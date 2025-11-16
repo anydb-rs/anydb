@@ -200,7 +200,7 @@ mod tests {
         for i in 0..1000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let collected: Vec<i32> = vec.dirty_iter().unwrap().collect();
         assert_eq!(collected.len(), 1000);
@@ -232,7 +232,7 @@ mod tests {
         for i in 0..5000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         for i in 5000..10000 {
             vec.push(i);
@@ -253,7 +253,7 @@ mod tests {
         for i in 0..5000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         for i in 5000..10000 {
             vec.push(i);
@@ -273,7 +273,7 @@ mod tests {
         for i in 0..5000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         for i in 5000..10000 {
             vec.push(i);
@@ -294,7 +294,7 @@ mod tests {
         for i in 0..5000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         for i in 5000..7000 {
             vec.push(i);
@@ -315,7 +315,7 @@ mod tests {
         for i in 0..5000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         for i in 5000..10000 {
             vec.push(i);
@@ -334,7 +334,7 @@ mod tests {
         for i in 0..5000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         for i in 5000..10000 {
             vec.push(i);
@@ -351,7 +351,7 @@ mod tests {
         for i in 0..5000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let iter = vec.dirty_iter().unwrap();
         assert_eq!(iter.last(), Some(4999));
@@ -364,7 +364,7 @@ mod tests {
         for i in 0..5000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         for i in 5000..7500 {
             vec.push(i);
@@ -388,7 +388,7 @@ mod tests {
         for i in 0..10000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         // Small pushed portion
         for i in 10000..10100 {
@@ -410,7 +410,7 @@ mod tests {
         for i in 0..8000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         for i in 8000..12000 {
             vec.push(i);

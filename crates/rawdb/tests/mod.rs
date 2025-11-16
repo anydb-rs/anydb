@@ -29,7 +29,7 @@ fn test_create_single_region() -> Result<()> {
     let region = db.create_region_if_needed("test_region")?;
 
     // Verify region properties
-    let meta = region.meta().read();
+    let meta = region.meta();
     assert_eq!(meta.start(), 0);
     assert_eq!(meta.len(), 0);
     assert_eq!(meta.reserved(), PAGE_SIZE);
@@ -38,7 +38,7 @@ fn test_create_single_region() -> Result<()> {
     // Verify it's tracked in regions
     let regions = db.regions();
     assert_eq!(regions.index_to_region().len(), 1);
-    assert!(regions.get_region_from_id("test_region").is_some());
+    assert!(regions.get_from_id("test_region").is_some());
 
     // Verify it's tracked in layout
     let layout = db.layout();
@@ -69,20 +69,17 @@ fn test_write_to_region_within_reserved() -> Result<()> {
     let region = db.create_region_if_needed("test")?;
     let data = b"Hello, World!";
 
-    db.write_all_to_region(&region, data)?;
+    region.write(data)?;
 
     // Verify data was written
-    let meta = region.meta().read();
-    assert_eq!(meta.len(), data.len() as u64);
+    let meta = region.meta();
+    assert_eq!(meta.len(), data.len());
     assert_eq!(meta.reserved(), PAGE_SIZE);
     let start = meta.start();
     drop(meta);
 
     let mmap = db.mmap();
-    assert_eq!(
-        &mmap[start as usize..(start + data.len() as u64) as usize],
-        data
-    );
+    assert_eq!(&mmap[start..start + data.len()], data);
 
     Ok(())
 }
@@ -93,19 +90,16 @@ fn test_write_append() -> Result<()> {
 
     let region = db.create_region_if_needed("test")?;
 
-    db.write_all_to_region(&region, b"Hello")?;
-    db.write_all_to_region(&region, b", World!")?;
+    region.write(b"Hello")?;
+    region.write(b", World!")?;
 
-    let meta = region.meta().read();
+    let meta = region.meta();
     assert_eq!(meta.len(), 13);
     let start = meta.start();
     drop(meta);
 
     let mmap = db.mmap();
-    assert_eq!(
-        &mmap[start as usize..(start + 13) as usize],
-        b"Hello, World!"
-    );
+    assert_eq!(&mmap[start..(start + 13)], b"Hello, World!");
 
     Ok(())
 }
@@ -116,18 +110,15 @@ fn test_write_at_position() -> Result<()> {
 
     let region = db.create_region_if_needed("test")?;
 
-    db.write_all_to_region(&region, b"Hello, World!")?;
-    db.write_all_to_region_at(&region, b"Rust!", 7)?;
+    region.write(b"Hello, World!")?;
+    region.write_at(b"Rust!", 7)?;
 
-    let meta = region.meta().read();
+    let meta = region.meta();
     let start = meta.start();
     drop(meta);
 
     let mmap = db.mmap();
-    assert_eq!(
-        &mmap[start as usize..(start + 13) as usize],
-        b"Hello, Rust!!"
-    );
+    assert_eq!(&mmap[start..(start + 13)], b"Hello, Rust!!");
 
     Ok(())
 }
@@ -139,11 +130,11 @@ fn test_write_exceeds_reserved() -> Result<()> {
     let region = db.create_region_if_needed("test")?;
 
     // Write more than PAGE_SIZE to trigger expansion
-    let large_data = vec![1u8; (PAGE_SIZE + 100) as usize];
-    db.write_all_to_region(&region, &large_data)?;
+    let large_data = vec![1u8; PAGE_SIZE + 100];
+    region.write(&large_data)?;
 
-    let meta = region.meta().read();
-    assert_eq!(meta.len(), large_data.len() as u64);
+    let meta = region.meta();
+    assert_eq!(meta.len(), large_data.len());
     assert!(meta.reserved() >= PAGE_SIZE * 2);
 
     Ok(())
@@ -155,15 +146,15 @@ fn test_truncate_region() -> Result<()> {
 
     let region = db.create_region_if_needed("test")?;
 
-    db.write_all_to_region(&region, b"Hello, World!")?;
+    region.write(b"Hello, World!")?;
 
-    let meta_before = region.meta().read();
+    let meta_before = region.meta();
     assert_eq!(meta_before.len(), 13);
     drop(meta_before);
 
-    db.truncate_region(&region, 5)?;
+    region.truncate(5)?;
 
-    let meta_after = region.meta().read();
+    let meta_after = region.meta();
     assert_eq!(meta_after.len(), 5);
 
     Ok(())
@@ -174,14 +165,14 @@ fn test_truncate_errors() -> Result<()> {
     let (db, _temp) = setup_test_db()?;
 
     let region = db.create_region_if_needed("test")?;
-    db.write_all_to_region(&region, b"Hello")?;
+    region.write(b"Hello")?;
 
     // Truncating beyond length should error
-    let result = db.truncate_region(&region, 10);
+    let result = region.truncate(10);
     assert!(result.is_err());
 
     // Truncating to same length should be OK
-    let result = db.truncate_region(&region, 5);
+    let result = region.truncate(5);
     assert!(result.is_ok());
 
     Ok(())
@@ -194,16 +185,15 @@ fn test_remove_region() -> Result<()> {
     let region = db.create_region_if_needed("test")?;
     let index = region.index();
 
-    db.write_all_to_region(&region, b"Hello")?;
+    region.write(b"Hello")?;
 
     // Remove region
-    let removed = db.remove_region(region)?;
-    assert!(removed.is_some());
+    region.remove()?;
 
     // Verify removal
     let regions = db.regions();
-    assert!(regions.get_region_from_id("test").is_none());
-    assert!(regions.get_region_from_index(index).is_none());
+    assert!(regions.get_from_id("test").is_none());
+    assert!(regions.get_from_index(index).is_none());
 
     db.flush()?; // Make hole available
 
@@ -224,9 +214,9 @@ fn test_multiple_regions() -> Result<()> {
     let region3 = db.create_region_if_needed("region3")?;
 
     // Write different data to each
-    db.write_all_to_region(&region1, b"First")?;
-    db.write_all_to_region(&region2, b"Second")?;
-    db.write_all_to_region(&region3, b"Third")?;
+    region1.write(b"First")?;
+    region2.write(b"Second")?;
+    region3.write(b"Third")?;
 
     // Verify all exist
     assert_eq!(db.regions().index_to_region().len(), 3);
@@ -235,25 +225,16 @@ fn test_multiple_regions() -> Result<()> {
     // Verify data integrity
     let mmap = db.mmap();
 
-    let meta1 = region1.meta().read();
-    assert_eq!(
-        &mmap[meta1.start() as usize..(meta1.start() + 5) as usize],
-        b"First"
-    );
+    let meta1 = region1.meta();
+    assert_eq!(&mmap[meta1.start()..(meta1.start() + 5)], b"First");
     drop(meta1);
 
-    let meta2 = region2.meta().read();
-    assert_eq!(
-        &mmap[meta2.start() as usize..(meta2.start() + 6) as usize],
-        b"Second"
-    );
+    let meta2 = region2.meta();
+    assert_eq!(&mmap[meta2.start()..(meta2.start() + 6)], b"Second");
     drop(meta2);
 
-    let meta3 = region3.meta().read();
-    assert_eq!(
-        &mmap[meta3.start() as usize..(meta3.start() + 5) as usize],
-        b"Third"
-    );
+    let meta3 = region3.meta();
+    assert_eq!(&mmap[meta3.start()..(meta3.start() + 5)], b"Third");
 
     Ok(())
 }
@@ -267,7 +248,7 @@ fn test_region_reuse_after_removal() -> Result<()> {
     let index1 = region1.index();
 
     // Remove first region
-    db.remove_region(region1)?;
+    region1.remove()?;
 
     // Create a new region - should reuse the slot
     let region3 = db.create_region_if_needed("region3")?;
@@ -276,9 +257,9 @@ fn test_region_reuse_after_removal() -> Result<()> {
     // Verify only 2 regions exist
     let regions = db.regions();
     assert_eq!(regions.id_to_index().len(), 2);
-    assert!(regions.get_region_from_id("region1").is_none());
-    assert!(regions.get_region_from_id("region2").is_some());
-    assert!(regions.get_region_from_id("region3").is_some());
+    assert!(regions.get_from_id("region1").is_none());
+    assert!(regions.get_from_id("region2").is_some());
+    assert!(regions.get_from_id("region3").is_some());
 
     Ok(())
 }
@@ -292,7 +273,7 @@ fn test_hole_filling() -> Result<()> {
     let _region3 = db.create_region_if_needed("region3")?;
 
     // Remove middle region to create a hole
-    db.remove_region(region2)?;
+    region2.remove()?;
     db.flush()?; // Make hole available for reuse
 
     let layout = db.layout();
@@ -319,7 +300,7 @@ fn test_persistence() -> Result<()> {
     {
         let db = Database::open(path)?;
         let region = db.create_region_if_needed("persistent")?;
-        db.write_all_to_region(&region, b"Persisted data")?;
+        region.write(b"Persisted data")?;
         db.flush()?;
     }
 
@@ -328,19 +309,16 @@ fn test_persistence() -> Result<()> {
         let db = Database::open(path)?;
         let regions = db.regions();
         let region = regions
-            .get_region_from_id("persistent")
+            .get_from_id("persistent")
             .expect("Region should persist");
 
-        let meta = region.meta().read();
+        let meta = region.meta();
         assert_eq!(meta.len(), 14);
         let start = meta.start();
         drop(meta);
 
         let mmap = db.mmap();
-        assert_eq!(
-            &mmap[start as usize..(start + 14) as usize],
-            b"Persisted data"
-        );
+        assert_eq!(&mmap[start..(start + 14)], b"Persisted data");
     }
 
     Ok(())
@@ -351,7 +329,7 @@ fn test_reader() -> Result<()> {
     let (db, _temp) = setup_test_db()?;
 
     let region = db.create_region_if_needed("test")?;
-    db.write_all_to_region(&region, b"Hello, World!")?;
+    region.write(b"Hello, World!")?;
 
     let reader = region.create_reader();
     assert_eq!(reader.read_all(), b"Hello, World!");
@@ -378,10 +356,10 @@ fn test_retain_regions() -> Result<()> {
 
     let regions = db.regions();
     assert_eq!(regions.id_to_index().len(), 2);
-    assert!(regions.get_region_from_id("keep1").is_some());
-    assert!(regions.get_region_from_id("keep2").is_some());
-    assert!(regions.get_region_from_id("remove1").is_none());
-    assert!(regions.get_region_from_id("remove2").is_none());
+    assert!(regions.get_from_id("keep1").is_some());
+    assert!(regions.get_from_id("keep2").is_some());
+    assert!(regions.get_from_id("remove1").is_none());
+    assert!(regions.get_from_id("remove2").is_none());
 
     Ok(())
 }
@@ -396,12 +374,12 @@ fn test_region_defragmentation() -> Result<()> {
     dbg!(0);
 
     // Write small data first
-    db.write_all_to_region(&region1, b"small")?;
+    region1.write(b"small")?;
 
     dbg!(1);
     // Write large data to region1 - should move it to end
-    let large_data = vec![1u8; (PAGE_SIZE * 2) as usize];
-    db.write_all_to_region(&region1, &large_data)?;
+    let large_data = vec![1u8; PAGE_SIZE * 2];
+    region1.write(&large_data)?;
     db.flush()?; // Make hole available
 
     dbg!(2);
@@ -411,7 +389,7 @@ fn test_region_defragmentation() -> Result<()> {
 
     dbg!(3);
     // region2 should still be at its original position
-    let meta2 = region2.meta().read();
+    let meta2 = region2.meta();
     assert_eq!(meta2.start(), PAGE_SIZE);
     dbg!(4);
 
@@ -466,19 +444,16 @@ fn test_large_write() -> Result<()> {
 
     // Write 1MB of data
     let large_data = vec![42u8; 1024 * 1024];
-    db.write_all_to_region(&region, &large_data)?;
+    region.write(&large_data)?;
 
-    let meta = region.meta().read();
-    assert_eq!(meta.len(), large_data.len() as u64);
+    let meta = region.meta();
+    assert_eq!(meta.len(), large_data.len());
     let start = meta.start();
     drop(meta);
 
     // Verify data
     let mmap = db.mmap();
-    assert_eq!(
-        &mmap[start as usize..(start + large_data.len() as u64) as usize],
-        &large_data[..]
-    );
+    assert_eq!(&mmap[start..(start + large_data.len())], &large_data[..]);
 
     Ok(())
 }
@@ -489,22 +464,22 @@ fn test_truncate_write() -> Result<()> {
 
     let region = db.create_region_if_needed("test")?;
 
-    db.write_all_to_region(&region, b"Hello, World!")?;
+    region.write(b"Hello, World!")?;
 
-    let meta_before = region.meta().read();
+    let meta_before = region.meta();
     assert_eq!(meta_before.len(), 13);
     drop(meta_before);
 
     // Truncate write - should set length to exactly the written data
-    db.truncate_write_all_to_region(&region, 7, b"Rust")?;
+    region.truncate_write(7, b"Rust")?;
 
-    let meta_after = region.meta().read();
+    let meta_after = region.meta();
     assert_eq!(meta_after.len(), 11); // 7 + 4
     let start = meta_after.start();
     drop(meta_after);
 
     let mmap = db.mmap();
-    assert_eq!(&mmap[start as usize..(start + 11) as usize], b"Hello, Rust");
+    assert_eq!(&mmap[start..(start + 11)], b"Hello, Rust");
 
     Ok(())
 }
@@ -516,15 +491,15 @@ fn test_punch_holes() -> Result<()> {
     let region = db.create_region_if_needed("test")?;
 
     // Write large data then truncate
-    let large_data = vec![1u8; (PAGE_SIZE * 2) as usize];
-    db.write_all_to_region(&region, &large_data)?;
-    db.truncate_region(&region, 100)?;
+    let large_data = vec![1u8; PAGE_SIZE * 2];
+    region.write(&large_data)?;
+    region.truncate(100)?;
 
     // Flush and punch holes
     db.compact()?;
 
     // Should still be able to read the data
-    let meta = region.meta().read();
+    let meta = region.meta();
     assert_eq!(meta.len(), 100);
 
     Ok(())
@@ -535,10 +510,10 @@ fn test_write_at_invalid_position() -> Result<()> {
     let (db, _temp) = setup_test_db()?;
 
     let region = db.create_region_if_needed("test")?;
-    db.write_all_to_region(&region, b"Hello")?;
+    region.write(b"Hello")?;
 
     // Writing beyond length should fail
-    let result = db.write_all_to_region_at(&region, b"World", 10);
+    let result = region.write_at(b"World", 10);
     assert!(result.is_err());
 
     Ok(())
@@ -556,9 +531,9 @@ fn test_empty_region_operations() -> Result<()> {
     drop(reader);
 
     // Truncating empty region to 0 should work
-    db.truncate_region(&region, 0)?;
+    region.truncate(0)?;
 
-    let meta = region.meta().read();
+    let meta = region.meta();
     assert_eq!(meta.len(), 0);
 
     Ok(())
@@ -572,26 +547,26 @@ fn test_region_metadata_updates() -> Result<()> {
 
     // Initial state
     {
-        let meta = region.meta().read();
+        let meta = region.meta();
         assert_eq!(meta.start(), 0);
         assert_eq!(meta.len(), 0);
         assert_eq!(meta.reserved(), PAGE_SIZE);
     }
 
     // After first write
-    db.write_all_to_region(&region, b"Hello")?;
+    region.write(b"Hello")?;
     {
-        let meta = region.meta().read();
+        let meta = region.meta();
         assert_eq!(meta.len(), 5);
         assert_eq!(meta.reserved(), PAGE_SIZE);
     }
 
     // After expansion
-    let large = vec![1u8; (PAGE_SIZE * 3) as usize];
-    db.write_all_to_region(&region, &large)?;
+    let large = vec![1u8; PAGE_SIZE * 3];
+    region.write(&large)?;
     {
-        let meta = region.meta().read();
-        assert_eq!(meta.len(), 5 + large.len() as u64);
+        let meta = region.meta();
+        assert_eq!(meta.len(), 5 + large.len());
         assert!(meta.reserved() >= PAGE_SIZE * 4);
     }
 
@@ -612,12 +587,12 @@ fn test_complex_region_lifecycle() -> Result<()> {
     let r3 = db.create_region_if_needed("region3")?;
 
     // Write to all regions
-    db.write_all_to_region(&r1, b"Data for region 1")?;
-    db.write_all_to_region(&r2, b"Data for region 2")?;
-    db.write_all_to_region(&r3, b"Data for region 3")?;
+    r1.write(b"Data for region 1")?;
+    r2.write(b"Data for region 2")?;
+    r3.write(b"Data for region 3")?;
 
     // Remove middle region
-    db.remove_region(r2)?;
+    r2.remove()?;
     db.flush()?; // Make hole available
 
     // Verify hole exists
@@ -628,7 +603,7 @@ fn test_complex_region_lifecycle() -> Result<()> {
 
     // Create new region that should reuse the hole
     let r4 = db.create_region_if_needed("region4")?;
-    db.write_all_to_region(&r4, b"Fills the hole")?;
+    r4.write(b"Fills the hole")?;
 
     // Verify hole was filled
     {
@@ -637,8 +612,8 @@ fn test_complex_region_lifecycle() -> Result<()> {
     }
 
     // Write large data to trigger region movement (overwrite from start)
-    let large = vec![42u8; (PAGE_SIZE * 3) as usize];
-    db.write_all_to_region_at(&r4, &large, 0)?;
+    let large = vec![42u8; PAGE_SIZE * 3];
+    r4.write_at(&large, 0)?;
     db.flush()?; // Make hole available
 
     // Verify r4 moved and created a hole
@@ -679,7 +654,7 @@ fn test_many_small_regions() -> Result<()> {
         let name = format!("region_{}", i);
         let region = db.create_region_if_needed(&name)?;
         let data = format!("Data for region {}", i);
-        db.write_all_to_region(&region, data.as_bytes())?;
+        region.write(data.as_bytes())?;
         regions.push(Some(region));
     }
 
@@ -695,7 +670,7 @@ fn test_many_small_regions() -> Result<()> {
     // Remove every other region
     for i in (0..50).step_by(2) {
         let region = regions[i].take().unwrap();
-        db.remove_region(region)?;
+        region.remove()?;
     }
 
     // Verify remaining regions
@@ -719,19 +694,19 @@ fn test_interleaved_operations() -> Result<()> {
     let r3 = db.create_region_if_needed("r3")?;
 
     // Interleave writes
-    db.write_all_to_region(&r1, b"Start1")?;
-    db.write_all_to_region(&r2, b"Start2")?;
-    db.write_all_to_region(&r3, b"Start3")?;
+    r1.write(b"Start1")?;
+    r2.write(b"Start2")?;
+    r3.write(b"Start3")?;
 
-    db.write_all_to_region(&r1, b" More1")?;
-    db.write_all_to_region(&r2, b" More2")?;
+    r1.write(b" More1")?;
+    r2.write(b" More2")?;
 
     // Truncate one
-    db.truncate_region(&r3, 3)?;
+    r3.truncate(3)?;
 
     // Continue writing
-    db.write_all_to_region(&r1, b" End1")?;
-    db.write_all_to_region_at(&r2, b"X", 0)?;
+    r1.write(b" End1")?;
+    r2.write_at(b"X", 0)?;
 
     // Verify results
     {
@@ -747,7 +722,7 @@ fn test_interleaved_operations() -> Result<()> {
     }
 
     {
-        let meta = r3.meta().read();
+        let meta = r3.meta();
         assert_eq!(meta.len(), 3);
     }
 
@@ -767,11 +742,11 @@ fn test_persistence_with_holes() -> Result<()> {
         let r2 = db.create_region_if_needed("remove")?;
         let r3 = db.create_region_if_needed("keep2")?;
 
-        db.write_all_to_region(&r1, b"Keep this 1")?;
-        db.write_all_to_region(&r2, b"Remove this")?;
-        db.write_all_to_region(&r3, b"Keep this 2")?;
+        r1.write(b"Keep this 1")?;
+        r2.write(b"Remove this")?;
+        r3.write(b"Keep this 2")?;
 
-        db.remove_region(r2)?;
+        r2.remove()?;
         db.flush()?;
     }
 
@@ -780,12 +755,12 @@ fn test_persistence_with_holes() -> Result<()> {
         let db = Database::open(path)?;
 
         let regions = db.regions();
-        assert!(regions.get_region_from_id("keep1").is_some());
-        assert!(regions.get_region_from_id("remove").is_none());
-        assert!(regions.get_region_from_id("keep2").is_some());
+        assert!(regions.get_from_id("keep1").is_some());
+        assert!(regions.get_from_id("remove").is_none());
+        assert!(regions.get_from_id("keep2").is_some());
 
-        let r1 = regions.get_region_from_id("keep1").unwrap();
-        let r3 = regions.get_region_from_id("keep2").unwrap();
+        let r1 = regions.get_from_id("keep1").unwrap();
+        let r3 = regions.get_from_id("keep2").unwrap();
 
         let reader1 = r1.create_reader();
         assert_eq!(reader1.read_all(), b"Keep this 1");
@@ -812,10 +787,10 @@ fn test_region_growth_patterns() -> Result<()> {
     // Grow gradually
     for i in 0..10 {
         let data = vec![i as u8; 1000];
-        db.write_all_to_region(&region, &data)?;
+        region.write(&data)?;
     }
 
-    let meta = region.meta().read();
+    let meta = region.meta();
     assert_eq!(meta.len(), 10_000);
 
     // Verify all data
@@ -836,13 +811,13 @@ fn test_write_at_boundary_conditions() -> Result<()> {
     let region = db.create_region_if_needed("boundary")?;
 
     // Write at start
-    db.write_all_to_region(&region, b"0123456789")?;
+    region.write(b"0123456789")?;
 
     // Write at exact length boundary
-    db.write_all_to_region_at(&region, b"ABC", 10)?;
+    region.write_at(b"ABC", 10)?;
 
     // Write at position 0
-    db.write_all_to_region_at(&region, b"X", 0)?;
+    region.write_at(b"X", 0)?;
 
     let reader = region.create_reader();
     assert_eq!(reader.read_all(), b"X123456789ABC");
@@ -859,20 +834,20 @@ fn test_multiple_flushes() -> Result<()> {
         let db = Database::open(path)?;
         let r = db.create_region_if_needed("test")?;
 
-        db.write_all_to_region(&r, b"Version 1")?;
+        r.write(b"Version 1")?;
         db.flush()?;
 
-        db.write_all_to_region(&r, b" Version 2")?;
+        r.write(b" Version 2")?;
         db.flush()?;
 
-        db.write_all_to_region(&r, b" Version 3")?;
+        r.write(b" Version 3")?;
         db.flush()?;
     }
 
     {
         let db = Database::open(path)?;
         let regions = db.regions();
-        let r = regions.get_region_from_id("test").unwrap();
+        let r = regions.get_from_id("test").unwrap();
 
         let reader = r.create_reader();
         assert_eq!(reader.read_all(), b"Version 1 Version 2 Version 3");
@@ -895,13 +870,13 @@ fn test_hole_coalescing() -> Result<()> {
 
     // Write small data to each
     for r in &regions {
-        db.write_all_to_region(r.as_ref().unwrap(), b"data")?;
+        r.as_ref().unwrap().write(b"data")?;
     }
 
     // Remove regions 1, 2, 3 to create adjacent holes
-    db.remove_region(regions[1].take().unwrap())?;
-    db.remove_region(regions[2].take().unwrap())?;
-    db.remove_region(regions[3].take().unwrap())?;
+    regions[1].take().unwrap().remove()?;
+    regions[2].take().unwrap().remove()?;
+    regions[3].take().unwrap().remove()?;
     db.flush()?; // Make holes available and coalesce
 
     // Check that holes were coalesced
@@ -934,7 +909,7 @@ fn test_stress_region_creation_and_removal() -> Result<()> {
         // Write to each
         for (i, r) in regions.iter().enumerate() {
             let data = format!("Cycle {} Region {}", cycle, i);
-            db.write_all_to_region(r, data.as_bytes())?;
+            r.write(data.as_bytes())?;
         }
 
         // Verify
@@ -947,7 +922,7 @@ fn test_stress_region_creation_and_removal() -> Result<()> {
 
         // Remove all
         for r in regions {
-            db.remove_region(r)?;
+            r.remove()?;
         }
 
         // Verify all gone
@@ -965,12 +940,12 @@ fn test_mixed_size_writes() -> Result<()> {
     let region = db.create_region_if_needed("mixed")?;
 
     // Write various sizes
-    db.write_all_to_region(&region, b"tiny")?;
-    db.write_all_to_region(&region, &[1u8; 100])?;
-    db.write_all_to_region(&region, &[2u8; 1000])?;
-    db.write_all_to_region(&region, &[3u8; 10000])?;
+    region.write(b"tiny")?;
+    region.write(&[1u8; 100])?;
+    region.write(&[2u8; 1000])?;
+    region.write(&[3u8; 10000])?;
 
-    let meta = region.meta().read();
+    let meta = region.meta();
     assert_eq!(meta.len(), 4 + 100 + 1000 + 10000);
 
     // Verify each section
@@ -1002,10 +977,9 @@ fn test_concurrent_writes_to_different_regions() -> Result<()> {
         .into_iter()
         .enumerate()
         .map(|(i, region)| {
-            let db = Arc::clone(&db);
             thread::spawn(move || {
                 let data = vec![i as u8; 1000];
-                db.write_all_to_region(&region, &data)
+                region.write(&data)
             })
         })
         .collect();
@@ -1018,9 +992,7 @@ fn test_concurrent_writes_to_different_regions() -> Result<()> {
     // Verify all data
     for i in 0..10 {
         let regions = db.regions();
-        let region = regions
-            .get_region_from_id(&format!("region_{}", i))
-            .unwrap();
+        let region = regions.get_from_id(&format!("region_{}", i)).unwrap();
         let reader = region.create_reader();
         let data = reader.read_all();
         assert_eq!(data.len(), 1000);
@@ -1037,7 +1009,7 @@ fn test_concurrent_reads() -> Result<()> {
 
     let region = db.create_region_if_needed("shared")?;
     let data = b"Shared data for concurrent reads";
-    db.write_all_to_region(&region, data)?;
+    region.write(data)?;
 
     // Multiple threads reading simultaneously
     let handles: Vec<_> = (0..20)
@@ -1045,7 +1017,7 @@ fn test_concurrent_reads() -> Result<()> {
             let db = Arc::clone(&db);
             thread::spawn(move || {
                 let regions = db.regions();
-                let region = regions.get_region_from_id("shared").unwrap();
+                let region = regions.get_from_id("shared").unwrap();
                 let reader = region.create_reader();
                 assert_eq!(reader.read_all(), b"Shared data for concurrent reads");
             })
@@ -1068,7 +1040,7 @@ fn test_reader_prefixed() -> Result<()> {
     let (db, _temp) = setup_test_db()?;
 
     let region = db.create_region_if_needed("test")?;
-    db.write_all_to_region(&region, b"0123456789ABCDEF")?;
+    region.write(b"0123456789ABCDEF")?;
 
     let reader = region.create_reader();
 
@@ -1087,7 +1059,7 @@ fn test_reader_unchecked_read() -> Result<()> {
     let (db, _temp) = setup_test_db()?;
 
     let region = db.create_region_if_needed("test")?;
-    db.write_all_to_region(&region, b"Hello World")?;
+    region.write(b"Hello World")?;
 
     let reader = region.create_reader();
 
@@ -1107,7 +1079,7 @@ fn test_reader_bounds_check() {
     let (db, _temp) = setup_test_db().unwrap();
 
     let region = db.create_region_if_needed("test").unwrap();
-    db.write_all_to_region(&region, b"Short").unwrap();
+    region.write(b"Short").unwrap();
 
     let reader = region.create_reader();
 
@@ -1126,13 +1098,13 @@ fn test_very_long_region_names() -> Result<()> {
     // Create regions with very long names
     let long_name = "a".repeat(1000);
     let region = db.create_region_if_needed(&long_name)?;
-    db.write_all_to_region(&region, b"data")?;
+    region.write(b"data")?;
 
     // Verify it persists
     db.flush()?;
 
     let regions = db.regions();
-    let retrieved = regions.get_region_from_id(&long_name);
+    let retrieved = regions.get_from_id(&long_name);
     assert!(retrieved.is_some());
 
     Ok(())
@@ -1145,17 +1117,17 @@ fn test_zero_byte_writes() -> Result<()> {
     let region = db.create_region_if_needed("empty_writes")?;
 
     // Write zero bytes
-    db.write_all_to_region(&region, b"")?;
+    region.write(b"")?;
 
-    let meta = region.meta().read();
+    let meta = region.meta();
     assert_eq!(meta.len(), 0);
     drop(meta);
 
     // Write some data, then write zero bytes again
-    db.write_all_to_region(&region, b"Hello")?;
-    db.write_all_to_region(&region, b"")?;
+    region.write(b"Hello")?;
+    region.write(b"")?;
 
-    let meta = region.meta().read();
+    let meta = region.meta();
     assert_eq!(meta.len(), 5);
 
     Ok(())
@@ -1170,17 +1142,17 @@ fn test_alternating_write_and_truncate() -> Result<()> {
     for cycle in 0..10 {
         // Grow
         let data = vec![cycle as u8; 1000];
-        db.write_all_to_region(&region, &data)?;
+        region.write(&data)?;
 
-        let meta = region.meta().read();
+        let meta = region.meta();
         let expected_len = if cycle == 0 { 1000 } else { 100 + 1000 };
         assert_eq!(meta.len(), expected_len);
         drop(meta);
 
         // Shrink
-        db.truncate_region(&region, 100)?;
+        region.truncate(100)?;
 
-        let meta = region.meta().read();
+        let meta = region.meta();
         assert_eq!(meta.len(), 100);
         drop(meta);
     }
@@ -1227,13 +1199,13 @@ fn test_complex_fragmentation_scenario() -> Result<()> {
     let r4 = db.create_region_if_needed("r4")?;
 
     for r in [&r0, &r1, &r2, &r3, &r4] {
-        db.write_all_to_region(r, b"data")?;
+        r.write(b"data")?;
     }
 
     // Remove pattern: keep, remove, keep, remove, keep
     // This creates 2 separate holes
-    db.remove_region(r1)?;
-    db.remove_region(r3)?;
+    r1.remove()?;
+    r3.remove()?;
     db.flush()?; // Make holes available
 
     let layout = db.layout();
@@ -1242,7 +1214,7 @@ fn test_complex_fragmentation_scenario() -> Result<()> {
 
     // Create a new region - should fill one of the holes
     let r5 = db.create_region_if_needed("r5")?;
-    db.write_all_to_region(&r5, b"fills hole")?;
+    r5.write(b"fills hole")?;
 
     let layout = db.layout();
     assert_eq!(layout.start_to_hole().len(), 1); // One hole filled, one remains
@@ -1263,7 +1235,7 @@ fn test_set_min_len_preallocate() -> Result<()> {
 
     // Should still be able to write
     let region = db.create_region_if_needed("test")?;
-    db.write_all_to_region(&region, b"After preallocation")?;
+    region.write(b"After preallocation")?;
 
     Ok(())
 }
@@ -1280,16 +1252,16 @@ fn test_partial_overwrites_data_integrity() -> Result<()> {
 
     // Write initial pattern
     let initial = b"AAAAAAAAAA";
-    db.write_all_to_region(&region, initial)?;
+    region.write(initial)?;
 
     // Overwrite middle
-    db.write_all_to_region_at(&region, b"BBB", 3)?;
+    region.write_at(b"BBB", 3)?;
 
     // Overwrite start
-    db.write_all_to_region_at(&region, b"CC", 0)?;
+    region.write_at(b"CC", 0)?;
 
     // Overwrite end
-    db.write_all_to_region_at(&region, b"DD", 8)?;
+    region.write_at(b"DD", 8)?;
 
     let reader = region.create_reader();
     assert_eq!(reader.read_all(), b"CCABBBAADD");
@@ -1304,18 +1276,18 @@ fn test_write_at_exact_reserved_boundary() -> Result<()> {
     let region = db.create_region_if_needed("boundary")?;
 
     // Fill exactly to PAGE_SIZE
-    let data = vec![42u8; PAGE_SIZE as usize];
-    db.write_all_to_region(&region, &data)?;
+    let data = vec![42u8; PAGE_SIZE];
+    region.write(&data)?;
 
-    let meta = region.meta().read();
+    let meta = region.meta();
     assert_eq!(meta.len(), PAGE_SIZE);
     assert_eq!(meta.reserved(), PAGE_SIZE);
     drop(meta);
 
     // Writing one more byte should trigger expansion
-    db.write_all_to_region(&region, b"X")?;
+    region.write(b"X")?;
 
-    let meta = region.meta().read();
+    let meta = region.meta();
     assert_eq!(meta.len(), PAGE_SIZE + 1);
     assert!(meta.reserved() > PAGE_SIZE);
 
@@ -1343,50 +1315,50 @@ fn test_comprehensive_db_operations() -> Result<()> {
 
         assert!(
             regions
-                .get_region_from_id("region1")
-                .is_some_and(|r| Arc::ptr_eq(r, &region1))
+                .get_from_id("region1")
+                .is_some_and(|r| Arc::ptr_eq(r.arc(), region1.arc()))
         );
 
-        let region1_meta = region1.meta().read();
+        let region1_meta = region1.meta();
         assert!(region1_meta.start() == 0);
         assert!(region1_meta.len() == 0);
         assert!(region1_meta.reserved() == PAGE_SIZE);
     }
 
-    db.write_all_to_region(&region1, &[0, 1, 2, 3, 4])?;
+    region1.write(&[0, 1, 2, 3, 4])?;
 
     {
-        let region1_meta = region1.meta().read();
+        let region1_meta = region1.meta();
         assert!(region1_meta.start() == 0);
         assert!(region1_meta.len() == 5);
         assert!(region1_meta.reserved() == PAGE_SIZE);
         assert!(db.mmap()[0..10] == [0, 1, 2, 3, 4, 0, 0, 0, 0, 0]);
     }
 
-    db.write_all_to_region(&region1, &[5, 6, 7, 8, 9])?;
+    region1.write(&[5, 6, 7, 8, 9])?;
 
     {
-        let region1_meta = region1.meta().read();
+        let region1_meta = region1.meta();
         assert!(region1_meta.start() == 0);
         assert!(region1_meta.len() == 10);
         assert!(region1_meta.reserved() == PAGE_SIZE);
         assert!(db.mmap()[0..10] == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 
-    db.write_all_to_region_at(&region1, &[1, 2], 0)?;
+    region1.write_at(&[1, 2], 0)?;
 
     {
-        let region1_meta = region1.meta().read();
+        let region1_meta = region1.meta();
         assert!(region1_meta.start() == 0);
         assert!(region1_meta.len() == 10);
         assert!(region1_meta.reserved() == PAGE_SIZE);
         assert!(db.mmap()[0..10] == [1, 2, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 
-    db.write_all_to_region_at(&region1, &[10, 11, 12, 13, 14, 15, 16, 17, 18], 4)?;
+    region1.write_at(&[10, 11, 12, 13, 14, 15, 16, 17, 18], 4)?;
 
     {
-        let region1_meta = region1.meta().read();
+        let region1_meta = region1.meta();
         assert!(region1_meta.start() == 0);
         assert!(region1_meta.len() == 13);
         assert!(region1_meta.reserved() == PAGE_SIZE);
@@ -1398,10 +1370,10 @@ fn test_comprehensive_db_operations() -> Result<()> {
         );
     }
 
-    db.write_all_to_region_at(&region1, &[0, 0, 0, 0, 0, 1], 13)?;
+    region1.write_at(&[0, 0, 0, 0, 0, 1], 13)?;
 
     {
-        let region1_meta = region1.meta().read();
+        let region1_meta = region1.meta();
         assert!(region1_meta.start() == 0);
         assert!(region1_meta.len() == 19);
         assert!(region1_meta.reserved() == PAGE_SIZE);
@@ -1413,10 +1385,10 @@ fn test_comprehensive_db_operations() -> Result<()> {
         );
     }
 
-    db.write_all_to_region_at(&region1, &[1; 8000], 0)?;
+    region1.write_at(&[1; 8000], 0)?;
 
     {
-        let region1_meta = region1.meta().read();
+        let region1_meta = region1.meta();
         assert!(region1_meta.start() == 0);
         assert!(region1_meta.len() == 8000);
         assert!(region1_meta.reserved() == PAGE_SIZE * 2);
@@ -1426,11 +1398,11 @@ fn test_comprehensive_db_operations() -> Result<()> {
 
     db.flush()?;
 
-    db.truncate_region(&region1, 10)?;
+    region1.truncate(10)?;
     db.compact()?;
 
     {
-        let region1_meta = region1.meta().read();
+        let region1_meta = region1.meta();
         assert!(region1_meta.start() == 0);
         assert!(region1_meta.len() == 10);
         assert!(region1_meta.reserved() == PAGE_SIZE * 2);
@@ -1443,11 +1415,11 @@ fn test_comprehensive_db_operations() -> Result<()> {
 
     db.flush()?;
 
-    db.truncate_region(&region1, 10)?;
+    region1.truncate(10)?;
     db.compact()?;
 
     {
-        let region1_meta = region1.meta().read();
+        let region1_meta = region1.meta();
         assert!(region1_meta.start() == 0);
         assert!(region1_meta.len() == 10);
         assert!(region1_meta.reserved() == PAGE_SIZE * 2);
@@ -1459,7 +1431,7 @@ fn test_comprehensive_db_operations() -> Result<()> {
 
     db.flush()?;
 
-    db.remove_region(region1)?;
+    region1.remove()?;
     db.compact()?;
 
     {
@@ -1483,17 +1455,17 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let index_to_region = regions.index_to_region();
         assert!(index_to_region.len() == 3);
 
-        let region1_meta = region1.meta().read();
+        let region1_meta = region1.meta();
         assert!(region1_meta.start() == 0);
         assert!(region1_meta.len() == 0);
         assert!(region1_meta.reserved() == PAGE_SIZE);
 
-        let region2_meta = region2.meta().read();
+        let region2_meta = region2.meta();
         assert!(region2_meta.start() == PAGE_SIZE);
         assert!(region2_meta.len() == 0);
         assert!(region2_meta.reserved() == PAGE_SIZE);
 
-        let region3_meta = region3.meta().read();
+        let region3_meta = region3.meta();
         assert!(region3_meta.start() == PAGE_SIZE * 2);
         assert!(region3_meta.len() == 0);
         assert!(region3_meta.reserved() == PAGE_SIZE);
@@ -1508,19 +1480,22 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 3);
 
-        assert!(Arc::ptr_eq(start_to_index.get(&0).unwrap(), &region1));
         assert!(Arc::ptr_eq(
-            start_to_index.get(&PAGE_SIZE).unwrap(),
-            &region2
+            start_to_index.get(&0).unwrap().arc(),
+            region1.arc()
         ));
         assert!(Arc::ptr_eq(
-            start_to_index.get(&(PAGE_SIZE * 2)).unwrap(),
-            &region3
+            start_to_index.get(&PAGE_SIZE).unwrap().arc(),
+            region2.arc()
+        ));
+        assert!(Arc::ptr_eq(
+            start_to_index.get(&(PAGE_SIZE * 2)).unwrap().arc(),
+            region3.arc()
         ));
         assert!(layout.start_to_hole().is_empty());
     }
 
-    db.remove_region(region2)?;
+    region2.remove()?;
     db.compact()?;
 
     {
@@ -1528,13 +1503,13 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let index_to_region = regions.index_to_region();
         assert!(index_to_region.len() == 3);
 
-        let region1_meta = region1.meta().read();
+        let region1_meta = region1.meta();
         assert!(region1_meta.start() == 0);
         assert!(region1_meta.len() == 0);
         assert!(region1_meta.reserved() == PAGE_SIZE);
         assert!(index_to_region.get(1).is_some_and(|opt| opt.is_none()));
 
-        let region3_meta = region3.meta().read();
+        let region3_meta = region3.meta();
         assert!(region3_meta.start() == PAGE_SIZE * 2);
         assert!(region3_meta.len() == 0);
         assert!(region3_meta.reserved() == PAGE_SIZE);
@@ -1547,10 +1522,13 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let layout = db.layout();
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 2);
-        assert!(Arc::ptr_eq(start_to_index.get(&0).unwrap(), &region1));
         assert!(Arc::ptr_eq(
-            start_to_index.get(&(PAGE_SIZE * 2)).unwrap(),
-            &region3
+            start_to_index.get(&0).unwrap().arc(),
+            region1.arc()
+        ));
+        assert!(Arc::ptr_eq(
+            start_to_index.get(&(PAGE_SIZE * 2)).unwrap().arc(),
+            region3.arc()
         ));
         let start_to_hole = layout.start_to_hole();
         assert!(start_to_hole.len() == 1);
@@ -1561,7 +1539,7 @@ fn test_comprehensive_db_operations() -> Result<()> {
     let region2_i = region2.index();
     assert!(region2_i == 1);
 
-    db.remove_region(region2)?;
+    region2.remove()?;
     db.compact()?;
 
     {
@@ -1569,7 +1547,7 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let index_to_region = regions.index_to_region();
         assert!(index_to_region.len() == 3);
 
-        let region1_meta = region1.meta().read();
+        let region1_meta = region1.meta();
         assert!(region1_meta.start() == 0);
         assert!(region1_meta.len() == 0);
         assert!(region1_meta.reserved() == PAGE_SIZE);
@@ -1579,7 +1557,7 @@ fn test_comprehensive_db_operations() -> Result<()> {
                 .is_some_and(|opt| opt.is_none())
         );
 
-        let region3_meta = region3.meta().read();
+        let region3_meta = region3.meta();
         assert!(region3_meta.start() == PAGE_SIZE * 2);
         assert!(region3_meta.len() == 0);
         assert!(region3_meta.reserved() == PAGE_SIZE);
@@ -1593,10 +1571,13 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let layout = db.layout();
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 2);
-        assert!(Arc::ptr_eq(start_to_index.get(&0).unwrap(), &region1));
         assert!(Arc::ptr_eq(
-            start_to_index.get(&(PAGE_SIZE * 2)).unwrap(),
-            &region3
+            start_to_index.get(&0).unwrap().arc(),
+            region1.arc()
+        ));
+        assert!(Arc::ptr_eq(
+            start_to_index.get(&(PAGE_SIZE * 2)).unwrap().arc(),
+            region3.arc()
         ));
 
         let start_to_hole = layout.start_to_hole();
@@ -1604,14 +1585,14 @@ fn test_comprehensive_db_operations() -> Result<()> {
         assert!(start_to_hole.get(&PAGE_SIZE) == Some(&PAGE_SIZE));
     }
 
-    db.write_all_to_region_at(&region1, &[1; 8000], 0)?;
+    region1.write_at(&[1; 8000], 0)?;
 
     {
         let regions = db.regions();
         let index_to_region = regions.index_to_region();
         assert!(index_to_region.len() == 3);
 
-        let region1_meta = region1.meta().read();
+        let region1_meta = region1.meta();
         assert!(region1_meta.start() == 0);
         assert!(region1_meta.len() == 8000);
         assert!(region1_meta.reserved() == 2 * PAGE_SIZE);
@@ -1621,7 +1602,7 @@ fn test_comprehensive_db_operations() -> Result<()> {
                 .is_some_and(|opt| opt.is_none())
         );
 
-        let region3_meta = region3.meta().read();
+        let region3_meta = region3.meta();
         assert!(region3_meta.start() == PAGE_SIZE * 2);
         assert!(region3_meta.len() == 0);
         assert!(region3_meta.reserved() == PAGE_SIZE);
@@ -1634,10 +1615,13 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let layout = db.layout();
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 2);
-        assert!(Arc::ptr_eq(start_to_index.get(&0).unwrap(), &region1));
         assert!(Arc::ptr_eq(
-            start_to_index.get(&(PAGE_SIZE * 2)).unwrap(),
-            &region3
+            start_to_index.get(&0).unwrap().arc(),
+            region1.arc()
+        ));
+        assert!(Arc::ptr_eq(
+            start_to_index.get(&(PAGE_SIZE * 2)).unwrap().arc(),
+            region3.arc()
         ));
         let start_to_hole = layout.start_to_hole();
         assert!(start_to_hole.is_empty());
@@ -1650,17 +1634,17 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let index_to_region = regions.index_to_region();
         assert!(index_to_region.len() == 3);
 
-        let region1_meta = region1.meta().read();
+        let region1_meta = region1.meta();
         assert!(region1_meta.start() == 0);
         assert!(region1_meta.len() == 8000);
         assert!(region1_meta.reserved() == 2 * PAGE_SIZE);
 
-        let region2_meta = region2.meta().read();
+        let region2_meta = region2.meta();
         assert!(region2_meta.start() == PAGE_SIZE * 3);
         assert!(region2_meta.len() == 0);
         assert!(region2_meta.reserved() == PAGE_SIZE);
 
-        let region3_meta = region3.meta().read();
+        let region3_meta = region3.meta();
         assert!(region3_meta.start() == PAGE_SIZE * 2);
         assert!(region3_meta.len() == 0);
         assert!(region3_meta.reserved() == PAGE_SIZE);
@@ -1673,20 +1657,23 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let layout = db.layout();
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 3);
-        assert!(Arc::ptr_eq(start_to_index.get(&0).unwrap(), &region1));
         assert!(Arc::ptr_eq(
-            start_to_index.get(&(PAGE_SIZE * 2)).unwrap(),
-            &region3
+            start_to_index.get(&0).unwrap().arc(),
+            region1.arc()
         ));
         assert!(Arc::ptr_eq(
-            start_to_index.get(&(PAGE_SIZE * 3)).unwrap(),
-            &region2
+            start_to_index.get(&(PAGE_SIZE * 2)).unwrap().arc(),
+            region3.arc()
+        ));
+        assert!(Arc::ptr_eq(
+            start_to_index.get(&(PAGE_SIZE * 3)).unwrap().arc(),
+            region2.arc()
         ));
         let start_to_hole = layout.start_to_hole();
         assert!(start_to_hole.is_empty());
     }
 
-    db.remove_region(region3)?;
+    region3.remove()?;
     db.compact()?;
 
     {
@@ -1694,12 +1681,12 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let index_to_region = regions.index_to_region();
         assert!(index_to_region.len() == 3);
 
-        let region1_meta = region1.meta().read();
+        let region1_meta = region1.meta();
         assert!(region1_meta.start() == 0);
         assert!(region1_meta.len() == 8000);
         assert!(region1_meta.reserved() == 2 * PAGE_SIZE);
 
-        let region2_meta = region2.meta().read();
+        let region2_meta = region2.meta();
         assert!(region2_meta.start() == PAGE_SIZE * 3);
         assert!(region2_meta.len() == 0);
         assert!(region2_meta.reserved() == PAGE_SIZE);
@@ -1713,16 +1700,19 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let layout = db.layout();
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 2);
-        assert!(Arc::ptr_eq(start_to_index.get(&0).unwrap(), &region1));
         assert!(Arc::ptr_eq(
-            start_to_index.get(&(PAGE_SIZE * 3)).unwrap(),
-            &region2
+            start_to_index.get(&0).unwrap().arc(),
+            region1.arc()
+        ));
+        assert!(Arc::ptr_eq(
+            start_to_index.get(&(PAGE_SIZE * 3)).unwrap().arc(),
+            region2.arc()
         ));
         let start_to_hole = layout.start_to_hole();
         assert!(start_to_hole.get(&(PAGE_SIZE * 2)) == Some(&PAGE_SIZE));
     }
 
-    db.write_all_to_region(&region1, &[1; 8000])?;
+    region1.write(&[1; 8000])?;
     db.compact()?;
 
     {
@@ -1730,12 +1720,12 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let index_to_region = regions.index_to_region();
         assert!(index_to_region.len() == 3);
 
-        let region1_meta = region1.meta().read();
+        let region1_meta = region1.meta();
         assert!(region1_meta.start() == PAGE_SIZE * 4);
         assert!(region1_meta.len() == 16_000);
         assert!(region1_meta.reserved() == 4 * PAGE_SIZE);
 
-        let region2_meta = region2.meta().read();
+        let region2_meta = region2.meta();
         assert!(region2_meta.start() == PAGE_SIZE * 3);
         assert!(region2_meta.len() == 0);
         assert!(region2_meta.reserved() == PAGE_SIZE);
@@ -1750,22 +1740,22 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 2);
         assert!(Arc::ptr_eq(
-            start_to_index.get(&(PAGE_SIZE * 4)).unwrap(),
-            &region1
+            start_to_index.get(&(PAGE_SIZE * 4)).unwrap().arc(),
+            region1.arc()
         ));
         assert!(Arc::ptr_eq(
-            start_to_index.get(&(PAGE_SIZE * 3)).unwrap(),
-            &region2
+            start_to_index.get(&(PAGE_SIZE * 3)).unwrap().arc(),
+            region2.arc()
         ));
         let start_to_hole = layout.start_to_hole();
         assert!(start_to_hole.get(&0) == Some(&(PAGE_SIZE * 3)));
     }
 
-    db.write_all_to_region(&region2, &[1; 6000])?;
+    region2.write(&[1; 6000])?;
 
     let region4 = db.create_region_if_needed("region4")?;
-    db.remove_region(region2)?;
-    db.remove_region(region4)?;
+    region2.remove()?;
+    region4.remove()?;
 
     Ok(())
 }
@@ -1779,13 +1769,13 @@ fn test_basic_region_rename() -> Result<()> {
     let (db, _temp) = setup_test_db()?;
 
     let region = db.create_region_if_needed("old_name")?;
-    db.write_all_to_region(&region, b"Test data")?;
+    region.write(b"Test data")?;
 
     // Verify old name exists
     {
         let regions = db.regions();
-        assert!(regions.get_region_from_id("old_name").is_some());
-        assert!(regions.get_region_from_id("new_name").is_none());
+        assert!(regions.get_from_id("old_name").is_some());
+        assert!(regions.get_from_id("new_name").is_none());
     }
 
     // Rename the region
@@ -1794,8 +1784,8 @@ fn test_basic_region_rename() -> Result<()> {
     // Verify new name exists and old name doesn't
     {
         let regions = db.regions();
-        assert!(regions.get_region_from_id("old_name").is_none());
-        assert!(regions.get_region_from_id("new_name").is_some());
+        assert!(regions.get_from_id("old_name").is_none());
+        assert!(regions.get_from_id("new_name").is_some());
     }
 
     // Verify data is still intact
@@ -1804,7 +1794,7 @@ fn test_basic_region_rename() -> Result<()> {
     drop(reader);
 
     // Verify metadata was updated
-    let meta = region.meta().read();
+    let meta = region.meta();
     assert_eq!(meta.id(), "new_name");
 
     Ok(())
@@ -1819,7 +1809,7 @@ fn test_rename_with_persistence() -> Result<()> {
     {
         let db = Database::open(path)?;
         let region = db.create_region_if_needed("original")?;
-        db.write_all_to_region(&region, b"Persistent data")?;
+        region.write(b"Persistent data")?;
         region.rename("renamed")?;
         db.flush()?;
     }
@@ -1829,8 +1819,8 @@ fn test_rename_with_persistence() -> Result<()> {
         let db = Database::open(path)?;
         let regions = db.regions();
 
-        assert!(regions.get_region_from_id("original").is_none());
-        let renamed = regions.get_region_from_id("renamed");
+        assert!(regions.get_from_id("original").is_none());
+        let renamed = regions.get_from_id("renamed");
         assert!(renamed.is_some());
 
         let reader = renamed.unwrap().create_reader();
@@ -1853,8 +1843,8 @@ fn test_rename_to_existing_name_fails() -> Result<()> {
 
     // Verify region1 still has its original name
     let regions = db.regions();
-    assert!(regions.get_region_from_id("region1").is_some());
-    assert!(regions.get_region_from_id("region2").is_some());
+    assert!(regions.get_from_id("region1").is_some());
+    assert!(regions.get_from_id("region2").is_some());
 
     Ok(())
 }
@@ -1865,20 +1855,20 @@ fn test_rename_after_remove_and_recreate() -> Result<()> {
 
     // Create a region, write some data, then remove it
     let region1 = db.create_region_if_needed("temp")?;
-    db.write_all_to_region(&region1, b"Old data")?;
+    region1.write(b"Old data")?;
     region1.remove()?;
 
     // Create a new region with the same name
     let region2 = db.create_region_if_needed("temp")?;
-    db.write_all_to_region(&region2, b"New data")?;
+    region2.write(b"New data")?;
 
     // Rename the new region
     region2.rename("renamed")?;
 
     // Verify the rename worked
     let regions = db.regions();
-    assert!(regions.get_region_from_id("temp").is_none());
-    assert!(regions.get_region_from_id("renamed").is_some());
+    assert!(regions.get_from_id("temp").is_none());
+    assert!(regions.get_from_id("renamed").is_some());
 
     // Verify it has the new data (not old)
     let reader = region2.create_reader();
@@ -1892,7 +1882,7 @@ fn test_multiple_renames() -> Result<()> {
     let (db, _temp) = setup_test_db()?;
 
     let region = db.create_region_if_needed("name1")?;
-    db.write_all_to_region(&region, b"Data")?;
+    region.write(b"Data")?;
 
     // Rename multiple times
     region.rename("name2")?;
@@ -1901,10 +1891,10 @@ fn test_multiple_renames() -> Result<()> {
 
     // Verify final name
     let regions = db.regions();
-    assert!(regions.get_region_from_id("name1").is_none());
-    assert!(regions.get_region_from_id("name2").is_none());
-    assert!(regions.get_region_from_id("name3").is_none());
-    assert!(regions.get_region_from_id("name4").is_some());
+    assert!(regions.get_from_id("name1").is_none());
+    assert!(regions.get_from_id("name2").is_none());
+    assert!(regions.get_from_id("name3").is_none());
+    assert!(regions.get_from_id("name4").is_some());
 
     // Verify data is still intact
     let reader = region.create_reader();
@@ -1920,12 +1910,12 @@ fn test_rename_preserves_region_metadata() -> Result<()> {
     let region = db.create_region_if_needed("original")?;
 
     // Write large data to trigger expansion
-    let large_data = vec![42u8; (PAGE_SIZE * 2) as usize];
-    db.write_all_to_region(&region, &large_data)?;
+    let large_data = vec![42u8; PAGE_SIZE * 2];
+    region.write(&large_data)?;
 
     // Capture metadata before rename
     let (start_before, len_before, reserved_before, index_before) = {
-        let meta = region.meta().read();
+        let meta = region.meta();
         (meta.start(), meta.len(), meta.reserved(), region.index())
     };
 
@@ -1934,7 +1924,7 @@ fn test_rename_preserves_region_metadata() -> Result<()> {
 
     // Verify metadata preserved (except id)
     {
-        let meta = region.meta().read();
+        let meta = region.meta();
         assert_eq!(meta.id(), "renamed");
         assert_eq!(meta.start(), start_before);
         assert_eq!(meta.len(), len_before);
@@ -1957,28 +1947,16 @@ fn test_rename_with_special_characters() -> Result<()> {
 
     // Rename with special characters (but not control characters)
     region.rename("name-with-dashes")?;
-    assert!(
-        db.regions()
-            .get_region_from_id("name-with-dashes")
-            .is_some()
-    );
+    assert!(db.regions().get_from_id("name-with-dashes").is_some());
 
     region.rename("name_with_underscores")?;
-    assert!(
-        db.regions()
-            .get_region_from_id("name_with_underscores")
-            .is_some()
-    );
+    assert!(db.regions().get_from_id("name_with_underscores").is_some());
 
     region.rename("name.with.dots")?;
-    assert!(db.regions().get_region_from_id("name.with.dots").is_some());
+    assert!(db.regions().get_from_id("name.with.dots").is_some());
 
     region.rename("name:with:colons")?;
-    assert!(
-        db.regions()
-            .get_region_from_id("name:with:colons")
-            .is_some()
-    );
+    assert!(db.regions().get_from_id("name:with:colons").is_some());
 
     Ok(())
 }
@@ -2008,14 +1986,10 @@ fn test_concurrent_renames() -> Result<()> {
     // Verify all renames succeeded
     let regions_lock = db.regions();
     for i in 0..10 {
+        assert!(regions_lock.get_from_id(&format!("region_{}", i)).is_none());
         assert!(
             regions_lock
-                .get_region_from_id(&format!("region_{}", i))
-                .is_none()
-        );
-        assert!(
-            regions_lock
-                .get_region_from_id(&format!("renamed_{}", i))
+                .get_from_id(&format!("renamed_{}", i))
                 .is_some()
         );
     }

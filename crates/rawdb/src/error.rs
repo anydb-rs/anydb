@@ -20,14 +20,14 @@ pub enum Error {
 
     // Write errors
     WriteOutOfBounds {
-        position: u64,
-        region_len: u64,
+        position: usize,
+        region_len: usize,
     },
 
     // Truncate errors
     TruncateInvalid {
-        from: u64,
-        current_len: u64,
+        from: usize,
+        current_len: usize,
     },
 
     // Metadata errors
@@ -43,10 +43,11 @@ pub enum Error {
 
     // Hole punching errors
     HolePunchFailed {
-        start: u64,
-        len: u64,
+        start: usize,
+        len: usize,
         source: io::Error,
     },
+    HolePunchUnsupported,
 }
 
 impl From<io::Error> for Error {
@@ -105,6 +106,9 @@ impl fmt::Display for Error {
                 "Failed to punch hole at offset {} (length {}): {}",
                 start, len, source
             ),
+            Error::HolePunchUnsupported => {
+                write!(f, "Hole punching is not supported on this platform")
+            }
         }
     }
 }

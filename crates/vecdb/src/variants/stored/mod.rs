@@ -179,10 +179,10 @@ where
         }
     }
 
-    fn flush(&mut self) -> Result<()> {
+    fn write(&mut self) -> Result<()> {
         match self {
-            StoredVec::Raw(v) => v.flush(),
-            StoredVec::Compressed(v) => v.flush(),
+            StoredVec::Raw(v) => v.write(),
+            StoredVec::Compressed(v) => v.write(),
         }
     }
 

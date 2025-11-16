@@ -9,7 +9,7 @@ use crate::{Error, Result, Stamp, Version};
 use super::Format;
 
 const HEADER_VERSION: Version = Version::ONE;
-pub(crate) const HEADER_OFFSET: u64 = size_of::<HeaderInner>() as u64;
+pub(crate) const HEADER_OFFSET: usize = size_of::<HeaderInner>();
 
 #[derive(Debug, Clone)]
 pub struct Header {
@@ -102,7 +102,7 @@ impl HeaderInner {
     }
 
     pub fn write(&self, region: &Region) -> Result<()> {
-        region.write_all_at(self.as_bytes(), 0)?;
+        region.write_at(self.as_bytes(), 0)?;
         Ok(())
     }
 
@@ -111,7 +111,7 @@ impl HeaderInner {
         vec_version: Version,
         format: Format,
     ) -> Result<Self> {
-        let len = region.meta().read().len();
+        let len = region.meta().len();
 
         if len < HEADER_OFFSET {
             return Err(Error::WrongLength);

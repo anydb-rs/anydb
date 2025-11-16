@@ -18,9 +18,9 @@ pub struct CleanRawVecIterator<'a, I, T> {
     buffer: Vec<u8>,
     pub(crate) buffer_pos: usize,
     buffer_len: usize,
-    file_offset: u64,
-    end_offset: u64,
-    start_offset: u64,
+    file_offset: usize,
+    end_offset: usize,
+    start_offset: usize,
     pub(crate) _vec: &'a RawVec<I, T>,
     _lock: RwLockReadGuard<'a, RegionMetadata>,
 }
@@ -37,7 +37,7 @@ where
     pub fn new(vec: &'a RawVec<I, T>) -> Result<Self> {
         let file = vec.region.open_db_read_only_file()?;
 
-        let region_meta = vec.region.meta().read();
+        let region_meta = vec.region.meta();
         let region_start = region_meta.start();
         let start_offset = region_start + HEADER_OFFSET;
         // Support truncated vecs
@@ -64,14 +64,14 @@ where
     }
 
     #[inline(always)]
-    fn seek(&mut self, pos: u64) -> bool {
+    fn seek(&mut self, pos: usize) -> bool {
         self.file_offset = pos.min(self.end_offset).max(self.start_offset);
         self.buffer_pos = 0;
         self.buffer_len = 0;
 
         if likely(self.can_read_file()) {
             self.file
-                .seek(SeekFrom::Start(self.file_offset))
+                .seek(SeekFrom::Start(self.file_offset as u64))
                 .expect("Failed to seek to start position");
             true
         } else {
@@ -101,7 +101,7 @@ where
 
     #[inline(always)]
     pub(crate) fn remaining_file_bytes(&self) -> usize {
-        (self.end_offset - self.file_offset) as usize
+        self.end_offset - self.file_offset
     }
 
     #[inline(always)]
@@ -129,32 +129,32 @@ where
                 .unwrap_unchecked()
         };
 
-        self.file_offset += buffer_len as u64;
+        self.file_offset += buffer_len;
         self.buffer_len = buffer_len;
         self.buffer_pos = 0;
     }
 
     #[inline(always)]
-    fn index_to_bytes(index: usize) -> u64 {
-        index.saturating_mul(Self::SIZE_OF_T) as u64
+    fn index_to_bytes(index: usize) -> usize {
+        index.saturating_mul(Self::SIZE_OF_T)
     }
 
     #[inline(always)]
-    fn skip_bytes(&mut self, skip_bytes: u64) -> bool {
+    fn skip_bytes(&mut self, skip_bytes: usize) -> bool {
         if skip_bytes == 0 {
             return true;
         }
 
         let buffer_remaining = self.remaining_buffer_bytes();
-        if (skip_bytes as usize) < buffer_remaining {
+        if skip_bytes < buffer_remaining {
             // Fast path: skip within buffer
-            self.buffer_pos += skip_bytes as usize;
+            self.buffer_pos += skip_bytes;
             true
         } else {
             // Slow path: seek file
             self.seek(
                 self.file_offset
-                    .saturating_add(skip_bytes - buffer_remaining as u64),
+                    .saturating_add(skip_bytes - buffer_remaining),
             )
         }
     }
@@ -218,7 +218,7 @@ where
             return None;
         }
 
-        self.seek(self.end_offset - Self::SIZE_OF_T as u64);
+        self.seek(self.end_offset - Self::SIZE_OF_T);
 
         self.next()
     }
@@ -235,12 +235,12 @@ where
 
         // Check if target is within current buffer
         if self.buffer_len > 0 {
-            let buffer_start = self.file_offset - self.buffer_len as u64;
+            let buffer_start = self.file_offset - self.buffer_len;
             let buffer_end = self.file_offset;
 
             if target_offset >= buffer_start && target_offset < buffer_end {
                 // Just adjust buffer position without seeking
-                self.buffer_pos = (target_offset - buffer_start) as usize;
+                self.buffer_pos = target_offset - buffer_start;
                 return;
             }
         }
@@ -309,7 +309,7 @@ mod tests {
         for i in 0..100 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let collected: Vec<i32> = vec.clean_iter().unwrap().collect();
         assert_eq!(collected.len(), 100);
@@ -324,7 +324,7 @@ mod tests {
         for i in 0..100 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let mut iter = vec.clean_iter().unwrap();
         assert_eq!(iter.next(), Some(0));
@@ -339,7 +339,7 @@ mod tests {
         for i in 0..100 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let iter = vec.clean_iter().unwrap().skip(50);
         let collected: Vec<i32> = iter.collect();
@@ -355,7 +355,7 @@ mod tests {
         for i in 0..100 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let iter = vec.clean_iter().unwrap().take(25);
         let collected: Vec<i32> = iter.collect();
@@ -371,7 +371,7 @@ mod tests {
         for i in 0..100 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let mut iter = vec.clean_iter().unwrap();
         iter.set_position_to(50);
@@ -386,7 +386,7 @@ mod tests {
         for i in 0..100 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let mut iter = vec.clean_iter().unwrap();
         iter.set_end_to(50);
@@ -402,7 +402,7 @@ mod tests {
         for i in 0..100 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let iter = vec.clean_iter().unwrap();
         assert_eq!(iter.last(), Some(99));
@@ -423,7 +423,7 @@ mod tests {
         for i in 0..100 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let mut iter = vec.clean_iter().unwrap();
         assert_eq!(iter.len(), 100);
@@ -440,7 +440,7 @@ mod tests {
         for i in 0..10000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let collected: Vec<i32> = vec.clean_iter().unwrap().collect();
         assert_eq!(collected.len(), 10000);
@@ -457,7 +457,7 @@ mod tests {
         for i in 0..1000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         // Skip 100, take 200, skip 50 more, take 100 more
         let collected: Vec<i32> = vec
@@ -481,7 +481,7 @@ mod tests {
         for i in 0..1000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let mut iter = vec.clean_iter().unwrap();
 
@@ -502,7 +502,7 @@ mod tests {
         for i in 0..100 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let mut iter = vec.clean_iter().unwrap().skip(100);
         assert_eq!(iter.next(), None);
@@ -515,7 +515,7 @@ mod tests {
         for i in 0..100 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let collected: Vec<i32> = vec.clean_iter().unwrap().take(0).collect();
         assert_eq!(collected.len(), 0);
@@ -528,7 +528,7 @@ mod tests {
         for i in 0..10 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let mut iter = vec.clean_iter().unwrap();
         assert_eq!(iter.nth(20), None);
@@ -542,7 +542,7 @@ mod tests {
         for i in 0..100 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let mut iter = vec.clean_iter().unwrap();
 

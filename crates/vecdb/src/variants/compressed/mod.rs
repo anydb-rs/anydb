@@ -62,16 +62,15 @@ where
             | Err(Error::WrongLength)
             | Err(Error::DifferentVersion { .. }) => {
                 info!("Resetting {}...", options.name);
-
-                let _ = options
+                options
                     .db
-                    .remove_region_with_id(&Self::vec_region_name_with(options.name));
-                let _ = options
+                    .remove_region_if_exists(&Self::vec_region_name_with(options.name))?;
+                options
                     .db
-                    .remove_region_with_id(&Self::holes_region_name_with(options.name));
-                let _ = options
+                    .remove_region_if_exists(&Self::holes_region_name_with(options.name))?;
+                options
                     .db
-                    .remove_region_with_id(&Self::pages_region_name_(options.name));
+                    .remove_region_if_exists(&Self::pages_region_name_(options.name))?;
                 Self::import_with(options)
             }
             _ => res,
@@ -117,8 +116,8 @@ where
         }
 
         let page = pages.get(page_index).unwrap();
-        let len = page.bytes as u64;
-        let offset = page.start;
+        let len = page.bytes as usize;
+        let offset = page.start as usize;
 
         let compressed_data = reader.unchecked_read(offset, len);
         Self::decompress_bytes(compressed_data, page.values as usize)
@@ -291,7 +290,7 @@ where
         self.pages.read().stored_len(Self::PER_PAGE)
     }
 
-    fn flush(&mut self) -> Result<()> {
+    fn write(&mut self) -> Result<()> {
         self.inner.write_header_if_needed()?;
 
         let stored_len = self.stored_len();
@@ -313,7 +312,7 @@ where
 
         let mut values = vec![];
 
-        let offset = HEADER_OFFSET;
+        let offset = HEADER_OFFSET as u64;
 
         let truncate_at = if starting_page_index < pages_len {
             let len = stored_len % Self::PER_PAGE;
@@ -363,7 +362,7 @@ where
             .flat_map(|(v, _)| v)
             .collect::<Vec<_>>();
 
-        self.region().truncate_write_all(truncate_at, &buf)?;
+        self.region().truncate_write(truncate_at as usize, &buf)?;
 
         self.update_stored_len(stored_len + pushed_len);
 

@@ -17,10 +17,17 @@ pub trait AnyStoredVec: AnyVec {
     /// Number of stamped change files to keep for rollback support.
     fn saved_stamped_changes(&self) -> u16;
 
-    fn flush(&mut self) -> Result<()>;
+    fn write(&mut self) -> Result<()>;
 
     #[doc(hidden)]
     fn db(&self) -> Database;
+
+    #[inline]
+    fn flush(&mut self) -> Result<()> {
+        self.write()?;
+        self.region().flush()?; // OS only syncs dirty pages anyway
+        Ok(())
+    }
 
     /// Flushes while holding the exit lock to ensure consistency during shutdown.
     #[inline]
@@ -28,7 +35,6 @@ pub trait AnyStoredVec: AnyVec {
         // info!("safe flush {}", self.name());
         let _lock = exit.lock();
         self.flush()?;
-        // self.db().flush()?; // Need to do a partial flush instead
         Ok(())
     }
 
@@ -48,7 +54,7 @@ pub trait AnyStoredVec: AnyVec {
     #[inline]
     fn stamped_flush(&mut self, stamp: Stamp) -> Result<()> {
         self.update_stamp(stamp);
-        self.flush()
+        self.write()
     }
 
     fn serialize_changes(&self) -> Result<Vec<u8>>;

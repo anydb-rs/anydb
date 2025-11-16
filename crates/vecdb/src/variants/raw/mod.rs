@@ -75,12 +75,12 @@ where
             | Err(Error::WrongLength)
             | Err(Error::DifferentVersion { .. }) => {
                 info!("Resetting {}...", options.name);
-                let _ = options
+                options
                     .db
-                    .remove_region_with_id(&Self::vec_region_name_with(options.name));
-                let _ = options
+                    .remove_region_if_exists(&Self::vec_region_name_with(options.name))?;
+                options
                     .db
-                    .remove_region_with_id(&Self::holes_region_name_with(options.name));
+                    .remove_region_if_exists(&Self::holes_region_name_with(options.name))?;
                 Self::import_with(options)
             }
             _ => res,
@@ -108,11 +108,11 @@ where
     ) -> Result<Self> {
         let region = db.create_region_if_needed(&Self::vec_region_name_with(name))?;
 
-        let region_len = region.meta().read().len() as usize;
+        let region_len = region.meta().len();
         if region_len > 0
-            && (region_len < HEADER_OFFSET as usize
+            && (region_len < HEADER_OFFSET
                 || (format.is_raw()
-                    && !(region_len - HEADER_OFFSET as usize).is_multiple_of(Self::SIZE_OF_T)))
+                    && !(region_len - HEADER_OFFSET).is_multiple_of(Self::SIZE_OF_T)))
         {
             dbg!(region_len, region_len, HEADER_OFFSET);
             return Err(Error::Str("Region was saved incorrectly"));
@@ -215,7 +215,7 @@ where
 
         // Remove holes region if it exists
         if has_stored_holes {
-            let _ = db.remove_region_with_id(&holes_region_name);
+            db.remove_region(&holes_region_name)?;
         }
 
         Ok(())
@@ -310,7 +310,7 @@ where
 
     #[inline]
     fn real_stored_len(&self) -> usize {
-        (self.region.meta().read().len() as usize - HEADER_OFFSET as usize) / Self::SIZE_OF_T
+        (self.region.meta().len() - HEADER_OFFSET) / Self::SIZE_OF_T
     }
 
     #[inline]
@@ -318,7 +318,7 @@ where
         self.stored_len.load(Ordering::Acquire)
     }
 
-    fn flush(&mut self) -> Result<()> {
+    fn write(&mut self) -> Result<()> {
         self.write_header_if_needed()?;
 
         let stored_len = self.stored_len();
@@ -337,11 +337,11 @@ where
             return Ok(());
         }
 
-        let from = (stored_len * Self::SIZE_OF_T + HEADER_OFFSET as usize) as u64;
+        let from = stored_len * Self::SIZE_OF_T + HEADER_OFFSET;
 
         if has_new_data {
             self.region
-                .truncate_write_all(from, mem::take(&mut self.pushed).as_bytes())?;
+                .truncate_write(from, mem::take(&mut self.pushed).as_bytes())?;
             self.update_stored_len(stored_len + pushed_len);
         } else if truncated {
             self.region.truncate(from)?;
@@ -351,8 +351,8 @@ where
             let updated = mem::take(&mut self.updated);
             updated.into_iter().try_for_each(|(i, v)| -> Result<()> {
                 let bytes = v.as_bytes();
-                let at = (i * Self::SIZE_OF_T) as u64 + HEADER_OFFSET;
-                self.region.write_all_at(bytes, at)?;
+                let at = (i * Self::SIZE_OF_T) + HEADER_OFFSET;
+                self.region.write_at(bytes, at)?;
                 Ok(())
             })?;
         }
@@ -368,13 +368,10 @@ where
                 .iter()
                 .flat_map(|i| i.to_ne_bytes())
                 .collect::<Vec<_>>();
-            holes.truncate_write_all(0, &bytes)?;
+            holes.truncate_write(0, &bytes)?;
         } else if had_holes {
             self.has_stored_holes = false;
-            let _ = self
-                .region
-                .db()
-                .remove_region_with_id(&self.holes_region_name());
+            self.region.db().remove_region(&self.holes_region_name())?;
         }
 
         Ok(())
@@ -465,7 +462,7 @@ where
 {
     #[inline(always)]
     fn unchecked_read_at(&self, index: usize, reader: &Reader) -> Result<T> {
-        T::read_from_prefix(reader.prefixed((index * Self::SIZE_OF_T) as u64 + HEADER_OFFSET))
+        T::read_from_prefix(reader.prefixed((index * Self::SIZE_OF_T) + HEADER_OFFSET))
             .map(|(v, _)| v)
             .map_err(Error::from)
     }

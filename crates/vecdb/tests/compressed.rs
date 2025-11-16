@@ -37,7 +37,7 @@ fn test_compressed_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(iter.get(21), None);
         drop(iter);
 
-        vec.flush()?;
+        vec.write()?;
 
         assert_eq!(vec.header().stamp(), Stamp::new(0));
     }
@@ -75,7 +75,7 @@ fn test_compressed_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(iter.get(23), None);
         drop(iter);
 
-        vec.flush()?;
+        vec.write()?;
     }
 
     {
@@ -114,7 +114,7 @@ fn test_compressed_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
         vec.push(vec.len() as u32);
         assert_eq!(vec.iter()?.last(), Some(14));
 
-        vec.flush()?;
+        vec.write()?;
 
         assert_eq!(
             vec.into_iter().collect::<Vec<_>>(),
@@ -161,7 +161,7 @@ fn test_compressed_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(iter.get(21), None);
         drop(iter);
 
-        vec.flush()?;
+        vec.write()?;
     }
 
     {
@@ -177,7 +177,7 @@ fn test_compressed_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(vec.get_or_read(10, &reader)?, Some(10));
         drop(reader);
 
-        vec.flush()?;
+        vec.write()?;
     }
 
     {

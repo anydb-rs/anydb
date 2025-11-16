@@ -253,7 +253,7 @@ mod tests {
         for i in 0..100 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let collected: Vec<i32> = vec.dirty_iter().unwrap().collect();
         assert_eq!(collected.len(), 100);
@@ -283,7 +283,7 @@ mod tests {
         for i in 0..50 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         for i in 50..100 {
             vec.push(i);
@@ -304,7 +304,7 @@ mod tests {
         for i in 0..50 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         for i in 50..100 {
             vec.push(i);
@@ -324,7 +324,7 @@ mod tests {
         for i in 0..50 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         for i in 50..100 {
             vec.push(i);
@@ -344,7 +344,7 @@ mod tests {
         for i in 0..50 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         for i in 50..100 {
             vec.push(i);
@@ -365,7 +365,7 @@ mod tests {
         for i in 0..50 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         for i in 50..100 {
             vec.push(i);
@@ -384,7 +384,7 @@ mod tests {
         for i in 0..50 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         for i in 50..100 {
             vec.push(i);
@@ -401,7 +401,7 @@ mod tests {
         for i in 0..100 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let iter = vec.dirty_iter().unwrap();
         assert_eq!(iter.last(), Some(99));
@@ -414,7 +414,7 @@ mod tests {
         for i in 0..50 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         for i in 50..75 {
             vec.push(i);

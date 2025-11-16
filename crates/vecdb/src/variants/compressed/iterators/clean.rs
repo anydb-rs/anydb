@@ -47,7 +47,7 @@ where
 
     pub fn new(vec: &'a CompressedVec<I, T>) -> Result<Self> {
         let file = vec.inner.region().open_db_read_only_file()?;
-        let region_lock = vec.inner.region().meta().read();
+        let region_lock = vec.inner.region().meta();
 
         let pages = vec.pages.read();
         let stored_len = vec.stored_len();
@@ -353,7 +353,7 @@ mod tests {
         for i in 0..100 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let collected: Vec<i32> = vec.clean_iter().unwrap().collect();
         assert_eq!(collected.len(), 100);
@@ -369,7 +369,7 @@ mod tests {
         for i in 0..10000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let collected: Vec<i32> = vec.clean_iter().unwrap().collect();
         assert_eq!(collected.len(), 10000);
@@ -386,7 +386,7 @@ mod tests {
         for i in 0..1000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let mut iter = vec.clean_iter().unwrap();
         assert_eq!(iter.next(), Some(0));
@@ -402,7 +402,7 @@ mod tests {
         for i in 0..10000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let iter = vec.clean_iter().unwrap().skip(5000);
         let collected: Vec<i32> = iter.collect();
@@ -419,7 +419,7 @@ mod tests {
         for i in 0..1000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let iter = vec.clean_iter().unwrap().take(100);
         let collected: Vec<i32> = iter.collect();
@@ -436,7 +436,7 @@ mod tests {
         for i in 0..5000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let iter = vec.clean_iter().unwrap().skip(1000).take(2000);
         let collected: Vec<i32> = iter.collect();
@@ -453,7 +453,7 @@ mod tests {
         for i in 0..5000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let mut iter = vec.clean_iter().unwrap();
         iter.set_position_to(2500);
@@ -468,7 +468,7 @@ mod tests {
         for i in 0..1000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let mut iter = vec.clean_iter().unwrap();
         iter.next(); // Decode first page
@@ -483,7 +483,7 @@ mod tests {
         for i in 0..1000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let iter = vec.clean_iter().unwrap();
         assert_eq!(iter.last(), Some(999));
@@ -504,7 +504,7 @@ mod tests {
         for i in 0..1000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let mut iter = vec.clean_iter().unwrap();
         assert_eq!(iter.len(), 1000);
@@ -524,7 +524,7 @@ mod tests {
         for i in 0..10000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         // Iterate and ensure no gaps at page boundaries
         let mut iter = vec.clean_iter().unwrap();
@@ -541,7 +541,7 @@ mod tests {
         for i in 0..10000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let mut iter = vec.clean_iter().unwrap();
 
@@ -564,7 +564,7 @@ mod tests {
         for i in 0..20000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         // Sequential iteration should reuse buffer efficiently
         let collected: Vec<i32> = vec.clean_iter().unwrap().collect();
@@ -582,7 +582,7 @@ mod tests {
         for i in 0..10000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let collected: Vec<i32> = vec
             .clean_iter()
@@ -605,7 +605,7 @@ mod tests {
         for i in 0..100 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let mut iter = vec.clean_iter().unwrap();
         assert_eq!(iter.nth(200), None);
@@ -619,7 +619,7 @@ mod tests {
         for i in 0..5000 {
             vec.push(i);
         }
-        vec.flush().unwrap();
+        vec.write().unwrap();
 
         let mut iter = vec.clean_iter().unwrap();
         iter.set_end_to(2500); // Middle of a page

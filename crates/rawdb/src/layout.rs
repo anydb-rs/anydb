@@ -1,16 +1,14 @@
 use std::{collections::BTreeMap, mem};
 
-use crate::{Error, Result};
-
-use super::{Region, Regions};
+use crate::{Error, Region, Regions, Result};
 
 #[derive(Debug, Default)]
 pub struct Layout {
-    start_to_region: BTreeMap<u64, Region>,
-    start_to_hole: BTreeMap<u64, u64>,
-    start_to_reserved: BTreeMap<u64, u64>,
+    start_to_region: BTreeMap<usize, Region>,
+    start_to_hole: BTreeMap<usize, usize>,
+    start_to_reserved: BTreeMap<usize, usize>,
     /// Holes from region moves that can't be reused until flush
-    pending_holes: BTreeMap<u64, u64>,
+    pending_holes: BTreeMap<usize, usize>,
 }
 
 impl From<&Regions> for Layout {
@@ -22,7 +20,7 @@ impl From<&Regions> for Layout {
             .iter()
             .flatten()
             .for_each(|region| {
-                start_to_region.insert(region.meta().read().start(), region.clone());
+                start_to_region.insert(region.meta().start(), region.clone());
             });
 
         let mut start_to_hole = BTreeMap::new();
@@ -33,7 +31,7 @@ impl From<&Regions> for Layout {
             if prev_end != start {
                 start_to_hole.insert(prev_end, start - prev_end);
             }
-            let reserved = region.meta().read().reserved();
+            let reserved = region.meta().reserved();
             prev_end = start + reserved;
         });
 
@@ -47,15 +45,15 @@ impl From<&Regions> for Layout {
 }
 
 impl Layout {
-    pub fn start_to_region(&self) -> &BTreeMap<u64, Region> {
+    pub fn start_to_region(&self) -> &BTreeMap<usize, Region> {
         &self.start_to_region
     }
 
-    pub fn start_to_hole(&self) -> &BTreeMap<u64, u64> {
+    pub fn start_to_hole(&self) -> &BTreeMap<usize, usize> {
         &self.start_to_hole
     }
 
-    pub fn len(&self) -> u64 {
+    pub fn len(&self) -> usize {
         let mut len = 0;
         let mut start = 0;
         if let Some((start_reserved, reserved)) = self.get_last_reserved() {
@@ -71,24 +69,24 @@ impl Layout {
         if let Some((region_start, region)) = self.get_last_region()
             && region_start > start
         {
-            len = region_start + region.meta().read().reserved();
+            len = region_start + region.meta().reserved();
         }
         len
     }
 
-    pub fn get_last_region(&self) -> Option<(u64, &Region)> {
+    pub fn get_last_region(&self) -> Option<(usize, &Region)> {
         self.start_to_region
             .last_key_value()
             .map(|(start, region)| (*start, region))
     }
 
-    fn get_last_hole(&self) -> Option<(u64, u64)> {
+    fn get_last_hole(&self) -> Option<(usize, usize)> {
         self.start_to_hole
             .last_key_value()
             .map(|(start, gap)| (*start, *gap))
     }
 
-    fn get_last_reserved(&self) -> Option<(u64, u64)> {
+    fn get_last_reserved(&self) -> Option<(usize, usize)> {
         self.start_to_reserved
             .last_key_value()
             .map(|(start, reserved)| (*start, *reserved))
@@ -110,19 +108,18 @@ impl Layout {
         }
     }
 
-    pub fn insert_region(&mut self, start: u64, region: &Region) {
+    pub fn insert_region(&mut self, start: usize, region: &Region) {
         assert!(self.start_to_region.insert(start, region.clone()).is_none())
-        // TODO: Other checks related to holes and reserved ?
     }
 
-    pub fn move_region(&mut self, new_start: u64, region: &Region) -> Result<()> {
+    pub fn move_region(&mut self, new_start: usize, region: &Region) -> Result<()> {
         self.remove_region(region)?;
         self.insert_region(new_start, region);
         Ok(())
     }
 
     pub fn remove_region(&mut self, region: &Region) -> Result<()> {
-        let region_meta = region.meta().read();
+        let region_meta = region.meta();
         let start = region_meta.start();
         let mut reserved = region_meta.reserved();
 
@@ -132,7 +129,6 @@ impl Layout {
             .as_ref()
             .is_none_or(|region_| region.index() != region_.index())
         {
-            dbg!((region, removed));
             return Err(Error::RegionIndexMismatch);
         }
 
@@ -154,11 +150,11 @@ impl Layout {
         Ok(())
     }
 
-    pub fn get_hole(&self, start: u64) -> Option<u64> {
+    pub fn get_hole(&self, start: usize) -> Option<usize> {
         self.start_to_hole.get(&start).copied()
     }
 
-    pub fn find_smallest_adequate_hole(&self, reserved: u64) -> Option<u64> {
+    pub fn find_smallest_adequate_hole(&self, reserved: usize) -> Option<usize> {
         let mut best_gap = None;
 
         for (&start, &gap) in &self.start_to_hole {
@@ -177,7 +173,7 @@ impl Layout {
         best_gap.map(|(_, s)| s)
     }
 
-    pub fn remove_or_compress_hole(&mut self, start: u64, compress_by: u64) {
+    pub fn remove_or_compress_hole(&mut self, start: usize, compress_by: usize) {
         if let Some(gap) = self.start_to_hole.remove(&start)
             && gap != compress_by
         {
@@ -190,13 +186,15 @@ impl Layout {
         }
     }
 
-    pub fn reserve(&mut self, start: u64, reserved: u64) {
+    pub fn reserve(&mut self, start: usize, reserved: usize) {
         if self.start_to_reserved.insert(start, reserved).is_some() {
             unreachable!();
         }
     }
 
-    pub fn reserved(&mut self, start: u64) -> Option<u64> {
+    /// Takes the reserved space at the given start position, removing it from tracking.
+    /// Returns None if no reservation exists at this position.
+    pub fn take_reserved(&mut self, start: usize) -> Option<usize> {
         self.start_to_reserved.remove(&start)
     }
 

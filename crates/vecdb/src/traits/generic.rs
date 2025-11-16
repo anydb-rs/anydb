@@ -319,15 +319,15 @@ where
         Err(Error::IndexTooHigh)
     }
 
-    /// Pushes a value at the given index, truncating if necessary, and flushes if cache is full.
+    /// Pushes a value at the given index, truncating if necessary.
     #[inline]
-    fn forced_push(&mut self, index: I, value: T, exit: &Exit) -> Result<()> {
-        self.forced_push_at(index.to_usize(), value, exit)
+    fn forced_push(&mut self, index: I, value: T) -> Result<()> {
+        self.forced_push_at(index.to_usize(), value)
     }
 
-    /// Pushes a value at the given usize index, truncating if necessary, and flushes if cache is full.
+    /// Pushes a value at the given usize index, truncating if necessary.
     #[inline]
-    fn forced_push_at(&mut self, index: usize, value: T, exit: &Exit) -> Result<()> {
+    fn forced_push_at(&mut self, index: usize, value: T) -> Result<()> {
         match self.len().cmp(&index) {
             Ordering::Less => {
                 return Err(Error::IndexTooHigh);
@@ -339,12 +339,16 @@ where
                 self.push(value);
             }
         }
+        Ok(())
+    }
 
+    /// Flushes if the pushed cache exceeds MAX_CACHE_SIZE.
+    #[inline]
+    fn flush_if_needed(&mut self, exit: &Exit) -> Result<()> {
         let pushed_bytes = self.pushed_len() * Self::SIZE_OF_T;
         if pushed_bytes >= MAX_CACHE_SIZE {
             self.safe_flush(exit)?;
         }
-
         Ok(())
     }
 
@@ -700,6 +704,7 @@ where
         // Save current state BEFORE flush clears it (flush uses mem::take on pushed/updated)
         let holes_before_flush = self.holes().clone();
 
+        // Flush ?
         fs::write(
             path.join(u64::from(stamp).to_string()),
             self.serialize_changes()?,

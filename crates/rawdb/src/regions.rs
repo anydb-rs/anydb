@@ -5,13 +5,10 @@ use std::{
     sync::Arc,
 };
 
-use std::os::unix::fs::FileExt;
+use memmap2::{MmapMut, MmapOptions};
 
-use crate::{Database, Error, RegionMetadata, Result};
-
-use super::{
-    PAGE_SIZE,
-    region::{Region, SIZE_OF_REGION_METADATA},
+use crate::{
+    Database, Error, PAGE_SIZE, RegionMetadata, Result, SIZE_OF_REGION_METADATA, region::Region,
 };
 
 #[derive(Debug)]
@@ -19,7 +16,7 @@ pub struct Regions {
     id_to_index: HashMap<String, usize>,
     index_to_region: Vec<Option<Region>>,
     file: File,
-    file_len: u64,
+    mmap: MmapMut,
 }
 
 impl Regions {
@@ -34,31 +31,42 @@ impl Regions {
             .open(parent.join("regions"))?;
         file.try_lock()?;
 
-        let file_len = file.metadata()?.len();
+        let mmap = Self::create_mmap(&file)?;
 
         Ok(Self {
             id_to_index: HashMap::new(),
             index_to_region: vec![],
             file,
-            file_len,
+            mmap,
         })
     }
 
-    pub fn fill_index_to_region(&mut self, db: &Database) -> Result<()> {
-        assert_eq!(self.file_len % SIZE_OF_REGION_METADATA as u64, 0);
+    #[inline]
+    fn create_mmap(file: &File) -> Result<MmapMut> {
+        Ok(unsafe { MmapOptions::new().map_mut(file)? })
+    }
 
-        let num_slots = (self.file_len / SIZE_OF_REGION_METADATA as u64) as usize;
+    fn file_len(&self) -> Result<usize> {
+        Ok(self.file.metadata()?.len() as usize)
+    }
+
+    /// Fill `index_to_region`.
+    /// Needs to be called after `open()`
+    pub(crate) fn fill(&mut self, db: &Database) -> Result<()> {
+        let file_len = self.file_len()?;
+
+        assert_eq!(file_len % SIZE_OF_REGION_METADATA, 0);
+
+        let num_slots = file_len / SIZE_OF_REGION_METADATA;
 
         self.index_to_region
             .resize_with(num_slots, Default::default);
 
         for index in 0..num_slots {
-            let start = (index * SIZE_OF_REGION_METADATA) as u64;
-            let mut buffer = vec![0; SIZE_OF_REGION_METADATA];
+            let start = index * SIZE_OF_REGION_METADATA;
+            let bytes = &self.mmap[start..start + SIZE_OF_REGION_METADATA];
 
-            self.file.read_exact_at(&mut buffer, start)?;
-
-            let Ok(meta) = RegionMetadata::from_bytes(&buffer) else {
+            let Ok(meta) = RegionMetadata::from_bytes(bytes) else {
                 continue;
             };
 
@@ -69,15 +77,17 @@ impl Regions {
         Ok(())
     }
 
-    pub fn set_min_len(&mut self, len: u64) -> Result<()> {
-        if self.file_len < len {
-            self.file.set_len(len)?;
-            self.file_len = len;
+    pub(crate) fn set_min_len(&mut self, len: usize) -> Result<()> {
+        let file_len = self.file_len()?;
+        if file_len < len {
+            self.file.set_len(len as u64)?;
+            // self.file.sync_all()?;
+            self.mmap = Self::create_mmap(&self.file)?;
         }
         Ok(())
     }
 
-    pub fn create_region(&mut self, db: &Database, id: String, start: u64) -> Result<Region> {
+    pub(crate) fn create(&mut self, db: &Database, id: String, start: usize) -> Result<Region> {
         let index = self
             .index_to_region
             .iter()
@@ -88,7 +98,7 @@ impl Regions {
 
         let region = Region::new(db, id.clone(), index, start, 0, PAGE_SIZE);
 
-        self.set_min_len(((index + 1) * SIZE_OF_REGION_METADATA) as u64)?;
+        self.set_min_len((index + 1) * SIZE_OF_REGION_METADATA)?;
 
         let region_opt = Some(region.clone());
         if index < self.index_to_region.len() {
@@ -105,28 +115,18 @@ impl Regions {
     }
 
     #[inline]
-    pub fn get_region_from_index(&self, index: usize) -> Option<&Region> {
+    pub fn get_from_index(&self, index: usize) -> Option<&Region> {
         self.index_to_region.get(index).and_then(Option::as_ref)
     }
 
     #[inline]
-    pub fn get_region_from_id(&self, id: &str) -> Option<&Region> {
+    pub fn get_from_id(&self, id: &str) -> Option<&Region> {
         self.id_to_index
             .get(id)
-            .and_then(|&index| self.get_region_from_index(index))
+            .and_then(|&index| self.get_from_index(index))
     }
 
-    #[inline]
-    pub fn index_to_region(&self) -> &[Option<Region>] {
-        &self.index_to_region
-    }
-
-    #[inline]
-    pub fn id_to_index(&self) -> &HashMap<String, usize> {
-        &self.id_to_index
-    }
-
-    pub fn rename_region(&mut self, old_id: &str, new_id: &str) -> Result<()> {
+    pub(crate) fn rename(&mut self, old_id: &str, new_id: &str) -> Result<()> {
         // Check that old_id exists
         let index = self
             .id_to_index
@@ -139,13 +139,6 @@ impl Regions {
             return Err(Error::RegionAlreadyExists);
         }
 
-        // Get the region and update its metadata
-        let region = self
-            .get_region_from_index(index)
-            .ok_or(Error::RegionNotFound)?;
-
-        region.meta().write().set_id(new_id.to_string());
-
         // Update the id_to_index mapping
         self.id_to_index.remove(old_id);
         self.id_to_index.insert(new_id.to_string(), index);
@@ -153,7 +146,7 @@ impl Regions {
         Ok(())
     }
 
-    pub fn remove_region(&mut self, region: Region) -> Result<Option<Region>> {
+    pub(crate) fn remove(&mut self, region: &Region) -> Result<()> {
         if self
             .index_to_region
             .get_mut(region.index())
@@ -161,48 +154,45 @@ impl Regions {
             .is_none()
         {
             return Err(Error::RegionNotFound);
-        } else if Arc::strong_count(&region) > 1 {
+        } else if Arc::strong_count(region.arc()) > 1 {
             return Err(Error::RegionStillReferenced {
-                ref_count: Arc::strong_count(&region),
+                ref_count: Arc::strong_count(region.arc()),
             });
         }
 
-        self.id_to_index.remove(region.meta().read().id());
+        self.id_to_index.remove(region.meta().id());
 
-        // Clear metadata from file by writing zeros
-        let start = (region.index() * SIZE_OF_REGION_METADATA) as u64;
-        let empty = [0u8; SIZE_OF_REGION_METADATA];
-        self.file.write_all_at(&empty, start)?;
-
-        Ok(Some(region))
-    }
-
-    pub fn flush(&self) -> Result<()> {
-        let mut needs_sync = false;
-
-        // Write all dirty metadata to file
-        for (index, region) in self
-            .index_to_region
-            .iter()
-            .enumerate()
-            .flat_map(|(i, opt)| opt.as_ref().map(|r| (i, r)))
-        {
-            let mut region_meta = region.meta().write();
-            if region_meta.is_clean() {
-                continue;
-            }
-            needs_sync = true;
-            let start = (index * SIZE_OF_REGION_METADATA) as u64;
-            let bytes = region_meta.to_bytes();
-            self.file.write_all_at(&bytes, start)?;
-            region_meta.clear_dirty();
-        }
-
-        if needs_sync {
-            // Sync the metadata file
-            self.file.sync_data()?;
-        }
+        self.write_at(region.index(), &[0u8; SIZE_OF_REGION_METADATA]);
 
         Ok(())
+    }
+
+    pub(crate) fn flush(&self) -> Result<()> {
+        self.mmap.flush()?;
+        Ok(())
+    }
+
+    pub(crate) fn write_at(&self, index: usize, data: &[u8]) {
+        assert!(data.len() == SIZE_OF_REGION_METADATA);
+        let mmap = &self.mmap;
+        let start = index * SIZE_OF_REGION_METADATA;
+        (unsafe { std::slice::from_raw_parts_mut(mmap.as_ptr() as *mut u8, mmap.len()) })
+            [start..start + SIZE_OF_REGION_METADATA]
+            .copy_from_slice(data);
+    }
+
+    #[inline]
+    pub fn index_to_region(&self) -> &[Option<Region>] {
+        &self.index_to_region
+    }
+
+    #[inline]
+    pub fn id_to_index(&self) -> &HashMap<String, usize> {
+        &self.id_to_index
+    }
+
+    #[inline]
+    pub(crate) fn mmap(&self) -> &MmapMut {
+        &self.mmap
     }
 }

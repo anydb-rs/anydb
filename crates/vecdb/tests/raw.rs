@@ -37,7 +37,7 @@ fn test_raw_vec_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         assert!(iter.get(21).is_none());
         drop(iter);
 
-        vec.flush()?;
+        vec.write()?;
 
         assert!(vec.header().stamp() == Stamp::new(0));
     }
@@ -75,7 +75,7 @@ fn test_raw_vec_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         assert!(iter.get(23).is_none());
         drop(iter);
 
-        vec.flush()?;
+        vec.write()?;
     }
 
     {
@@ -119,7 +119,7 @@ fn test_raw_vec_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
             vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
         );
 
-        vec.flush()?;
+        vec.write()?;
     }
 
     {
@@ -158,7 +158,7 @@ fn test_raw_vec_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(vec.get_or_read(10, &reader)?, None);
         drop(reader);
 
-        vec.flush()?;
+        vec.write()?;
 
         assert!(vec.holes() == &BTreeSet::from([10]));
     }
@@ -181,7 +181,7 @@ fn test_raw_vec_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(vec.get_or_read(10, &reader)?, Some(10));
         drop(reader);
 
-        vec.flush()?;
+        vec.write()?;
     }
 
     options = options.with_saved_stamped_changes(10);

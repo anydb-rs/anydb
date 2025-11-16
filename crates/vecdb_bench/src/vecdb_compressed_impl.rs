@@ -70,7 +70,7 @@ impl DatabaseBenchmark for VecDbCompressedBench {
     }
 
     fn flush(&mut self) -> Result<()> {
-        self.vec.flush()?;
+        self.vec.write()?;
         self.db.flush()?;
         Ok(())
     }

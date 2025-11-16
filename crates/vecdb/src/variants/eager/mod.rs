@@ -1465,8 +1465,8 @@ where
     }
 
     #[inline]
-    fn flush(&mut self) -> Result<()> {
-        self.0.flush()
+    fn write(&mut self) -> Result<()> {
+        self.0.write()
     }
 
     #[inline]

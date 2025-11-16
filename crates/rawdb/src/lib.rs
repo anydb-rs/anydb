@@ -1,13 +1,8 @@
 #![doc = include_str!("../README.md")]
-// #![doc = "\n## Example\n"]
-// #![doc = "\n```rust"]
-// #![doc = include_str!("../examples/db.rs")]
-// #![doc = "```\n"]
 
 use std::{
     collections::HashSet,
     fs::{self, File, OpenOptions},
-    ops::Deref,
     os::unix::io::AsRawFd,
     path::{Path, PathBuf},
     sync::{Arc, Weak},
@@ -16,12 +11,13 @@ use std::{
 use libc::off_t;
 use log::debug;
 use memmap2::{MmapMut, MmapOptions};
-use parking_lot::{RwLock, RwLockReadGuard};
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 pub mod error;
 mod layout;
 mod reader;
 mod region;
+mod region_metadata;
 mod regions;
 
 pub use error::*;
@@ -29,11 +25,13 @@ use layout::*;
 use rayon::prelude::*;
 pub use reader::*;
 pub use region::*;
+pub use region_metadata::*;
 use regions::*;
 
-pub const PAGE_SIZE: u64 = 4096;
-pub const PAGE_SIZE_MINUS_1: u64 = PAGE_SIZE - 1;
-const GB: usize = 1024 * 1024 * 1024;
+pub const PAGE_SIZE: usize = 4096;
+pub const PAGE_SIZE_MINUS_1: usize = PAGE_SIZE - 1;
+#[allow(non_upper_case_globals)]
+const GiB: usize = 1024 * 1024 * 1024;
 
 /// Memory-mapped database with dynamic space allocation and hole punching.
 ///
@@ -58,7 +56,7 @@ impl Database {
     }
 
     /// Opens or creates a database with a minimum initial file size.
-    pub fn open_with_min_len(path: &Path, min_len: u64) -> Result<Self> {
+    pub fn open_with_min_len(path: &Path, min_len: usize) -> Result<Self> {
         fs::create_dir_all(path)?;
 
         let file = OpenOptions::new()
@@ -66,15 +64,15 @@ impl Database {
             .create(true)
             .write(true)
             .truncate(false)
-            .open(Self::data_path_(path))?;
+            .open(Self::data_path_from(path))?;
         debug!("File opened.");
 
         file.try_lock()?;
         debug!("File locked.");
 
-        let file_len = file.metadata()?.len();
+        let file_len = file.metadata()?.len() as usize;
         if file_len < min_len {
-            file.set_len(min_len)?;
+            file.set_len(min_len as u64)?;
             debug!("File extended.");
             file.sync_all()?;
         }
@@ -91,19 +89,29 @@ impl Database {
             layout: RwLock::new(Layout::default()),
         }));
 
-        db.regions.write().fill_index_to_region(&db)?;
+        db.regions_mut().fill(&db)?;
         debug!("Filled regions.");
-        *db.layout.write() = Layout::from(&*db.regions.read());
+        *db.layout_mut() = Layout::from(&*db.regions());
         debug!("Layout created.");
 
         Ok(db)
     }
 
-    pub fn file_len(&self) -> Result<u64> {
-        Ok(self.file.read().metadata()?.len())
+    #[inline]
+    fn create_mmap(file: &File) -> Result<MmapMut> {
+        Ok(unsafe { MmapOptions::new().map_mut(file)? })
     }
 
-    pub fn set_min_len(&self, len: u64) -> Result<()> {
+    /// Returns the current length of the database file in bytes.
+    pub fn file_len(&self) -> Result<usize> {
+        Ok(self.file().metadata()?.len() as usize)
+    }
+
+    /// Ensures the database file is at least the specified length.
+    ///
+    /// This pre-allocates file space to avoid expensive growth during writes.
+    /// The length is rounded up to the next page size multiple (4096 bytes).
+    pub fn set_min_len(&self, len: usize) -> Result<()> {
         let len = Self::ceil_number_to_page_size_multiple(len);
 
         let file_len = self.file_len()?;
@@ -111,24 +119,25 @@ impl Database {
             return Ok(());
         }
 
-        let mut mmap = self.mmap.write();
-        let file = self.file.write();
-        file.set_len(len)?;
-        file.sync_all()?;
+        let mut mmap = self.mmap_mut();
+        let file = self.file_mut();
+        file.set_len(len as u64)?;
         *mmap = Self::create_mmap(&file)?;
         Ok(())
     }
 
+    /// Pre-allocates space for at least the specified number of regions.
+    ///
+    /// This avoids expensive reallocations when creating many regions.
     pub fn set_min_regions(&self, regions: usize) -> Result<()> {
-        self.regions
-            .write()
-            .set_min_len((regions * SIZE_OF_REGION_METADATA) as u64)?;
-        self.set_min_len(regions as u64 * PAGE_SIZE)
+        self.regions_mut()
+            .set_min_len(regions * SIZE_OF_REGION_METADATA)?;
+        self.set_min_len(regions * PAGE_SIZE)
     }
 
     /// Gets an existing region by ID.
     pub fn get_region(&self, id: &str) -> Option<Region> {
-        self.regions.read().get_region_from_id(id).cloned()
+        self.regions().get_from_id(id).cloned()
     }
 
     /// Creates a region with the given ID, or returns it if it already exists.
@@ -137,8 +146,8 @@ impl Database {
             return Ok(region);
         }
 
-        let mut regions = self.regions.write();
-        let mut layout = self.layout.write();
+        let mut regions = self.regions_mut();
+        let mut layout = self.layout_mut();
 
         let start = if let Some(start) = layout.find_smallest_adequate_hole(PAGE_SIZE) {
             layout.remove_or_compress_hole(start, PAGE_SIZE);
@@ -147,7 +156,7 @@ impl Database {
             let start = layout
                 .get_last_region()
                 .map(|(_, region)| {
-                    let region_meta = region.meta().read();
+                    let region_meta = region.meta();
                     region_meta.start() + region_meta.reserved()
                 })
                 .unwrap_or_default();
@@ -159,7 +168,7 @@ impl Database {
             start
         };
 
-        let region = regions.create_region(self, id.to_owned(), start)?;
+        let region = regions.create(self, id.to_owned(), start)?;
 
         layout.insert_region(start, &region);
 
@@ -167,190 +176,10 @@ impl Database {
     }
 
     #[inline]
-    pub fn write_all_to_region(&self, region: &Region, data: &[u8]) -> Result<()> {
-        self.write_all_to_region_at_(region, data, None, false)
-    }
-
-    #[inline]
-    pub fn write_all_to_region_at(&self, region: &Region, data: &[u8], at: u64) -> Result<()> {
-        self.write_all_to_region_at_(region, data, Some(at), false)
-    }
-
-    #[inline]
-    pub fn truncate_write_all_to_region(
-        &self,
-        region: &Region,
-        at: u64,
-        data: &[u8],
-    ) -> Result<()> {
-        self.write_all_to_region_at_(region, data, Some(at), true)
-    }
-
-    fn write_all_to_region_at_(
-        &self,
-        region: &Region,
-        data: &[u8],
-        at: Option<u64>,
-        truncate: bool,
-    ) -> Result<()> {
-        let region_meta = region.meta().read();
-        let start = region_meta.start();
-        let reserved = region_meta.reserved();
-        let len = region_meta.len();
-        drop(region_meta);
-
-        let data_len = data.len() as u64;
-
-        // Validate write position if specified
-        // Note: checking `at > len` is sufficient since `len <= reserved` is always true
-        // Therefore if `at <= len`, then `at <= reserved` must also be true
-        if let Some(at_val) = at
-            && at_val > len
-        {
-            return Err(Error::WriteOutOfBounds {
-                position: at_val,
-                region_len: len,
-            });
-        }
-
-        let new_len = at.map_or(len + data_len, |at| {
-            let new_len = at + data_len;
-            if truncate { new_len } else { new_len.max(len) }
-        });
-        let write_start = start + at.unwrap_or(len);
-
-        // Write to reserved space if possible
-        if new_len <= reserved {
-            // info!(
-            //     "Write {data_len} bytes to {region_index} reserved space at {write_start} (start = {start}, at = {at:?}, len = {len})"
-            // );
-
-            if at.is_none() {
-                self.write(write_start, data);
-            }
-
-            let mut region_meta = region.meta().write();
-
-            if at.is_some() {
-                self.write(write_start, data);
-            }
-
-            region_meta.set_len(new_len);
-
-            return Ok(());
-        }
-
-        assert!(new_len > reserved);
-        let mut new_reserved = reserved;
-        while new_len > new_reserved {
-            new_reserved *= 2;
-        }
-        assert!(new_len <= new_reserved);
-        let added_reserve = new_reserved - reserved;
-
-        let mut layout = self.layout.write();
-
-        // If is last continue writing
-        if layout.is_last_anything(region) {
-            // info!("{region_index} Append to file at {write_start}");
-
-            self.set_min_len(start + new_reserved)?;
-            let mut region_meta = region.meta().write();
-            region_meta.set_reserved(new_reserved);
-            drop(region_meta);
-            drop(layout);
-
-            self.write(write_start, data);
-
-            let mut region_meta = region.meta().write();
-            region_meta.set_len(new_len);
-
-            return Ok(());
-        }
-
-        // Expand region to the right if gap is wide enough
-        let hole_start = start + reserved;
-        if layout
-            .get_hole(hole_start)
-            .is_some_and(|gap| gap >= added_reserve)
-        {
-            // info!("Expand {region_index} to hole");
-
-            layout.remove_or_compress_hole(hole_start, added_reserve);
-            let mut region_meta = region.meta().write();
-            region_meta.set_reserved(new_reserved);
-            drop(region_meta);
-            drop(layout);
-
-            self.write(write_start, data);
-
-            let mut region_meta = region.meta().write();
-            region_meta.set_len(new_len);
-
-            return Ok(());
-        }
-
-        // Find hole big enough to move the region
-        if let Some(hole_start) = layout.find_smallest_adequate_hole(new_reserved) {
-            // info!("Move {region_index} to hole at {hole_start}");
-
-            layout.remove_or_compress_hole(hole_start, new_reserved);
-            drop(layout);
-
-            self.write(
-                hole_start,
-                &self.mmap.read()[start as usize..write_start as usize],
-            );
-
-            self.write(hole_start + at.unwrap_or(len), data);
-
-            let mut layout = self.layout.write();
-            layout.move_region(hole_start, region)?;
-
-            let mut region_meta = region.meta().write();
-            region_meta.set_start(hole_start);
-            region_meta.set_reserved(new_reserved);
-            region_meta.set_len(new_len);
-
-            return Ok(());
-        }
-
-        let new_start = layout.len();
-        // Write at the end
-        // info!(
-        //     "Move {region_index} to the end, from {start}..{} to {new_start}..{}",
-        //     start + reserved,
-        //     new_start + new_reserved
-        // );
-        self.set_min_len(new_start + new_reserved)?;
-        layout.reserve(new_start, new_reserved);
-        drop(layout);
-
-        // Read existing data and write to new location
-        self.write(
-            new_start,
-            &self.mmap.read()[start as usize..write_start as usize],
-        );
-        self.write(new_start + at.unwrap_or(len), data);
-
-        let mut layout = self.layout.write();
-        layout.move_region(new_start, region)?;
-        assert!(layout.reserved(new_start) == Some(new_reserved));
-
-        let mut region_meta = region.meta().write();
-        region_meta.set_start(new_start);
-        region_meta.set_reserved(new_reserved);
-        region_meta.set_len(new_len);
-
-        Ok(())
-    }
-
-    #[inline]
-    fn write(&self, at: u64, data: &[u8]) {
-        let mmap = self.mmap.read();
-        let data_len = data.len();
-        let start = at as usize;
-        let end = start + data_len;
+    pub(crate) fn write(&self, start: usize, data: &[u8]) {
+        let mmap = self.mmap();
+        let len = data.len();
+        let end = start + len;
         if end > mmap.len() {
             unreachable!("Trying to write beyond mmap")
         }
@@ -360,94 +189,75 @@ impl Database {
             .copy_from_slice(data);
     }
 
-    ///
-    /// From relative to start
-    ///
-    /// Non destructive
-    ///
-    pub fn truncate_region(&self, region: &Region, from: u64) -> Result<()> {
-        let mut region_meta = region.meta().write();
-        let len = region_meta.len();
-        if from == len {
-            return Ok(());
-        } else if from > len {
-            return Err(Error::TruncateInvalid {
-                from,
-                current_len: len,
-            });
+    /// Copy data within the mmap, chunked to avoid excessive memory pressure
+    pub(crate) fn copy(&self, src: usize, dst: usize, len: usize) {
+        const CHUNK_SIZE: usize = GiB; // 1GB chunks
+
+        // Validate bounds
+        let mmap = self.mmap();
+        if src + len > mmap.len() || dst + len > mmap.len() {
+            unreachable!(
+                "Copy out of bounds: src={}, dst={}, len={}, mmap.len()={}",
+                src,
+                dst,
+                len,
+                mmap.len()
+            );
         }
-        region_meta.set_len(from);
-        Ok(())
+        drop(mmap);
+
+        for offset in (0..len).step_by(CHUNK_SIZE) {
+            let chunk_len = (len - offset).min(CHUNK_SIZE);
+
+            // Copy to temp buffer to avoid aliasing mutable/immutable references
+            let chunk: Vec<u8> = {
+                let mmap = self.mmap();
+                mmap[src + offset..src + offset + chunk_len].to_vec()
+            };
+
+            self.write(dst + offset, &chunk);
+        }
     }
 
-    pub fn remove_region_with_id(&self, id: &str) -> Result<Option<Region>> {
+    /// Removes a region by ID if it exists, otherwise does nothing.
+    ///
+    /// Returns `Ok(())` whether the region existed or not.
+    pub fn remove_region_if_exists(&self, id: &str) -> Result<()> {
+        match self.remove_region(id) {
+            Ok(()) | Err(Error::RegionNotFound) => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Removes a region by ID.
+    ///
+    /// Returns `Error::RegionNotFound` if the region doesn't exist.
+    pub fn remove_region(&self, id: &str) -> Result<()> {
         let Some(region) = self.get_region(id) else {
-            return Ok(None);
+            return Err(Error::RegionNotFound);
         };
-        self.remove_region(region)
+        region.remove()
     }
 
-    pub fn rename_region(&self, old_id: &str, new_id: &str) -> Result<()> {
-        self.regions.write().rename_region(old_id, new_id)
-    }
-
-    pub fn remove_region(&self, region: Region) -> Result<Option<Region>> {
-        let mut regions = self.regions.write();
-        let mut layout = self.layout.write();
-        layout.remove_region(&region)?;
-        regions.remove_region(region)
-    }
-
+    /// Removes all regions except those in the provided set.
+    ///
+    /// This is useful for garbage collection - keeping only regions that are
+    /// still in use and removing all others.
     pub fn retain_regions(&self, mut ids: HashSet<String>) -> Result<()> {
-        let regions_to_remove = self
-            .regions
-            .read()
+        // Collect regions to remove first to avoid deadlock
+        // (holding read lock while calling region.remove() which needs write lock)
+        let regions_to_remove: Vec<_> = self
+            .regions()
             .id_to_index()
             .keys()
             .filter(|id| !ids.remove(&**id))
-            .flat_map(|id| self.get_region(id))
-            .collect::<Vec<Region>>();
+            .filter_map(|id| self.get_region(id))
+            .collect();
 
+        // Now remove them (read lock is released)
         regions_to_remove
             .into_iter()
-            .try_for_each(|region| -> Result<()> {
-                self.remove_region(region)?;
-                Ok(())
-            })
-    }
-
-    #[inline]
-    fn create_mmap(file: &File) -> Result<MmapMut> {
-        Ok(unsafe { MmapOptions::new().map_mut(file)? })
-    }
-
-    #[inline]
-    pub fn mmap(&self) -> RwLockReadGuard<'_, MmapMut> {
-        self.mmap.read()
-    }
-
-    #[inline]
-    pub fn regions(&self) -> RwLockReadGuard<'_, Regions> {
-        self.regions.read()
-    }
-
-    #[inline]
-    pub fn layout(&self) -> RwLockReadGuard<'_, Layout> {
-        self.layout.read()
-    }
-
-    #[inline]
-    fn ceil_number_to_page_size_multiple(num: u64) -> u64 {
-        (num + PAGE_SIZE_MINUS_1) & !PAGE_SIZE_MINUS_1
-    }
-
-    #[inline]
-    fn data_path(&self) -> PathBuf {
-        Self::data_path_(&self.path)
-    }
-    #[inline]
-    fn data_path_(path: &Path) -> PathBuf {
-        path.join("data")
+            .try_for_each(|region| region.remove())
     }
 
     /// Open a dedicated file handle for sequential reading
@@ -457,6 +267,10 @@ impl Database {
         File::open(self.data_path()).map_err(Error::from)
     }
 
+    /// Returns human-readable disk usage of the database file.
+    ///
+    /// Uses the `du -h` command to report actual disk space used (accounting for
+    /// sparse files and hole punching).
     pub fn disk_usage(&self) -> String {
         let path = self.data_path();
 
@@ -472,18 +286,21 @@ impl Database {
             .to_string()
     }
 
+    /// Flushes all dirty data and metadata to disk.
+    ///
+    /// This ensures durability - all writes are persisted and will survive a crash.
+    /// Also promotes pending holes so they can be reused by future allocations.
     pub fn flush(&self) -> Result<()> {
-        let mmap = self.mmap.read();
-        let regions = self.regions.read();
-        mmap.flush()?;
-        regions.flush()?;
-
-        // Now that metadata is durable, pending holes can be reused
-        self.layout.write().promote_pending_holes();
-
+        self.mmap().flush()?;
+        self.regions().flush()?;
+        self.file().sync_all()?;
+        self.layout_mut().promote_pending_holes();
         Ok(())
     }
 
+    /// Compact the database by promoting pending holes and punching holes in the file.
+    ///
+    /// This flushes all dirty data first to ensure consistency.
     #[inline]
     pub fn compact(&self) -> Result<()> {
         self.flush()?;
@@ -491,25 +308,27 @@ impl Database {
     }
 
     fn punch_holes(&self) -> Result<()> {
-        let file = self.file.write();
-        let mut mmap = self.mmap.write();
-        let regions = self.regions.read();
-        let layout = self.layout.read();
+        let file = self.file_mut();
+        let mut mmap = self.mmap_mut();
+        let regions = self.regions();
+        let layout = self.layout();
 
         let mut punched = regions
             .index_to_region()
             .par_iter()
             .flatten()
             .map(|region| -> Result<usize> {
-                // let region = region_lock.read();
-                let region_meta = region.meta().read();
+                let region_meta = region.meta();
                 let rstart = region_meta.start();
                 let len = region_meta.len();
                 let reserved = region_meta.reserved();
                 let ceil_len = Self::ceil_number_to_page_size_multiple(len);
                 assert!(len <= ceil_len);
                 if ceil_len > reserved {
-                    panic!()
+                    panic!(
+                        "Invariant violated: ceil_len ({}) > reserved ({})",
+                        ceil_len, reserved
+                    )
                 } else if ceil_len < reserved {
                     let start = rstart + ceil_len;
                     let hole = reserved - ceil_len;
@@ -544,12 +363,9 @@ impl Database {
         Ok(())
     }
 
-    fn approx_has_punchable_data(mmap: &MmapMut, start: u64, len: u64) -> bool {
+    fn approx_has_punchable_data(mmap: &MmapMut, start: usize, len: usize) -> bool {
         assert!(start.is_multiple_of(PAGE_SIZE));
         assert!(len.is_multiple_of(PAGE_SIZE));
-
-        let start = start as usize;
-        let len = len as usize;
 
         let min = start;
         let max = start + len;
@@ -562,23 +378,23 @@ impl Database {
         };
 
         let first_page_start = start;
-        let first_page_end = start + PAGE_SIZE as usize - 1;
+        let first_page_end = start + PAGE_SIZE - 1;
         if check(first_page_start, first_page_end) {
             return true;
         }
 
-        let last_page_start = start + len - PAGE_SIZE as usize;
+        let last_page_start = start + len - PAGE_SIZE;
         let last_page_end = start + len - 1;
         if check(last_page_start, last_page_end) {
             return true;
         }
 
-        if len > GB {
-            let num_gb_checks = len / GB;
+        if len > GiB {
+            let num_gb_checks = len / GiB;
             for i in 1..num_gb_checks {
-                let gb_boundary = start + i * GB;
+                let gb_boundary = start + i * GiB;
                 let page_start = gb_boundary;
-                let page_end = gb_boundary + PAGE_SIZE as usize - 1;
+                let page_end = gb_boundary + PAGE_SIZE - 1;
 
                 if check(page_start, page_end) {
                     return true;
@@ -590,7 +406,7 @@ impl Database {
     }
 
     #[cfg(target_os = "macos")]
-    fn punch_hole(file: &File, start: u64, length: u64) -> Result<()> {
+    fn punch_hole(file: &File, start: usize, length: usize) -> Result<()> {
         let fpunchhole = FPunchhole {
             fp_flags: 0,
             reserved: 0,
@@ -619,7 +435,7 @@ impl Database {
     }
 
     #[cfg(target_os = "linux")]
-    fn punch_hole(file: &File, start: u64, length: u64) -> Result<()> {
+    fn punch_hole(file: &File, start: usize, length: usize) -> Result<()> {
         let result = unsafe {
             libc::fallocate(
                 file.as_raw_fd(),
@@ -642,7 +458,7 @@ impl Database {
     }
 
     #[cfg(target_os = "freebsd")]
-    fn punch_hole(file: &File, start: u64, length: u64) -> Result<()> {
+    fn punch_hole(file: &File, start: usize, length: usize) -> Result<()> {
         let fd = file.as_raw_fd();
 
         let mut spacectl = libc::spacectl_range {
@@ -673,27 +489,72 @@ impl Database {
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "freebsd")))]
-    fn punch_hole(_file: &File, _start: u64, _length: u64) -> Result<()> {
-        Err(Error::String(
-            "Hole punching not supported on this platform".to_string(),
-        ))
+    fn punch_hole(_file: &File, _start: usize, _length: usize) -> Result<()> {
+        Err(Error::HolePunchUnsupported)
+    }
+
+    #[inline(always)]
+    pub fn file(&self) -> RwLockReadGuard<'_, File> {
+        self.0.file.read()
+    }
+
+    #[inline(always)]
+    pub fn file_mut(&self) -> RwLockWriteGuard<'_, File> {
+        self.0.file.write()
+    }
+
+    #[inline(always)]
+    pub fn mmap(&self) -> RwLockReadGuard<'_, MmapMut> {
+        self.0.mmap.read()
+    }
+
+    #[inline(always)]
+    pub fn mmap_mut(&self) -> RwLockWriteGuard<'_, MmapMut> {
+        self.0.mmap.write()
+    }
+
+    #[inline(always)]
+    pub fn regions(&self) -> RwLockReadGuard<'_, Regions> {
+        self.0.regions.read()
+    }
+
+    #[inline(always)]
+    pub(crate) fn regions_mut(&self) -> RwLockWriteGuard<'_, Regions> {
+        self.0.regions.write()
+    }
+
+    #[inline(always)]
+    pub fn layout(&self) -> RwLockReadGuard<'_, Layout> {
+        self.0.layout.read()
+    }
+
+    #[inline(always)]
+    pub(crate) fn layout_mut(&self) -> RwLockWriteGuard<'_, Layout> {
+        self.0.layout.write()
     }
 
     #[inline]
+    fn ceil_number_to_page_size_multiple(num: usize) -> usize {
+        (num + PAGE_SIZE_MINUS_1) & !PAGE_SIZE_MINUS_1
+    }
+
+    #[inline(always)]
+    fn data_path(&self) -> PathBuf {
+        Self::data_path_from(self.path())
+    }
+    #[inline(always)]
+    fn data_path_from(path: &Path) -> PathBuf {
+        path.join("data")
+    }
+
+    #[inline(always)]
     pub fn path(&self) -> &Path {
-        &self.path
+        &self.0.path
     }
 
     #[inline]
     pub fn weak_clone(&self) -> WeakDatabase {
         WeakDatabase(Arc::downgrade(&self.0))
-    }
-}
-
-impl Deref for Database {
-    type Target = Arc<DatabaseInner>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 

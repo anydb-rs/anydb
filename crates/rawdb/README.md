@@ -38,20 +38,22 @@ fn main() -> Result<()> {
     let region1 = db.create_region_if_needed("region1")?;
     let region2 = db.create_region_if_needed("region2")?;
 
-    // write data
-    db.write_all_to_region(&region1, &[0, 1, 2, 3, 4])?;
-    db.write_all_to_region(&region2, &[5, 6, 7, 8, 9])?;
+    // write data (buffered in mmap, not yet durable)
+    region1.write(&[0, 1, 2, 3, 4])?;
+    region2.write_at(&[5, 6, 7, 8, 9], 0)?;
 
-    // read via mmap
-    let data = &db.mmap()[0..5];
-
-    // flush to disk
+    // flush to disk for durability
     db.flush()?;
+    
+    // read via mmap (data is immediately visible)
+    let reader = region1.create_reader();
+    let data = reader.read_all();
 
-    // remove region (space becomes reusable hole)
-    db.remove_region(region1)?;
+    // remove region (space becomes reusable hole after flush)
+    region1.remove()?;
 
-    db.flush()?; // Should be `db.compact()?` but doesn't work with with doc-tests
+    // punch holes in the file
+    db.compact()?; // doesn't work with doc-tests
 
     Ok(())
 }
@@ -64,20 +66,20 @@ Operations become durable after calling `flush()`. Before flush, writes are visi
 **Design:**
 - **4KB metadata entries**: Atomic page-sized writes per region with embedded IDs
 - **Single metadata file**: Rebuilt into HashMap on startup for O(1) lookups
-- **No WAL**: Simple design with proper write ordering for consistency
-- **Dirty tracking**: Metadata changes tracked in-memory, batch-written on flush
+- **No WAL**: Simple design with lazy flushing for consistency
+- **Lazy writes**: Both data and metadata are written to mmaps immediately but not synced until flush
 
-**Write ordering:**
-1. Data writes update mmap (in-memory)
-2. Metadata changes tracked with dirty flag (in-memory)
-3. Holes from moves/removes marked as pending (not reusable until flush)
-4. `flush()` syncs mmap first, then writes dirty metadata, then syncs metadata file, then promotes pending holes
-5. Ensures metadata never points to unflushed data and old locations aren't reused prematurely (crash-consistent COW)
+**Write model:**
+1. **Data writes** modify the data mmap immediately (visible but not durable)
+2. **Metadata changes** modify the metadata mmap immediately (visible but not durable)
+3. **Holes from moves/removes** are marked as pending (not reusable until flush)
+4. **`flush()`** syncs both mmaps (data → metadata → file size), then promotes pending holes
+5. Ensures metadata never points to unflushed data and old locations aren't reused prematurely
 
 **Region operations:**
 - Expand in-place when possible (last region or adjacent hole)
 - Copy-on-write to new location when expansion needed
-- All changes stay in memory until `flush()` makes them durable
+- All changes visible immediately in mmaps, durable after `flush()`
 
 **Recovery:**
 On open, reads all metadata entries and rebuilds in-memory structures. Deleted regions are identified by zeroed metadata.
