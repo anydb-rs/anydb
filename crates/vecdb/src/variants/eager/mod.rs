@@ -115,7 +115,7 @@ where
 
             for i in from..to {
                 let (idx, val) = t(I::from(i));
-                this.forced_push(idx, val)?;
+                this.truncate_push(idx, val)?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -180,7 +180,7 @@ where
 
             for (a, b) in other.iter().enumerate().skip(skip) {
                 let (i, v) = t((A::from(a), b, this));
-                this.forced_push(i, v)?;
+                this.truncate_push(i, v)?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -215,7 +215,7 @@ where
 
             for (a, b) in other1.iter().enumerate().skip(skip) {
                 let (i, v) = t((A::from(a), b, iter2.next().unwrap(), this));
-                this.forced_push(i, v)?;
+                this.truncate_push(i, v)?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -263,7 +263,7 @@ where
                     iter3.next().unwrap(),
                     this,
                 ));
-                this.forced_push(i, v)?;
+                this.truncate_push(i, v)?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -317,7 +317,7 @@ where
                     iter4.next().unwrap(),
                     this,
                 ));
-                this.forced_push(i, v)?;
+                this.truncate_push(i, v)?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -397,7 +397,7 @@ where
     where
         T2: VecValue,
         T3: VecValue,
-        T: From<T2> + Mul<usize, Output = T> + Div<T3, Output = T> + CheckedSub<usize>,
+        T: From<T2> + Div<T3, Output = T>,
     {
         self.compute_transform2(
             max_from,
@@ -453,6 +453,8 @@ where
         )
     }
 
+    /// Computes the all time high of a source.
+    /// This version is more optimized than `compute_max` with a window set to `usize::MAX`.
     pub fn compute_all_time_high<T2>(
         &mut self,
         max_from: I,
@@ -466,6 +468,8 @@ where
         self.compute_all_time_extreme(max_from, source, exit, |prev, v| prev.max(v), false)
     }
 
+    /// Computes the all time low of a source.
+    /// This version is more optimized than `compute_min` with a window set to `usize::MAX`.
     pub fn compute_all_time_low<T2>(
         &mut self,
         max_from: I,
@@ -479,6 +483,8 @@ where
         self.compute_all_time_low_(max_from, source, exit, false)
     }
 
+    /// Computes the all time low of a source.
+    /// This version is more optimized than `compute_min` with a window set to `usize::MAX`.
     pub fn compute_all_time_low_<T2>(
         &mut self,
         max_from: I,
@@ -509,7 +515,13 @@ where
     where
         T2: VecValue,
         T3: VecValue,
-        T: From<T2> + From<T3> + Mul<usize, Output = T> + Div<T, Output = T> + CheckedSub<usize>,
+        T: From<T2>
+            + From<T3>
+            + From<u8>
+            + Mul<T, Output = T>
+            + Div<T, Output = T>
+            + Sub<T, Output = T>
+            + Copy,
     {
         self.compute_percentage_(max_from, divided, divider, exit, false)
     }
@@ -524,7 +536,13 @@ where
     where
         T2: VecValue,
         T3: VecValue,
-        T: From<T2> + From<T3> + Mul<usize, Output = T> + Div<T, Output = T> + CheckedSub<usize>,
+        T: From<T2>
+            + From<T3>
+            + From<u8>
+            + Mul<T, Output = T>
+            + Div<T, Output = T>
+            + Sub<T, Output = T>
+            + Copy,
     {
         self.compute_percentage_(max_from, divided, divider, exit, true)
     }
@@ -540,20 +558,26 @@ where
     where
         T2: VecValue,
         T3: VecValue,
-        T: From<T2> + From<T3> + Mul<usize, Output = T> + Div<T, Output = T> + CheckedSub<usize>,
+        T: From<T2>
+            + From<T3>
+            + From<u8>
+            + Mul<T, Output = T>
+            + Div<T, Output = T>
+            + Sub<T, Output = T>
+            + Copy,
     {
-        let multiplier = 100;
+        let multiplier = T::from(100u8);
         self.compute_transform2(
             max_from,
             divided,
             divider,
-            |(i, v1, v2, ..)| {
+            move |(i, v1, v2, ..)| {
                 let divided = T::from(v1);
                 let divider = T::from(v2);
                 let v = divided * multiplier;
                 let mut v = v / divider;
                 if as_difference {
-                    v = v.checked_sub(multiplier).unwrap();
+                    v = v - multiplier;
                 }
                 (i, v)
             },
@@ -590,7 +614,7 @@ where
                     .get_pushed_or_read_once(i)?
                     .is_none_or(|old_v| old_v > v)
                 {
-                    this.forced_push(i, v)?;
+                    this.truncate_push(i, v)?;
                 }
                 prev_i.replace(i);
 
@@ -670,7 +694,7 @@ where
 
                 let range = first_index.to_usize()..end;
                 let count = range.into_iter().filter(|i| filter(T2::from(*i))).count();
-                this.forced_push_at(i, T::from(T2::from(count)))?;
+                this.truncate_push_at(i, T::from(T2::from(count)))?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -705,7 +729,7 @@ where
             let mut other_to_self_iter = other_to_self.iter();
 
             for (i, other) in self_to_other.iter().enumerate().skip(skip) {
-                this.forced_push_at(
+                this.truncate_push_at(
                     i,
                     T::from(other_to_self_iter.get_unwrap(other).to_usize() == i),
                 )?;
@@ -770,7 +794,7 @@ where
                 }
 
                 let v = deque.front().unwrap().1.clone();
-                this.forced_push_at(i, T::from(v))?;
+                this.truncate_push_at(i, T::from(v))?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -867,7 +891,7 @@ where
                 }
 
                 prev.replace(sum);
-                this.forced_push_at(i, sum)?;
+                this.truncate_push_at(i, sum)?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -887,7 +911,7 @@ where
         exit: &Exit,
     ) -> Result<()>
     where
-        T: From<usize> + SaturatingAdd,
+        T: From<u8> + SaturatingAdd,
         T2: VecIndex + VecValue,
         T3: VecValue,
         usize: From<T3>,
@@ -912,7 +936,7 @@ where
         exit: &Exit,
     ) -> Result<()>
     where
-        T: From<usize> + SaturatingAdd,
+        T: From<u8> + SaturatingAdd,
         T2: VecIndex + VecValue,
         T3: VecValue,
         usize: From<T3>,
@@ -939,8 +963,8 @@ where
                 let sum = (&mut source_iter)
                     .take(count)
                     .filter(|v| filter(v))
-                    .fold(T::from(0_usize), |acc, val| acc.saturating_add(val));
-                this.forced_push_at(i, sum)?;
+                    .fold(T::from(0_u8), |acc, val| acc.saturating_add(val));
+                this.truncate_push_at(i, sum)?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -980,7 +1004,7 @@ where
             for i in skip..others.first().unwrap().len() {
                 let values = Box::new(others_iter.iter_mut().map(|iter| iter.next().unwrap()));
                 let result = aggregate(values);
-                this.forced_push_at(i, result)?;
+                this.truncate_push_at(i, result)?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -1037,7 +1061,7 @@ where
         exit: &Exit,
     ) -> Result<()>
     where
-        T: Add<T, Output = T> + From<T2> + Div<usize, Output = T> + From<f32>,
+        T: Add<T, Output = T> + From<T2> + From<f32>,
         T2: VecValue,
         f32: From<T> + From<T2>,
     {
@@ -1053,7 +1077,7 @@ where
         min_i: Option<I>,
     ) -> Result<()>
     where
-        T: Add<T, Output = T> + From<T2> + Div<usize, Output = T> + From<f32>,
+        T: Add<T, Output = T> + From<T2> + From<f32>,
         T2: VecValue,
         f32: From<T> + From<T2>,
     {
@@ -1114,9 +1138,9 @@ where
                     }
 
                     prev.replace(sma_result);
-                    this.forced_push_at(i, sma_result)?;
+                    this.truncate_push_at(i, sma_result)?;
                 } else {
-                    this.forced_push_at(i, T::from(f32::NAN))?;
+                    this.truncate_push_at(i, T::from(f32::NAN))?;
                 }
 
                 if this.batch_limit_reached() {
@@ -1137,7 +1161,7 @@ where
     ) -> Result<()>
     where
         T: From<T2> + From<f32>,
-        T2: VecValue + Div<usize, Output = T2> + Sum,
+        T2: VecValue + Sum,
         f32: From<T2> + From<T>,
     {
         self.compute_ema_(max_from, source, ema, exit, None)
@@ -1153,7 +1177,7 @@ where
     ) -> Result<()>
     where
         T: From<T2> + From<f32>,
-        T2: VecValue + Div<usize, Output = T2> + Sum,
+        T2: VecValue + Sum,
         f32: From<T2> + From<T>,
     {
         self.validate_computed_version_or_reset(
@@ -1199,9 +1223,9 @@ where
                     };
 
                     prev.replace(ema);
-                    this.forced_push_at(index, ema)?;
+                    this.truncate_push_at(index, ema)?;
                 } else {
-                    this.forced_push_at(index, T::from(f32::NAN))?;
+                    this.truncate_push_at(index, T::from(f32::NAN))?;
                 }
 
                 if this.batch_limit_reached() {
@@ -1237,7 +1261,7 @@ where
             for (i, current) in source.iter().enumerate().skip(skip) {
                 let previous = lookback.get_and_push(i, current, T2::default());
                 let result = transform(i, current, previous);
-                this.forced_push_at(i, result)?;
+                this.truncate_push_at(i, result)?;
 
                 if this.batch_limit_reached() {
                     break;

@@ -17,6 +17,7 @@ pub trait AnyStoredVec: AnyVec {
     /// Number of stamped change files to keep for rollback support.
     fn saved_stamped_changes(&self) -> u16;
 
+    #[doc(hidden)]
     fn write(&mut self) -> Result<()>;
 
     #[doc(hidden)]

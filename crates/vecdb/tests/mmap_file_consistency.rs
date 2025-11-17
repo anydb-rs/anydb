@@ -13,7 +13,7 @@ fn test_mmap_write_file_read_consistency() {
 
     // Write some data
     for i in 0..1000usize {
-        vec.forced_push(i, i as u64 * 100).unwrap();
+        vec.truncate_push(i, i as u64 * 100).unwrap();
     }
 
     // Flush the vec (writes to mmap)
@@ -55,7 +55,7 @@ fn test_immediate_read_after_write() {
 
         // Write batch
         for i in 0..100usize {
-            vec.forced_push(start + i, (start + i) as u64 * 100)
+            vec.truncate_push(start + i, (start + i) as u64 * 100)
                 .unwrap();
         }
 

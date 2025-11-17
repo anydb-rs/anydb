@@ -321,13 +321,13 @@ where
 
     /// Pushes a value at the given index, truncating if necessary.
     #[inline]
-    fn forced_push(&mut self, index: I, value: T) -> Result<()> {
-        self.forced_push_at(index.to_usize(), value)
+    fn truncate_push(&mut self, index: I, value: T) -> Result<()> {
+        self.truncate_push_at(index.to_usize(), value)
     }
 
     /// Pushes a value at the given usize index, truncating if necessary.
     #[inline]
-    fn forced_push_at(&mut self, index: usize, value: T) -> Result<()> {
+    fn truncate_push_at(&mut self, index: usize, value: T) -> Result<()> {
         match self.len().cmp(&index) {
             Ordering::Less => {
                 return Err(Error::IndexTooHigh);

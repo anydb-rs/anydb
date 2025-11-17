@@ -36,9 +36,9 @@ fn test_compute_sum_of_others() -> Result<()> {
 
     // Fill with test data
     for i in 0..10 {
-        vec1.forced_push(i, (i * 10) as u64)?;
-        vec2.forced_push(i, (i * 5) as u64)?;
-        vec3.forced_push(i, i as u64)?;
+        vec1.truncate_push(i, (i * 10) as u64)?;
+        vec2.truncate_push(i, (i * 5) as u64)?;
+        vec3.truncate_push(i, i as u64)?;
     }
     vec1.safe_flush(&exit)?;
     vec2.safe_flush(&exit)?;
@@ -78,9 +78,9 @@ fn test_compute_min_of_others() -> Result<()> {
 
     // Test data: [50, 51, 52...], [10, 11, 12...], [100, 101, 102...]
     for i in 0..10 {
-        vec1.forced_push(i, (50 + i) as u64)?;
-        vec2.forced_push(i, (10 + i) as u64)?;
-        vec3.forced_push(i, (100 + i) as u64)?;
+        vec1.truncate_push(i, (50 + i) as u64)?;
+        vec2.truncate_push(i, (10 + i) as u64)?;
+        vec3.truncate_push(i, (100 + i) as u64)?;
     }
     vec1.safe_flush(&exit)?;
     vec2.safe_flush(&exit)?;
@@ -118,9 +118,9 @@ fn test_compute_max_of_others() -> Result<()> {
         EagerVec::forced_import_compressed(&db, "vec3", Version::ONE)?;
 
     for i in 0..10 {
-        vec1.forced_push(i, (50 + i) as u64)?;
-        vec2.forced_push(i, (10 + i) as u64)?;
-        vec3.forced_push(i, (100 + i) as u64)?;
+        vec1.truncate_push(i, (50 + i) as u64)?;
+        vec2.truncate_push(i, (10 + i) as u64)?;
+        vec3.truncate_push(i, (100 + i) as u64)?;
     }
     dbg!(vec1.collect(), vec1.region());
     dbg!(vec2.collect(), vec2.region());
@@ -161,7 +161,7 @@ fn test_compute_previous_value() -> Result<()> {
 
     // Fill with test data: [10, 20, 30, 40, 50]
     for i in 0..5 {
-        source.forced_push(i, ((i + 1) * 10) as u16)?;
+        source.truncate_push(i, ((i + 1) * 10) as u16)?;
     }
     source.safe_flush(&exit)?;
 
@@ -207,7 +207,7 @@ fn test_compute_change() -> Result<()> {
     // Fill with test data: [10, 20, 25, 30, 50]
     let values = [10, 20, 25, 30, 50];
     for (i, &v) in values.iter().enumerate() {
-        source.forced_push(i, v)?;
+        source.truncate_push(i, v)?;
     }
     source.safe_flush(&exit)?;
 
@@ -246,7 +246,7 @@ fn test_compute_percentage_change() -> Result<()> {
     // Fill with test data: [100, 110, 121, 133]
     let values = [100, 110, 121, 133];
     for (i, &v) in values.iter().enumerate() {
-        source.forced_push(i, v)?;
+        source.truncate_push(i, v)?;
     }
     source.safe_flush(&exit)?;
 
@@ -287,7 +287,7 @@ fn test_compute_sliding_window_max() -> Result<()> {
     // Test data: [3, 1, 4, 1, 5, 9, 2, 6]
     let values = [3, 1, 4, 1, 5, 9, 2, 6];
     for (i, &v) in values.iter().enumerate() {
-        source.forced_push(i, v)?;
+        source.truncate_push(i, v)?;
     }
     source.safe_flush(&exit)?;
 
@@ -327,7 +327,7 @@ fn test_compute_sliding_window_min() -> Result<()> {
     // Test data: [3, 1, 4, 1, 5, 9, 2, 6]
     let values = [3, 1, 4, 1, 5, 9, 2, 6];
     for (i, &v) in values.iter().enumerate() {
-        source.forced_push(i, v)?;
+        source.truncate_push(i, v)?;
     }
     source.safe_flush(&exit)?;
 
@@ -367,7 +367,7 @@ fn test_compute_all_time_high() -> Result<()> {
     // Test data: [10, 15, 12, 20, 18, 25, 22]
     let values = [10, 15, 12, 20, 18, 25, 22];
     for (i, &v) in values.iter().enumerate() {
-        source.forced_push(i, v)?;
+        source.truncate_push(i, v)?;
     }
     source.safe_flush(&exit)?;
 
@@ -401,7 +401,7 @@ fn test_compute_all_time_low() -> Result<()> {
     // Test data: [10, 5, 12, 3, 18, 2, 22]
     let values = [10, 5, 12, 3, 18, 2, 22];
     for (i, &v) in values.iter().enumerate() {
-        source.forced_push(i, v)?;
+        source.truncate_push(i, v)?;
     }
     source.safe_flush(&exit)?;
 
@@ -437,7 +437,7 @@ fn test_compute_cagr() -> Result<()> {
     // CAGR for 100% over 2 years = 41.42%
     // CAGR for 100% over 3 years = 25.99%
     for i in 0..5 {
-        percentage_returns.forced_push(i, 100.0)?; // 100% total return
+        percentage_returns.truncate_push(i, 100.0)?; // 100% total return
     }
     percentage_returns.safe_flush(&exit)?;
 
@@ -479,9 +479,9 @@ fn test_compute_zscore() -> Result<()> {
     // SD:     [2.0,  2.0,  2.0,  2.0]
     // Z-score = (value - mean) / sd
     for i in 0..4 {
-        source.forced_push(i, 10.0 + i as f32 * 2.0)?;
-        sma.forced_push(i, 10.0)?;
-        sd.forced_push(i, 2.0)?;
+        source.truncate_push(i, 10.0 + i as f32 * 2.0)?;
+        sma.truncate_push(i, 10.0)?;
+        sd.truncate_push(i, 2.0)?;
     }
     source.safe_flush(&exit)?;
     sma.safe_flush(&exit)?;
@@ -525,7 +525,7 @@ fn test_compute_functions_with_resume() -> Result<()> {
 
     // First batch: compute for first 5 elements
     for i in 0..5 {
-        source.forced_push(i, (i * 10) as u32)?;
+        source.truncate_push(i, (i * 10) as u32)?;
     }
     source.safe_flush(&exit)?;
 
@@ -541,7 +541,7 @@ fn test_compute_functions_with_resume() -> Result<()> {
 
     // Add more data
     for i in 5..10 {
-        source.forced_push(i, (i * 10) as u32)?;
+        source.truncate_push(i, (i * 10) as u32)?;
     }
     source.safe_flush(&exit)?;
 
@@ -570,8 +570,8 @@ fn test_compute_add() -> Result<()> {
         EagerVec::forced_import_compressed(&db, "vec2", Version::ONE)?;
 
     for i in 0..10 {
-        vec1.forced_push(i, (i * 10) as u64)?;
-        vec2.forced_push(i, (i * 5) as u64)?;
+        vec1.truncate_push(i, (i * 10) as u64)?;
+        vec2.truncate_push(i, (i * 5) as u64)?;
     }
     vec1.safe_flush(&exit)?;
     vec2.safe_flush(&exit)?;
@@ -601,8 +601,8 @@ fn test_compute_subtract() -> Result<()> {
         EagerVec::forced_import_compressed(&db, "vec2", Version::ONE)?;
 
     for i in 0..10 {
-        vec1.forced_push(i, (100 + i * 10) as u64)?;
-        vec2.forced_push(i, (i * 5) as u64)?;
+        vec1.truncate_push(i, (100 + i * 10) as u64)?;
+        vec2.truncate_push(i, (i * 5) as u64)?;
     }
     vec1.safe_flush(&exit)?;
     vec2.safe_flush(&exit)?;
@@ -632,19 +632,19 @@ fn test_compute_multiply() -> Result<()> {
         EagerVec::forced_import_compressed(&db, "vec2", Version::ONE)?;
 
     for i in 0..10 {
-        vec1.forced_push(i, (i + 1) as u32)?;
-        vec2.forced_push(i, (i + 2) as u32)?;
+        vec1.truncate_push(i, (i + 1) as u32)?;
+        vec2.truncate_push(i, (i + 2) as u32)?;
     }
     vec1.safe_flush(&exit)?;
     vec2.safe_flush(&exit)?;
 
-    let mut result: EagerVec<usize, u64> =
+    let mut result: EagerVec<usize, u32> =
         EagerVec::forced_import_compressed(&db, "result", Version::ONE)?;
     result.compute_multiply(0, &vec1, &vec2, &exit)?;
     result.safe_flush(&exit)?;
 
     for i in 0..10 {
-        let expected = ((i + 1) * (i + 2)) as u64;
+        let expected = ((i + 1) * (i + 2)) as u32;
         let actual = result.read_at_unwrap_once(i);
         assert_eq!(actual, expected);
     }
@@ -663,8 +663,8 @@ fn test_compute_divide() -> Result<()> {
         EagerVec::forced_import_compressed(&db, "vec2", Version::ONE)?;
 
     for i in 0..10 {
-        vec1.forced_push(i, (100.0 + i as f32 * 10.0))?;
-        vec2.forced_push(i, (i as f32 + 1.0))?;
+        vec1.truncate_push(i, 100.0 + i as f32 * 10.0)?;
+        vec2.truncate_push(i, i as f32 + 1.0)?;
     }
     vec1.safe_flush(&exit)?;
     vec2.safe_flush(&exit)?;
@@ -694,13 +694,13 @@ fn test_compute_max() -> Result<()> {
     // Create data with a peak in the middle
     for i in 0..10 {
         let value = if i < 5 { i * 10 } else { (9 - i) * 10 };
-        source.forced_push(i, value as u64)?;
+        source.truncate_push(i, value as u64)?;
     }
     source.safe_flush(&exit)?;
 
     let mut result: EagerVec<usize, u64> =
         EagerVec::forced_import_compressed(&db, "result", Version::ONE)?;
-    result.compute_max(0, &source, &exit)?;
+    result.compute_max(0, &source, usize::MAX, &exit)?;
     result.safe_flush(&exit)?;
 
     // Verify max is accumulated correctly
@@ -732,13 +732,13 @@ fn test_compute_min() -> Result<()> {
         } else {
             50 + (i - 5) * 10
         };
-        source.forced_push(i, value as u64)?;
+        source.truncate_push(i, value as u64)?;
     }
     source.safe_flush(&exit)?;
 
     let mut result: EagerVec<usize, u64> =
         EagerVec::forced_import_compressed(&db, "result", Version::ONE)?;
-    result.compute_min(0, &source, &exit)?;
+    result.compute_min(0, &source, usize::MAX, &exit)?;
     result.safe_flush(&exit)?;
 
     // Verify min is accumulated correctly
@@ -764,13 +764,13 @@ fn test_compute_sum() -> Result<()> {
         EagerVec::forced_import_compressed(&db, "source", Version::ONE)?;
 
     for i in 0..10 {
-        source.forced_push(i, (i + 1) as u64)?;
+        source.truncate_push(i, (i + 1) as u64)?;
     }
     source.safe_flush(&exit)?;
 
     let mut result: EagerVec<usize, u64> =
         EagerVec::forced_import_compressed(&db, "result", Version::ONE)?;
-    result.compute_sum(0, &source, &exit)?;
+    result.compute_sum(0, &source, usize::MAX, &exit)?;
     result.safe_flush(&exit)?;
 
     // Verify cumulative sum
@@ -789,11 +789,11 @@ fn test_compute_sma() -> Result<()> {
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut source: EagerVec<usize, u64> =
+    let mut source: EagerVec<usize, u16> =
         EagerVec::forced_import_compressed(&db, "source", Version::ONE)?;
 
     for i in 0..10 {
-        source.forced_push(i, (i * 10) as u64)?;
+        source.truncate_push(i, (i * 10) as u16)?;
     }
     source.safe_flush(&exit)?;
 
@@ -803,8 +803,8 @@ fn test_compute_sma() -> Result<()> {
     result.safe_flush(&exit)?;
 
     // Verify SMA with window of 3
-    for i in 0..10 {
-        let actual = result.read_at_unwrap_once(i);
+    for i in 0..10_u64 {
+        let actual = result.read_at_unwrap_once(i as usize);
         if i < 2 {
             // Not enough data for full window
             let sum: u64 = (0..=i).map(|j| j * 10).sum();
@@ -826,11 +826,11 @@ fn test_compute_ema() -> Result<()> {
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut source: EagerVec<usize, u64> =
+    let mut source: EagerVec<usize, u16> =
         EagerVec::forced_import_compressed(&db, "source", Version::ONE)?;
 
     for i in 0..10 {
-        source.forced_push(i, 100)?; // Constant value for easier verification
+        source.truncate_push(i, 100)?; // Constant value for easier verification
     }
     source.safe_flush(&exit)?;
 
@@ -854,27 +854,32 @@ fn test_compute_percentage() -> Result<()> {
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut numerator: EagerVec<usize, u32> =
+    let mut numerator: EagerVec<usize, u16> =
         EagerVec::forced_import_compressed(&db, "numerator", Version::ONE)?;
-    let mut denominator: EagerVec<usize, u32> =
+    let mut denominator: EagerVec<usize, u16> =
         EagerVec::forced_import_compressed(&db, "denominator", Version::ONE)?;
 
     for i in 0..10 {
-        numerator.forced_push(i, (i + 1) as u32)?;
-        denominator.forced_push(i, 10)?;
+        numerator.truncate_push(i, (i + 1) as u16)?;
+        denominator.truncate_push(i, 10)?;
     }
     numerator.safe_flush(&exit)?;
     denominator.safe_flush(&exit)?;
 
-    let mut result: EagerVec<usize, u64> =
+    let mut result: EagerVec<usize, f32> =
         EagerVec::forced_import_compressed(&db, "result", Version::ONE)?;
     result.compute_percentage(0, &numerator, &denominator, &exit)?;
     result.safe_flush(&exit)?;
 
     for i in 0..10 {
-        let expected = ((i + 1) as u64 * 100) / 10;
+        let expected = ((i + 1) as f32 / 10.0) * 100.0;
         let actual = result.read_at_unwrap_once(i);
-        assert_eq!(actual, expected, "Percentage at index {}", i);
+        assert_f32_eq(
+            actual,
+            expected,
+            0.001,
+            &format!("Percentage at index {}", i),
+        );
     }
 
     Ok(())
@@ -885,27 +890,32 @@ fn test_compute_percentage_difference() -> Result<()> {
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut vec1: EagerVec<usize, u32> =
+    let mut vec1: EagerVec<usize, u16> =
         EagerVec::forced_import_compressed(&db, "vec1", Version::ONE)?;
-    let mut vec2: EagerVec<usize, u32> =
+    let mut vec2: EagerVec<usize, u16> =
         EagerVec::forced_import_compressed(&db, "vec2", Version::ONE)?;
 
     for i in 0..10 {
-        vec1.forced_push(i, (100 + i * 10) as u32)?;
-        vec2.forced_push(i, 100)?;
+        vec1.truncate_push(i, (100 + i * 10) as u16)?;
+        vec2.truncate_push(i, 100)?;
     }
     vec1.safe_flush(&exit)?;
     vec2.safe_flush(&exit)?;
 
-    let mut result: EagerVec<usize, u64> =
+    let mut result: EagerVec<usize, f32> =
         EagerVec::forced_import_compressed(&db, "result", Version::ONE)?;
     result.compute_percentage_difference(0, &vec1, &vec2, &exit)?;
     result.safe_flush(&exit)?;
 
     for i in 0..10 {
-        let expected = ((100 + i * 10) as u64 - 100) * 100 / 100;
+        let expected = (((100 + i * 10) as f32 - 100.0) / 100.0) * 100.0;
         let actual = result.read_at_unwrap_once(i);
-        assert_eq!(actual, expected, "Percentage difference at index {}", i);
+        assert_f32_eq(
+            actual,
+            expected,
+            0.001,
+            &format!("Percentage difference at index {}", i),
+        );
     }
 
     Ok(())
