@@ -9,7 +9,7 @@ use log::info;
 use rawdb::Reader;
 use zerocopy::FromBytes;
 
-use crate::{AnyStoredVec, Error, Exit, Result, SEPARATOR, Stamp, Version, likely};
+use crate::{AnyStoredVec, Error, Result, SEPARATOR, Stamp, Version, likely};
 
 const ONE_KIB: usize = 1024;
 const ONE_MIB: usize = ONE_KIB * ONE_KIB;
@@ -342,14 +342,10 @@ where
         Ok(())
     }
 
-    /// Flushes if the pushed cache exceeds MAX_CACHE_SIZE.
+    /// Returns true if the pushed cache has reached the batch limit (~1GiB).
     #[inline]
-    fn flush_if_needed(&mut self, exit: &Exit) -> Result<()> {
-        let pushed_bytes = self.pushed_len() * Self::SIZE_OF_T;
-        if pushed_bytes >= MAX_CACHE_SIZE {
-            self.safe_flush(exit)?;
-        }
-        Ok(())
+    fn batch_limit_reached(&self) -> bool {
+        self.pushed_len() * Self::SIZE_OF_T >= MAX_CACHE_SIZE
     }
 
     // ============================================================================

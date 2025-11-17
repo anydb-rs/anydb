@@ -21,6 +21,7 @@ pub struct CleanCompressedVecIterator<'a, I, T> {
     pub(crate) _vec: &'a CompressedVec<I, T>,
     file: File,         // Dedicated file handle for sequential reads
     file_position: u64, // Current position in the file
+    region_start: u64,  // Absolute start offset of this region in the database file
     // Compressed data buffer (to reduce syscalls)
     buffer: Vec<u8>,
     buffer_len: usize,
@@ -46,8 +47,9 @@ where
     const NO_PAGE: usize = usize::MAX;
 
     pub fn new(vec: &'a CompressedVec<I, T>) -> Result<Self> {
-        let file = vec.inner.region().open_db_read_only_file()?;
         let region_lock = vec.inner.region().meta();
+        let region_start = region_lock.start() as u64;
+        let file = vec.inner.region().open_db_read_only_file()?;
 
         let pages = vec.pages.read();
         let stored_len = vec.stored_len();
@@ -56,6 +58,7 @@ where
             _vec: vec,
             file,
             file_position: 0,
+            region_start,
             buffer: vec![0; BUFFER_SIZE],
             buffer_len: 0,
             buffer_page_start: 0,
@@ -126,15 +129,17 @@ where
             return None;
         }
 
-        if self.file_position != start_offset {
-            self.file_position = start_offset;
-            self.file.seek(SeekFrom::Start(start_offset)).unwrap();
+        let absolute_offset = self.region_start + start_offset;
+        if self.file_position != absolute_offset {
+            self.file_position = absolute_offset;
+            self.file.seek(SeekFrom::Start(absolute_offset)).unwrap();
         }
 
         self.file
             .read_exact(&mut self.buffer[..total_bytes])
             .unwrap();
         self.buffer_len = total_bytes;
+        self.file_position += total_bytes as u64;
 
         Some(())
     }

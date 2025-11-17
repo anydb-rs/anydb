@@ -53,7 +53,7 @@ fn main() -> Result<()> {
     region1.remove()?;
 
     // punch holes in the file
-    db.compact()?; // doesn't work with doc-tests
+    // db.compact()?; // doesn't work with doc-tests
 
     Ok(())
 }
