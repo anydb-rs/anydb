@@ -14,8 +14,8 @@ build = "build.rs"
 [features]
 derive = ["vecdb_derive"]
 serde = ["dep:serde"]
-serde_json = ["dep:serde", "dep:serde_json"]
-sonic-rs = ["dep:serde", "dep:sonic-rs"]
+serde_json = ["serde", "dep:serde_json"]
+sonic-rs = ["serde", "dep:sonic-rs"]
 
 [dependencies]
 ctrlc = { version = "3.5.1", features = ["termination"] }
