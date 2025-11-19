@@ -1,11 +1,9 @@
 use std::{fs, io, path::Path};
 
-use serde_derive::{Deserialize, Serialize};
-
 use crate::{Error, Result};
 
 /// Storage format selection for stored vectors.
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Format {
     /// Pcodec compressed storage (best for numerical data with sequential access).
     Compressed,

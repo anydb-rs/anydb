@@ -17,14 +17,20 @@ pub enum Error {
     SystemTimeError(time::SystemTimeError),
     PCO(pco::errors::PcoError),
     RawDB(rawdb::Error),
+    #[cfg(feature = "serde_json")]
     SerdeJSON(serde_json::Error),
+    #[cfg(feature = "sonic-rs")]
+    SonicRS(sonic_rs::Error),
 
     Str(&'static str),
     String(String),
 
     WrongLength,
     WrongEndian,
-    DifferentVersion { found: Version, expected: Version },
+    DifferentVersion {
+        found: Version,
+        expected: Version,
+    },
     IndexTooHigh,
     ExpectVecToHaveIndex,
     FailedKeyTryIntoUsize,
@@ -49,9 +55,17 @@ impl From<fmt::Error> for Error {
     }
 }
 
+#[cfg(feature = "serde_json")]
 impl From<serde_json::Error> for Error {
     fn from(value: serde_json::Error) -> Self {
         Self::SerdeJSON(value)
+    }
+}
+
+#[cfg(feature = "sonic-rs")]
+impl From<sonic_rs::Error> for Error {
+    fn from(value: sonic_rs::Error) -> Self {
+        Self::SonicRS(value)
     }
 }
 
@@ -90,7 +104,10 @@ impl fmt::Display for Error {
         match self {
             Error::IO(error) => Display::fmt(&error, f),
             Error::Format(error) => Display::fmt(&error, f),
+            #[cfg(feature = "serde_json")]
             Error::SerdeJSON(error) => Display::fmt(&error, f),
+            #[cfg(feature = "sonic-rs")]
+            Error::SonicRS(error) => Display::fmt(&error, f),
             Error::RawDB(error) => Display::fmt(&error, f),
             Error::TryLockError(_) => write!(
                 f,

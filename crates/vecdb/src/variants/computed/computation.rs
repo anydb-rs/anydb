@@ -1,7 +1,5 @@
-use serde_derive::{Deserialize, Serialize};
-
 /// Computation strategy for derived vectors.
-#[derive(Default, Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy, Serialize, Deserialize)]
+#[derive(Default, Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy)]
 pub enum Computation {
     /// Values computed once, stored on disk, and incrementally updated.
     Eager,

@@ -2,9 +2,9 @@
 
 - __CRATES__
   - _RAWDB_
-    - move example to tests
   - _VECDB_
     - make serde an optional feature
-    - move example to tests
-    - add support for other compression algos such as lz4 and zstd
+    - vecs:
+      - add lz4 option
+      - add raw option (rename raw to zerocopy (and then make dep optional))
 - __DOCS__
