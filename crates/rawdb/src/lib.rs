@@ -192,30 +192,10 @@ impl Database {
     /// Copy data within the mmap, chunked to avoid excessive memory pressure
     pub(crate) fn copy(&self, src: usize, dst: usize, len: usize) {
         const CHUNK_SIZE: usize = GiB; // 1GB chunks
-
-        // Validate bounds
-        let mmap = self.mmap();
-        if src + len > mmap.len() || dst + len > mmap.len() {
-            unreachable!(
-                "Copy out of bounds: src={}, dst={}, len={}, mmap.len()={}",
-                src,
-                dst,
-                len,
-                mmap.len()
-            );
-        }
-        drop(mmap);
-
         for offset in (0..len).step_by(CHUNK_SIZE) {
-            let chunk_len = (len - offset).min(CHUNK_SIZE);
-
-            // Copy to temp buffer to avoid aliasing mutable/immutable references
-            let chunk: Vec<u8> = {
-                let mmap = self.mmap();
-                mmap[src + offset..src + offset + chunk_len].to_vec()
-            };
-
-            self.write(dst + offset, &chunk);
+            let start = src + offset;
+            let end = start + (len - offset).min(CHUNK_SIZE);
+            self.write(dst + offset, &self.mmap()[start..end]);
         }
     }
 
