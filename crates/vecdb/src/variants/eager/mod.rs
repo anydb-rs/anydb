@@ -79,16 +79,12 @@ where
         F: FnMut(&mut Self) -> Result<()>,
     {
         loop {
-            let len_before = self.len();
             f(self)?;
-
-            // Check if we made progress
-            if self.len() == len_before {
-                break; // No progress, computation is complete
-            }
-
-            // Flush between batches
+            let batch_limit_reached = self.batch_limit_reached();
             self.safe_flush(exit)?;
+            if !batch_limit_reached {
+                break;
+            }
         }
 
         Ok(())
@@ -108,7 +104,7 @@ where
         self.validate_computed_version_or_reset(Version::ZERO + self.inner_version() + version)?;
 
         self.repeat_until_complete(exit, |this| {
-            let from = this.len().max(max_from.to_usize());
+            let from = this.len().min(max_from.to_usize());
             if from >= to {
                 return Ok(());
             }
@@ -140,15 +136,15 @@ where
         self.compute_to(max_from, other.len(), other.version(), t, exit)
     }
 
-    pub fn compute_from_index<T2>(
+    pub fn compute_from_index<A>(
         &mut self,
         max_from: I,
-        other: &impl IterableVec<I, T2>,
+        other: &impl IterableVec<I, A>,
         exit: &Exit,
     ) -> Result<()>
     where
         T: From<I>,
-        T2: VecValue,
+        A: VecValue,
     {
         self.compute_to(
             max_from,
@@ -159,27 +155,27 @@ where
         )
     }
 
-    pub fn compute_transform<A, B, F>(
+    pub fn compute_transform<A, F>(
         &mut self,
-        max_from: A,
-        other: &impl IterableVec<A, B>,
+        max_from: I,
+        other: &impl IterableVec<I, A>,
         mut t: F,
         exit: &Exit,
     ) -> Result<()>
     where
-        A: VecIndex,
-        B: VecValue,
-        F: FnMut((A, B, &Self)) -> (I, T),
+        A: VecValue,
+        F: FnMut((I, A, &Self)) -> (I, T),
     {
         self.validate_computed_version_or_reset(
             Version::ZERO + self.inner_version() + other.version(),
         )?;
 
         self.repeat_until_complete(exit, |this| {
-            let skip = this.len().max(max_from.to_usize());
+            let skip = this.len().min(max_from.to_usize());
+            dbg!(this.len(), max_from.to_usize(), skip);
 
-            for (a, b) in other.iter().enumerate().skip(skip) {
-                let (i, v) = t((A::from(a), b, this));
+            for (i, b) in other.iter().enumerate().skip(skip) {
+                let (i, v) = t((I::from(i), b, this));
                 this.truncate_push(i, v)?;
 
                 if this.batch_limit_reached() {
@@ -191,30 +187,29 @@ where
         })
     }
 
-    pub fn compute_transform2<A, B, C, F>(
+    pub fn compute_transform2<A, B, F>(
         &mut self,
-        max_from: A,
-        other1: &impl IterableVec<A, B>,
-        other2: &impl IterableVec<A, C>,
+        max_from: I,
+        other1: &impl IterableVec<I, A>,
+        other2: &impl IterableVec<I, B>,
         mut t: F,
         exit: &Exit,
     ) -> Result<()>
     where
-        A: VecIndex,
+        A: VecValue,
         B: VecValue,
-        C: VecValue,
-        F: FnMut((A, B, C, &Self)) -> (I, T),
+        F: FnMut((I, A, B, &Self)) -> (I, T),
     {
         self.validate_computed_version_or_reset(
             Version::ZERO + self.inner_version() + other1.version() + other2.version(),
         )?;
 
         self.repeat_until_complete(exit, |this| {
-            let skip = this.len().max(max_from.to_usize());
+            let skip = this.len().min(max_from.to_usize());
             let mut iter2 = other2.iter().skip(skip);
 
-            for (a, b) in other1.iter().enumerate().skip(skip) {
-                let (i, v) = t((A::from(a), b, iter2.next().unwrap(), this));
+            for (i, b) in other1.iter().enumerate().skip(skip) {
+                let (i, v) = t((I::from(i), b, iter2.next().unwrap(), this));
                 this.truncate_push(i, v)?;
 
                 if this.batch_limit_reached() {
@@ -226,21 +221,20 @@ where
         })
     }
 
-    pub fn compute_transform3<A, B, C, D, F>(
+    pub fn compute_transform3<A, B, C, F>(
         &mut self,
-        max_from: A,
-        other1: &impl IterableVec<A, B>,
-        other2: &impl IterableVec<A, C>,
-        other3: &impl IterableVec<A, D>,
+        max_from: I,
+        other1: &impl IterableVec<I, A>,
+        other2: &impl IterableVec<I, B>,
+        other3: &impl IterableVec<I, C>,
         mut t: F,
         exit: &Exit,
     ) -> Result<()>
     where
-        A: VecIndex,
+        A: VecValue,
         B: VecValue,
         C: VecValue,
-        D: VecValue,
-        F: FnMut((A, B, C, D, &Self)) -> (I, T),
+        F: FnMut((I, A, B, C, &Self)) -> (I, T),
     {
         self.validate_computed_version_or_reset(
             Version::ZERO
@@ -251,13 +245,13 @@ where
         )?;
 
         self.repeat_until_complete(exit, |this| {
-            let skip = this.len().max(max_from.to_usize());
+            let skip = this.len().min(max_from.to_usize());
             let mut iter2 = other2.iter().skip(skip);
             let mut iter3 = other3.iter().skip(skip);
 
-            for (a, b) in other1.iter().enumerate().skip(skip) {
+            for (i, b) in other1.iter().enumerate().skip(skip) {
                 let (i, v) = t((
-                    A::from(a),
+                    I::from(i),
                     b,
                     iter2.next().unwrap(),
                     iter3.next().unwrap(),
@@ -275,23 +269,22 @@ where
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn compute_transform4<A, B, C, D, E, F>(
+    pub fn compute_transform4<A, B, C, D, F>(
         &mut self,
-        max_from: A,
-        other1: &impl IterableVec<A, B>,
-        other2: &impl IterableVec<A, C>,
-        other3: &impl IterableVec<A, D>,
-        other4: &impl IterableVec<A, E>,
+        max_from: I,
+        other1: &impl IterableVec<I, A>,
+        other2: &impl IterableVec<I, B>,
+        other3: &impl IterableVec<I, C>,
+        other4: &impl IterableVec<I, D>,
         mut t: F,
         exit: &Exit,
     ) -> Result<()>
     where
-        A: VecIndex,
+        A: VecValue,
         B: VecValue,
         C: VecValue,
         D: VecValue,
-        E: VecValue,
-        F: FnMut((A, B, C, D, E, &Self)) -> (I, T),
+        F: FnMut((I, A, B, C, D, &Self)) -> (I, T),
     {
         self.validate_computed_version_or_reset(
             Version::ZERO
@@ -303,14 +296,14 @@ where
         )?;
 
         self.repeat_until_complete(exit, |this| {
-            let skip = this.len().max(max_from.to_usize());
+            let skip = this.len().min(max_from.to_usize());
             let mut iter2 = other2.iter().skip(skip);
             let mut iter3 = other3.iter().skip(skip);
             let mut iter4 = other4.iter().skip(skip);
 
-            for (a, b) in other1.iter().enumerate().skip(skip) {
+            for (i, b) in other1.iter().enumerate().skip(skip) {
                 let (i, v) = t((
-                    A::from(a),
+                    I::from(i),
                     b,
                     iter2.next().unwrap(),
                     iter3.next().unwrap(),
@@ -366,17 +359,17 @@ where
         )
     }
 
-    pub fn compute_multiply<T2, T3>(
+    pub fn compute_multiply<A, B>(
         &mut self,
         max_from: I,
-        multiplied: &impl IterableVec<I, T2>,
-        multiplier: &impl IterableVec<I, T3>,
+        multiplied: &impl IterableVec<I, A>,
+        multiplier: &impl IterableVec<I, B>,
         exit: &Exit,
     ) -> Result<()>
     where
-        T2: VecValue,
-        T3: VecValue,
-        T: From<T2> + Mul<T3, Output = T>,
+        A: VecValue,
+        B: VecValue,
+        T: From<A> + Mul<B, Output = T>,
     {
         self.compute_transform2(
             max_from,
@@ -387,17 +380,17 @@ where
         )
     }
 
-    pub fn compute_divide<T2, T3>(
+    pub fn compute_divide<A, B>(
         &mut self,
         max_from: I,
-        divided: &impl IterableVec<I, T2>,
-        divider: &impl IterableVec<I, T3>,
+        divided: &impl IterableVec<I, A>,
+        divider: &impl IterableVec<I, B>,
         exit: &Exit,
     ) -> Result<()>
     where
-        T2: VecValue,
-        T3: VecValue,
-        T: From<T2> + Div<T3, Output = T>,
+        A: VecValue,
+        B: VecValue,
+        T: From<A> + Div<B, Output = T>,
     {
         self.compute_transform2(
             max_from,
@@ -408,19 +401,20 @@ where
         )
     }
 
-    fn compute_all_time_extreme<T2, F>(
+    fn compute_all_time_extreme<A, F>(
         &mut self,
         max_from: I,
-        source: &impl IterableVec<I, T2>,
+        source: &impl IterableVec<I, A>,
         exit: &Exit,
         compare: F,
         exclude_default: bool,
     ) -> Result<()>
     where
-        T: From<T2> + Ord + Default,
-        T2: VecValue,
+        T: From<A> + Ord + Default,
+        A: VecValue,
         F: Fn(T, T) -> T + Copy,
     {
+        dbg!(max_from);
         let mut prev = None;
         self.compute_transform(
             max_from,
@@ -455,46 +449,46 @@ where
 
     /// Computes the all time high of a source.
     /// This version is more optimized than `compute_max` with a window set to `usize::MAX`.
-    pub fn compute_all_time_high<T2>(
+    pub fn compute_all_time_high<A>(
         &mut self,
         max_from: I,
-        source: &impl IterableVec<I, T2>,
+        source: &impl IterableVec<I, A>,
         exit: &Exit,
     ) -> Result<()>
     where
-        T: From<T2> + Ord + Default,
-        T2: VecValue,
+        T: From<A> + Ord + Default,
+        A: VecValue,
     {
         self.compute_all_time_extreme(max_from, source, exit, |prev, v| prev.max(v), false)
     }
 
     /// Computes the all time low of a source.
     /// This version is more optimized than `compute_min` with a window set to `usize::MAX`.
-    pub fn compute_all_time_low<T2>(
+    pub fn compute_all_time_low<A>(
         &mut self,
         max_from: I,
-        source: &impl IterableVec<I, T2>,
+        source: &impl IterableVec<I, A>,
         exit: &Exit,
     ) -> Result<()>
     where
-        T: From<T2> + Ord + Default,
-        T2: VecValue,
+        T: From<A> + Ord + Default,
+        A: VecValue,
     {
         self.compute_all_time_low_(max_from, source, exit, false)
     }
 
     /// Computes the all time low of a source.
     /// This version is more optimized than `compute_min` with a window set to `usize::MAX`.
-    pub fn compute_all_time_low_<T2>(
+    pub fn compute_all_time_low_<A>(
         &mut self,
         max_from: I,
-        source: &impl IterableVec<I, T2>,
+        source: &impl IterableVec<I, A>,
         exit: &Exit,
         exclude_default: bool,
     ) -> Result<()>
     where
-        T: From<T2> + Ord + Default,
-        T2: VecValue,
+        T: From<A> + Ord + Default,
+        A: VecValue,
     {
         self.compute_all_time_extreme(
             max_from,
@@ -505,18 +499,18 @@ where
         )
     }
 
-    pub fn compute_percentage<T2, T3>(
+    pub fn compute_percentage<A, B>(
         &mut self,
         max_from: I,
-        divided: &impl IterableVec<I, T2>,
-        divider: &impl IterableVec<I, T3>,
+        divided: &impl IterableVec<I, A>,
+        divider: &impl IterableVec<I, B>,
         exit: &Exit,
     ) -> Result<()>
     where
-        T2: VecValue,
-        T3: VecValue,
-        T: From<T2>
-            + From<T3>
+        A: VecValue,
+        B: VecValue,
+        T: From<A>
+            + From<B>
             + From<u8>
             + Mul<T, Output = T>
             + Div<T, Output = T>
@@ -526,18 +520,18 @@ where
         self.compute_percentage_(max_from, divided, divider, exit, false)
     }
 
-    pub fn compute_percentage_difference<T2, T3>(
+    pub fn compute_percentage_difference<A, B>(
         &mut self,
         max_from: I,
-        divided: &impl IterableVec<I, T2>,
-        divider: &impl IterableVec<I, T3>,
+        divided: &impl IterableVec<I, A>,
+        divider: &impl IterableVec<I, B>,
         exit: &Exit,
     ) -> Result<()>
     where
-        T2: VecValue,
-        T3: VecValue,
-        T: From<T2>
-            + From<T3>
+        A: VecValue,
+        B: VecValue,
+        T: From<A>
+            + From<B>
             + From<u8>
             + Mul<T, Output = T>
             + Div<T, Output = T>
@@ -547,19 +541,19 @@ where
         self.compute_percentage_(max_from, divided, divider, exit, true)
     }
 
-    pub fn compute_percentage_<T2, T3>(
+    pub fn compute_percentage_<A, B>(
         &mut self,
         max_from: I,
-        divided: &impl IterableVec<I, T2>,
-        divider: &impl IterableVec<I, T3>,
+        divided: &impl IterableVec<I, A>,
+        divider: &impl IterableVec<I, B>,
         exit: &Exit,
         as_difference: bool,
     ) -> Result<()>
     where
-        T2: VecValue,
-        T3: VecValue,
-        T: From<T2>
-            + From<T3>
+        A: VecValue,
+        B: VecValue,
+        T: From<A>
+            + From<B>
             + From<u8>
             + Mul<T, Output = T>
             + Div<T, Output = T>
@@ -627,24 +621,24 @@ where
         })
     }
 
-    pub fn compute_count_from_indexes<T2, T3>(
+    pub fn compute_count_from_indexes<A, B>(
         &mut self,
         max_from: I,
-        first_indexes: &impl IterableVec<I, T2>,
-        other_to_else: &impl IterableVec<T2, T3>,
+        first_indexes: &impl IterableVec<I, A>,
+        other_to_else: &impl IterableVec<A, B>,
         exit: &Exit,
     ) -> Result<()>
     where
-        T: From<T2>,
-        T2: VecValue
+        T: From<A>,
+        A: VecValue
             + VecIndex
             + Copy
-            + Add<usize, Output = T2>
-            + CheckedSub<T2>
+            + Add<usize, Output = A>
+            + CheckedSub<A>
             + TryInto<T>
             + Default,
-        <T2 as TryInto<T>>::Error: core::error::Error + 'static,
-        T3: VecValue,
+        <A as TryInto<T>>::Error: core::error::Error + 'static,
+        B: VecValue,
     {
         self.compute_filtered_count_from_indexes(
             max_from,
@@ -655,25 +649,25 @@ where
         )
     }
 
-    pub fn compute_filtered_count_from_indexes<T2, T3>(
+    pub fn compute_filtered_count_from_indexes<A, B>(
         &mut self,
         max_from: I,
-        first_indexes: &impl IterableVec<I, T2>,
-        other_to_else: &impl IterableVec<T2, T3>,
-        mut filter: impl FnMut(T2) -> bool,
+        first_indexes: &impl IterableVec<I, A>,
+        other_to_else: &impl IterableVec<A, B>,
+        mut filter: impl FnMut(A) -> bool,
         exit: &Exit,
     ) -> Result<()>
     where
-        T: From<T2>,
-        T2: VecValue
+        T: From<A>,
+        A: VecValue
             + VecIndex
             + Copy
-            + Add<usize, Output = T2>
-            + CheckedSub<T2>
+            + Add<usize, Output = A>
+            + CheckedSub<A>
             + TryInto<T>
             + Default,
-        T3: VecValue,
-        <T2 as TryInto<T>>::Error: core::error::Error + 'static,
+        B: VecValue,
+        <A as TryInto<T>>::Error: core::error::Error + 'static,
     {
         self.validate_computed_version_or_reset(
             Version::ZERO
@@ -693,8 +687,8 @@ where
                     .unwrap_or_else(|| other_to_else.len());
 
                 let range = first_index.to_usize()..end;
-                let count = range.into_iter().filter(|i| filter(T2::from(*i))).count();
-                this.truncate_push_at(i, T::from(T2::from(count)))?;
+                let count = range.into_iter().filter(|i| filter(A::from(*i))).count();
+                this.truncate_push_at(i, T::from(A::from(count)))?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -743,18 +737,18 @@ where
         })
     }
 
-    fn compute_monotonic_window<T2, F>(
+    fn compute_monotonic_window<A, F>(
         &mut self,
         max_from: I,
-        source: &impl IterableVec<I, T2>,
+        source: &impl IterableVec<I, A>,
         window: usize,
         exit: &Exit,
         should_pop: F,
     ) -> Result<()>
     where
-        T2: VecValue + Ord,
-        T: From<T2>,
-        F: Fn(&T2, &T2) -> bool,
+        A: VecValue + Ord,
+        T: From<A>,
+        F: Fn(&A, &A) -> bool,
     {
         self.validate_computed_version_or_reset(
             Version::ZERO + self.inner_version() + source.version(),
@@ -762,7 +756,7 @@ where
 
         self.repeat_until_complete(exit, |this| {
             let skip = max_from.to_usize().min(this.len());
-            let mut deque: VecDeque<(usize, T2)> = VecDeque::new();
+            let mut deque: VecDeque<(usize, A)> = VecDeque::new();
 
             for (i, value) in source
                 .iter()
@@ -805,44 +799,44 @@ where
         })
     }
 
-    pub fn compute_max<T2>(
+    pub fn compute_max<A>(
         &mut self,
         max_from: I,
-        source: &impl IterableVec<I, T2>,
+        source: &impl IterableVec<I, A>,
         window: usize,
         exit: &Exit,
     ) -> Result<()>
     where
-        T2: VecValue + Ord,
-        T: From<T2>,
+        A: VecValue + Ord,
+        T: From<A>,
     {
         self.compute_monotonic_window(max_from, source, window, exit, |v, value| v < value)
     }
 
-    pub fn compute_min<T2>(
+    pub fn compute_min<A>(
         &mut self,
         max_from: I,
-        source: &impl IterableVec<I, T2>,
+        source: &impl IterableVec<I, A>,
         window: usize,
         exit: &Exit,
     ) -> Result<()>
     where
-        T2: VecValue + Ord,
-        T: From<T2>,
+        A: VecValue + Ord,
+        T: From<A>,
     {
         self.compute_monotonic_window(max_from, source, window, exit, |v, value| v > value)
     }
 
-    pub fn compute_sum<T2>(
+    pub fn compute_sum<A>(
         &mut self,
         max_from: I,
-        source: &impl IterableVec<I, T2>,
+        source: &impl IterableVec<I, A>,
         window: usize,
         exit: &Exit,
     ) -> Result<()>
     where
-        T: Add<T, Output = T> + From<T2> + Default + CheckedSub,
-        T2: VecValue,
+        T: Add<T, Output = T> + From<A> + Default + CheckedSub,
+        A: VecValue,
     {
         self.validate_computed_version_or_reset(
             Version::ONE + self.inner_version() + source.version(),
@@ -902,19 +896,19 @@ where
         })
     }
 
-    pub fn compute_sum_from_indexes<T2, T3>(
+    pub fn compute_sum_from_indexes<A, B>(
         &mut self,
         max_from: I,
-        first_indexes: &impl IterableVec<I, T2>,
-        indexes_count: &impl IterableVec<I, T3>,
-        source: &impl IterableVec<T2, T>,
+        first_indexes: &impl IterableVec<I, A>,
+        indexes_count: &impl IterableVec<I, B>,
+        source: &impl IterableVec<A, T>,
         exit: &Exit,
     ) -> Result<()>
     where
         T: From<u8> + SaturatingAdd,
-        T2: VecIndex + VecValue,
-        T3: VecValue,
-        usize: From<T3>,
+        A: VecIndex + VecValue,
+        B: VecValue,
+        usize: From<B>,
     {
         self.compute_filtered_sum_from_indexes(
             max_from,
@@ -926,20 +920,20 @@ where
         )
     }
 
-    pub fn compute_filtered_sum_from_indexes<T2, T3>(
+    pub fn compute_filtered_sum_from_indexes<A, B>(
         &mut self,
         max_from: I,
-        first_indexes: &impl IterableVec<I, T2>,
-        indexes_count: &impl IterableVec<I, T3>,
-        source: &impl IterableVec<T2, T>,
+        first_indexes: &impl IterableVec<I, A>,
+        indexes_count: &impl IterableVec<I, B>,
+        source: &impl IterableVec<A, T>,
         mut filter: impl FnMut(&T) -> bool,
         exit: &Exit,
     ) -> Result<()>
     where
         T: From<u8> + SaturatingAdd,
-        T2: VecIndex + VecValue,
-        T3: VecValue,
-        usize: From<T3>,
+        A: VecIndex + VecValue,
+        B: VecValue,
+        usize: From<B>,
     {
         self.validate_computed_version_or_reset(
             Version::ZERO
@@ -1053,33 +1047,33 @@ where
         self.compute_aggregate_of_others(max_from, others, exit, |values| values.max().unwrap())
     }
 
-    pub fn compute_sma<T2>(
+    pub fn compute_sma<A>(
         &mut self,
         max_from: I,
-        source: &impl IterableVec<I, T2>,
+        source: &impl IterableVec<I, A>,
         sma: usize,
         exit: &Exit,
     ) -> Result<()>
     where
-        T: Add<T, Output = T> + From<T2> + From<f32>,
-        T2: VecValue,
-        f32: From<T> + From<T2>,
+        T: Add<T, Output = T> + From<A> + From<f32>,
+        A: VecValue,
+        f32: From<T> + From<A>,
     {
         self.compute_sma_(max_from, source, sma, exit, None)
     }
 
-    pub fn compute_sma_<T2>(
+    pub fn compute_sma_<A>(
         &mut self,
         max_from: I,
-        source: &impl IterableVec<I, T2>,
+        source: &impl IterableVec<I, A>,
         sma: usize,
         exit: &Exit,
         min_i: Option<I>,
     ) -> Result<()>
     where
-        T: Add<T, Output = T> + From<T2> + From<f32>,
-        T2: VecValue,
-        f32: From<T> + From<T2>,
+        T: Add<T, Output = T> + From<A> + From<f32>,
+        A: VecValue,
+        f32: From<T> + From<A>,
     {
         self.validate_computed_version_or_reset(
             Version::ONE + self.inner_version() + source.version(),
@@ -1152,33 +1146,33 @@ where
         })
     }
 
-    pub fn compute_ema<T2>(
+    pub fn compute_ema<A>(
         &mut self,
         max_from: I,
-        source: &impl CollectableVec<I, T2>,
+        source: &impl CollectableVec<I, A>,
         ema: usize,
         exit: &Exit,
     ) -> Result<()>
     where
-        T: From<T2> + From<f32>,
-        T2: VecValue + Sum,
-        f32: From<T2> + From<T>,
+        T: From<A> + From<f32>,
+        A: VecValue + Sum,
+        f32: From<A> + From<T>,
     {
         self.compute_ema_(max_from, source, ema, exit, None)
     }
 
-    pub fn compute_ema_<T2>(
+    pub fn compute_ema_<A>(
         &mut self,
         max_from: I,
-        source: &impl CollectableVec<I, T2>,
+        source: &impl CollectableVec<I, A>,
         ema: usize,
         exit: &Exit,
         min_i: Option<I>,
     ) -> Result<()>
     where
-        T: From<T2> + From<f32>,
-        T2: VecValue + Sum,
-        f32: From<T2> + From<T>,
+        T: From<A> + From<f32>,
+        A: VecValue + Sum,
+        f32: From<A> + From<T>,
     {
         self.validate_computed_version_or_reset(
             Version::new(3) + self.inner_version() + source.version(),
@@ -1237,18 +1231,18 @@ where
         })
     }
 
-    fn compute_with_lookback<T2, F>(
+    fn compute_with_lookback<A, F>(
         &mut self,
         max_from: I,
-        source: &impl IterableVec<I, T2>,
+        source: &impl IterableVec<I, A>,
         lookback_len: usize,
         exit: &Exit,
         transform: F,
     ) -> Result<()>
     where
         I: CheckedSub,
-        T2: Compressable + Default,
-        F: Fn(usize, T2, T2) -> T,
+        A: Compressable + Default,
+        F: Fn(usize, A, A) -> T,
     {
         self.validate_computed_version_or_reset(
             Version::ZERO + self.inner_version() + source.version(),
@@ -1259,7 +1253,7 @@ where
             let mut lookback = source.create_lookback(skip, lookback_len, 0);
 
             for (i, current) in source.iter().enumerate().skip(skip) {
-                let previous = lookback.get_and_push(i, current, T2::default());
+                let previous = lookback.get_and_push(i, current, A::default());
                 let result = transform(i, current, previous);
                 this.truncate_push_at(i, result)?;
 
@@ -1272,17 +1266,17 @@ where
         })
     }
 
-    pub fn compute_previous_value<T2>(
+    pub fn compute_previous_value<A>(
         &mut self,
         max_from: I,
-        source: &impl IterableVec<I, T2>,
+        source: &impl IterableVec<I, A>,
         len: usize,
         exit: &Exit,
     ) -> Result<()>
     where
         I: CheckedSub,
-        T2: Compressable + Default,
-        f32: From<T2>,
+        A: Compressable + Default,
+        f32: From<A>,
         T: From<f32>,
     {
         self.compute_with_lookback(max_from, source, len, exit, |i, _, previous| {
@@ -1316,17 +1310,17 @@ where
         })
     }
 
-    pub fn compute_percentage_change<T2>(
+    pub fn compute_percentage_change<A>(
         &mut self,
         max_from: I,
-        source: &impl IterableVec<I, T2>,
+        source: &impl IterableVec<I, A>,
         len: usize,
         exit: &Exit,
     ) -> Result<()>
     where
         I: CheckedSub,
-        T2: Compressable + Default,
-        f32: From<T2>,
+        A: Compressable + Default,
+        f32: From<A>,
         T: From<f32>,
     {
         self.compute_with_lookback(max_from, source, len, exit, |i, current, previous| {
@@ -1341,17 +1335,17 @@ where
         })
     }
 
-    pub fn compute_cagr<T2>(
+    pub fn compute_cagr<A>(
         &mut self,
         max_from: I,
-        percentage_returns: &impl IterableVec<I, T2>,
+        percentage_returns: &impl IterableVec<I, A>,
         days: usize,
         exit: &Exit,
     ) -> Result<()>
     where
         I: CheckedSub,
-        T2: VecValue + Default,
-        f32: From<T2>,
+        A: VecValue + Default,
+        f32: From<A>,
         T: From<f32>,
     {
         if days == 0 || !days.is_multiple_of(365) {
@@ -1372,21 +1366,20 @@ where
         )
     }
 
-    pub fn compute_zscore<T2, T3, T4>(
+    pub fn compute_zscore<A, B, C>(
         &mut self,
         max_from: I,
-        source: &impl IterableVec<I, T2>,
-        sma: &impl IterableVec<I, T3>,
-        sd: &impl IterableVec<I, T4>,
+        source: &impl IterableVec<I, A>,
+        sma: &impl IterableVec<I, B>,
+        sd: &impl IterableVec<I, C>,
         exit: &Exit,
     ) -> Result<()>
     where
         T: From<f32>,
-        T2: VecValue + Sub<T3, Output = T2> + Div<T4, Output = T>,
-        T3: VecValue,
-        T4: VecValue,
-        T2: VecValue,
-        f32: From<T2> + From<T3> + From<T4>,
+        A: VecValue + Sub<B, Output = A> + Div<C, Output = T>,
+        B: VecValue,
+        C: VecValue,
+        f32: From<A> + From<B> + From<C>,
     {
         self.compute_transform3(
             max_from,

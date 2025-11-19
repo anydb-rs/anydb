@@ -31,7 +31,10 @@ pub enum Error {
         found: Version,
         expected: Version,
     },
-    IndexTooHigh,
+    IndexTooHigh {
+        index: usize,
+        len: usize,
+    },
     ExpectVecToHaveIndex,
     FailedKeyTryIntoUsize,
     DifferentCompressionMode,
@@ -124,7 +127,9 @@ impl fmt::Display for Error {
                     "Different version found: {found:?}, expected: {expected:?}"
                 )
             }
-            Error::IndexTooHigh => write!(f, "Index too high"),
+            Error::IndexTooHigh { index, len } => {
+                write!(f, "Index too high: index: {index}, len: {len}")
+            }
             Error::ExpectVecToHaveIndex => write!(f, "Expect vec to have index"),
             Error::FailedKeyTryIntoUsize => write!(f, "Failed to convert key to usize"),
             Error::DifferentCompressionMode => write!(f, "Different compression mode chosen"),

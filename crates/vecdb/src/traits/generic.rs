@@ -61,10 +61,11 @@ where
     /// Reads value at usize index using provided reader.
     #[inline(always)]
     fn read_at(&self, index: usize, reader: &Reader) -> Result<T> {
-        if likely(index < self.len()) {
+        let len = self.len();
+        if likely(index < len) {
             self.unchecked_read_at(index, reader)
         } else {
-            Err(Error::IndexTooHigh)
+            Err(Error::IndexTooHigh { index, len })
         }
     }
 
@@ -293,16 +294,16 @@ where
     /// Returns an error if the index is too high.
     #[inline]
     fn push_if_needed(&mut self, index: I, value: T) -> Result<()> {
-        let index_usize = index.to_usize();
+        let index = index.to_usize();
         let len = self.len();
 
-        if index_usize == len {
+        if index == len {
             self.push(value);
             return Ok(());
         }
 
         // Already pushed
-        if index_usize < len {
+        if index < len {
             return Ok(());
         }
 
@@ -310,13 +311,13 @@ where
         debug_assert!(
             false,
             "Index too high: idx={}, len={}, header={:?}, region={}",
-            index_usize,
+            index,
             len,
             self.header(),
             self.region().index()
         );
 
-        Err(Error::IndexTooHigh)
+        Err(Error::IndexTooHigh { index, len })
     }
 
     /// Pushes a value at the given index, truncating if necessary.
@@ -328,9 +329,10 @@ where
     /// Pushes a value at the given usize index, truncating if necessary.
     #[inline]
     fn truncate_push_at(&mut self, index: usize, value: T) -> Result<()> {
-        match self.len().cmp(&index) {
+        let len = self.len();
+        match len.cmp(&index) {
             Ordering::Less => {
-                return Err(Error::IndexTooHigh);
+                return Err(Error::IndexTooHigh { index, len });
             }
             ord => {
                 if ord == Ordering::Greater {
@@ -377,7 +379,10 @@ where
                 *prev = value;
                 return Ok(());
             } else {
-                return Err(Error::IndexTooHigh);
+                return Err(Error::IndexTooHigh {
+                    index,
+                    len: stored_len,
+                });
             }
         }
 
@@ -395,10 +400,14 @@ where
     #[inline]
     fn update_or_push(&mut self, index: I, value: T) -> Result<()> {
         let len = self.len();
-        match len.cmp(&index.to_usize()) {
+        let index_usize = index.to_usize();
+        match len.cmp(&index_usize) {
             Ordering::Less => {
                 dbg!(index, value, len, self.header());
-                Err(Error::IndexTooHigh)
+                Err(Error::IndexTooHigh {
+                    index: index_usize,
+                    len,
+                })
             }
             Ordering::Equal => {
                 self.push(value);

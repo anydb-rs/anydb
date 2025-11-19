@@ -12,7 +12,7 @@ use rawdb::{Database, Reader, Region};
 use crate::{
     AnyStoredVec, AnyVec, AsInnerSlice, BoxedVecIterator, Compressable, Error, Format,
     FromInnerSlice, GenericStoredVec, HEADER_OFFSET, Header, IterableVec, RawVec, Result, TypedVec,
-    VecIndex, Version, likely, variants::ImportOptions,
+    VecIndex, Version, likely, unlikely, variants::ImportOptions,
 };
 
 mod iterators;
@@ -109,9 +109,14 @@ where
         reader: &Reader,
         pages: &Pages,
     ) -> Result<Vec<T>> {
-        if Self::page_index_to_index(page_index) >= stored_len {
-            return Err(Error::IndexTooHigh);
-        } else if page_index >= pages.len() {
+        let index = Self::page_index_to_index(page_index);
+
+        if unlikely(index >= stored_len) {
+            return Err(Error::IndexTooHigh {
+                index,
+                len: stored_len,
+            });
+        } else if unlikely(page_index >= pages.len()) {
             return Err(Error::ExpectVecToHaveIndex);
         }
 
