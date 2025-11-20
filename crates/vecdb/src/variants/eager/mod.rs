@@ -4,6 +4,7 @@ use std::{
     fmt::Debug,
     iter::Sum,
     ops::{Add, Div, Mul, Sub},
+    panic,
     path::PathBuf,
 };
 
@@ -172,7 +173,6 @@ where
 
         self.repeat_until_complete(exit, |this| {
             let skip = this.len().min(max_from.to_usize());
-            dbg!(this.len(), max_from.to_usize(), skip);
 
             for (i, b) in other.iter().enumerate().skip(skip) {
                 let (i, v) = t((I::from(i), b, this));
@@ -414,7 +414,6 @@ where
         A: VecValue,
         F: Fn(T, T) -> T + Copy,
     {
-        dbg!(max_from);
         let mut prev = None;
         self.compute_transform(
             max_from,
@@ -873,7 +872,10 @@ where
                     let prev_sum = prev.unwrap();
                     // Pop the oldest value from our window buffer
                     let value_to_subtract = window_values.pop_front().unwrap();
-                    prev_sum.checked_sub(value_to_subtract).unwrap() + value
+                    prev_sum.checked_sub(value_to_subtract).unwrap_or_else(|| {
+                        dbg!(i, prev_sum, value_to_subtract);
+                        panic!()
+                    }) + value
                 } else {
                     prev.unwrap() + value
                 };
@@ -905,7 +907,7 @@ where
         exit: &Exit,
     ) -> Result<()>
     where
-        T: From<u8> + SaturatingAdd,
+        T: Default + SaturatingAdd,
         A: VecIndex + VecValue,
         B: VecValue,
         usize: From<B>,
@@ -930,7 +932,7 @@ where
         exit: &Exit,
     ) -> Result<()>
     where
-        T: From<u8> + SaturatingAdd,
+        T: Default + SaturatingAdd,
         A: VecIndex + VecValue,
         B: VecValue,
         usize: From<B>,
@@ -939,7 +941,8 @@ where
             Version::ZERO
                 + self.inner_version()
                 + first_indexes.version()
-                + indexes_count.version(),
+                + indexes_count.version()
+                + source.version(),
         )?;
 
         self.repeat_until_complete(exit, |this| {
@@ -947,7 +950,7 @@ where
             let mut source_iter = source.iter();
 
             // Set position once - source indices are sequential
-            if let Some(starting_first_index) = first_indexes.iter().get(max_from) {
+            if let Some(starting_first_index) = first_indexes.iter().get(skip.into()) {
                 source_iter.set_position(starting_first_index);
             }
 
@@ -957,7 +960,7 @@ where
                 let sum = (&mut source_iter)
                     .take(count)
                     .filter(|v| filter(v))
-                    .fold(T::from(0_u8), |acc, val| acc.saturating_add(val));
+                    .fold(T::default(), |acc, val| acc.saturating_add(val));
                 this.truncate_push_at(i, sum)?;
 
                 if this.batch_limit_reached() {

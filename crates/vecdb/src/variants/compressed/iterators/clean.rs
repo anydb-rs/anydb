@@ -280,6 +280,10 @@ where
 {
     #[inline]
     fn set_position_to(&mut self, i: usize) {
+        if self.index == i {
+            return;
+        }
+
         let new_index = i.min(self.stored_len).min(self.end_index);
 
         // Check if new position is within the currently decoded page
