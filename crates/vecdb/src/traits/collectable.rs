@@ -16,7 +16,7 @@ where
         let to = to.map_or(len, |to| to.min(len));
         let mut iter = self.iter();
         iter.set_end_to(to);
-        iter.skip(from).take(to - from)
+        iter.skip(from).take(to.saturating_sub(from))
     }
 
     /// Returns an iterator over the specified range using signed indices (supports negative indexing).
