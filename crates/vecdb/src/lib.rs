@@ -7,7 +7,7 @@
 // #![doc = include_str!("../examples/compressed.rs")]
 // #![doc = "```"]
 
-pub use rawdb::{Database, Error as RawDBError, PAGE_SIZE, Reader};
+pub use rawdb::{Database, Error as RawDBError, PAGE_SIZE, Reader, likely, unlikely};
 #[cfg(feature = "derive")]
 pub use vecdb_derive::Compressable;
 
@@ -32,24 +32,3 @@ pub use version::*;
 
 const ONE_KIB: usize = 1024;
 const BUFFER_SIZE: usize = 512 * ONE_KIB;
-
-// Branch prediction hints
-#[inline(always)]
-#[cold]
-pub(crate) fn cold() {}
-
-#[inline(always)]
-pub fn likely(b: bool) -> bool {
-    if !b {
-        cold();
-    }
-    b
-}
-
-#[inline(always)]
-pub fn unlikely(b: bool) -> bool {
-    if b {
-        cold();
-    }
-    b
-}

@@ -1,6 +1,8 @@
 use crate::{Error, GiB, PAGE_SIZE, Result, regions::Regions};
 
 pub const SIZE_OF_REGION_METADATA: usize = PAGE_SIZE; // 4096 bytes for atomic writes
+const MAX_REGION_ID_LEN: usize = 1024;
+const MAX_RESERVED_SIZE: usize = 1024 * GiB; // 1 TiB
 
 /// Metadata tracking a region's location, size, and identity.
 #[derive(Debug, Clone)]
@@ -18,7 +20,11 @@ pub struct RegionMetadata {
 impl RegionMetadata {
     fn validate_id(id: &str) {
         assert!(!id.is_empty(), "Region id must not be empty");
-        assert!(id.len() <= 1024, "Region id must be <= 1024 bytes");
+        assert!(
+            id.len() <= MAX_REGION_ID_LEN,
+            "Region id must be <= {} bytes",
+            MAX_REGION_ID_LEN
+        );
         assert!(
             !id.chars().any(|c| c.is_control()),
             "Region id must not contain control characters"
@@ -82,7 +88,7 @@ impl RegionMetadata {
         assert!(self.len() <= reserved);
         assert!(reserved >= PAGE_SIZE);
         assert!(reserved.is_multiple_of(PAGE_SIZE));
-        assert!(reserved <= 1024 * GiB);
+        assert!(reserved <= MAX_RESERVED_SIZE);
 
         self.reserved = reserved;
     }

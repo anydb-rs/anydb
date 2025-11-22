@@ -46,8 +46,10 @@ fn main() -> Result<()> {
     db.flush()?;
     
     // read via mmap (data is immediately visible)
-    let reader = region1.create_reader();
-    let data = reader.read_all();
+    {
+        let reader = region1.create_reader();
+        let _data = reader.read_all();
+    } // reader dropped here, releasing its reference
 
     // remove region (space becomes reusable hole after flush)
     region1.remove()?;

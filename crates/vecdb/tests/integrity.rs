@@ -136,7 +136,7 @@ fn test_data_integrity_rollback_flush_reopen() -> Result<(), Box<dyn std::error:
     println!("  Current data: {:?}", vec.collect());
 
     // Operation 3: Create a hole and add value
-    let reader = vec.create_static_reader();
+    let reader = vec.create_reader();
     vec.take(5, &reader)?;
     drop(reader);
     vec.push(30);
@@ -217,7 +217,7 @@ fn test_data_integrity_rollback_flush_reopen() -> Result<(), Box<dyn std::error:
 
     // Verify using individual gets
     println!("\n--- Verification 2: After reopen (using gets) ---");
-    let reader = vec.create_static_reader();
+    let reader = vec.create_reader();
     let mut data_via_gets = Vec::new();
     for i in 0..vec.len() {
         let value = vec.get_or_read(i, &reader)?;
@@ -272,7 +272,7 @@ fn test_data_integrity_rollback_flush_reopen() -> Result<(), Box<dyn std::error:
     println!("  Current data: {:?}", vec.collect());
 
     // Redo Operation 3: Create hole and add value
-    let reader = vec.create_static_reader();
+    let reader = vec.create_reader();
     vec.take(5, &reader)?;
     drop(reader);
     vec.push(30);
@@ -330,7 +330,7 @@ fn test_data_integrity_rollback_flush_reopen() -> Result<(), Box<dyn std::error:
 
     // Verify using individual gets
     println!("\n--- Verification 5: After reopen (using gets) ---");
-    let reader = vec.create_static_reader();
+    let reader = vec.create_reader();
     let mut data_via_gets = Vec::new();
     for i in 0..vec.len() {
         let value = vec.get_or_read(i, &reader)?;

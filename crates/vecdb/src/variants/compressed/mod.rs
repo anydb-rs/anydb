@@ -326,7 +326,7 @@ where
                 let mut page_values = Self::decode_page_(
                     stored_len,
                     starting_page_index,
-                    &self.create_static_reader(),
+                    &self.create_reader(),
                     &pages,
                 )?;
                 page_values.truncate(len);

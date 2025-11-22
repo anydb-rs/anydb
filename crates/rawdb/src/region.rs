@@ -1,6 +1,5 @@
-use std::{fs::File, mem, sync::Arc};
+use std::{fs::File, sync::Arc};
 
-use memmap2::MmapMut;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::{Database, Error, Reader, RegionMetadata, Result, WeakDatabase};
@@ -10,6 +9,7 @@ use crate::{Database, Error, Reader, RegionMetadata, Result, WeakDatabase};
 /// Regions grow dynamically as data is written and can be moved within the
 /// database file to optimize space usage. Each region has a unique ID for lookup.
 #[derive(Debug, Clone)]
+#[must_use = "Region should be stored to access the data"]
 pub struct Region(Arc<RegionInner>);
 #[derive(Debug)]
 pub struct RegionInner {
@@ -42,18 +42,14 @@ impl Region {
         }))
     }
 
-    /// Creates a reader for this region with transmuted 'static lifetime.
+    /// Creates a reader for zero-copy access to this region's data.
     ///
-    /// # Safety
-    /// The returned Reader holds read locks that are transmuted to 'static lifetime.
-    /// The caller must ensure the Reader is dropped before any operations that
-    /// require write locks (writes, truncates, removes, etc.) to avoid deadlocks.
-    /// This is safe as long as the Reader doesn't outlive the Region.
-    pub fn create_reader(&self) -> Reader<'static> {
-        let db = self.db();
-        let mmap: RwLockReadGuard<'static, MmapMut> = unsafe { mem::transmute(db.mmap()) };
-        let meta: RwLockReadGuard<'static, RegionMetadata> = unsafe { mem::transmute(self.meta()) };
-        Reader::new(mmap, meta)
+    /// The Reader holds read locks on both the memory map and region metadata,
+    /// blocking writes until dropped. Drop the reader as soon as you're done
+    /// reading to avoid blocking other operations.
+    #[inline]
+    pub fn create_reader(&self) -> Reader {
+        Reader::new(self)
     }
 
     pub fn open_db_read_only_file(&self) -> Result<File> {
@@ -202,7 +198,7 @@ impl Region {
         {
             // info!("Expand {region_index} to hole");
 
-            layout.remove_or_compress_hole(hole_start, added_reserve);
+            layout.remove_or_compress_hole(hole_start, added_reserve)?;
             let mut meta = self.meta_mut();
             meta.set_reserved(new_reserved);
             drop(meta);
@@ -221,7 +217,7 @@ impl Region {
         if let Some(hole_start) = layout.find_smallest_adequate_hole(new_reserved) {
             // info!("Move {region_index} to hole at {hole_start}");
 
-            layout.remove_or_compress_hole(hole_start, new_reserved);
+            layout.remove_or_compress_hole(hole_start, new_reserved)?;
             drop(layout);
 
             db.copy(start, hole_start, write_start - start);

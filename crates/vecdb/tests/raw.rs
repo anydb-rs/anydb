@@ -152,7 +152,7 @@ fn test_raw_vec_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(iter.get(21), None);
         drop(iter);
 
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         assert_eq!(vec.take(10, &reader)?, Some(10));
         assert_eq!(vec.holes(), &BTreeSet::from([10]));
         assert_eq!(vec.get_or_read(10, &reader)?, None);
@@ -168,14 +168,14 @@ fn test_raw_vec_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
         assert!(vec.holes() == &BTreeSet::from([10]));
 
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         assert!(vec.get_or_read(10, &reader)?.is_none());
         drop(reader);
 
         vec.update(10, 10)?;
         vec.update(0, 10)?;
 
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         assert_eq!(vec.holes(), &BTreeSet::new());
         assert_eq!(vec.get_or_read(0, &reader)?, Some(10));
         assert_eq!(vec.get_or_read(10, &reader)?, Some(10));
@@ -198,7 +198,7 @@ fn test_raw_vec_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
         vec.truncate_if_needed(10)?;
 
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(5, &reader)?;
         vec.update(3, 5)?;
         vec.push(21);
@@ -229,7 +229,7 @@ fn test_raw_vec_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
         assert_eq!(vec.collect(), vec![10, 1, 2, 5, 4, 6, 7, 8, 9, 21]);
 
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(0, &reader)?;
         vec.update(1, 5)?;
         vec.push(5);
@@ -328,7 +328,7 @@ fn test_raw_vec_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
         vec.truncate_if_needed(10)?;
 
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(5, &reader)?;
         vec.update(3, 5)?;
         vec.push(21);
@@ -359,7 +359,7 @@ fn test_raw_vec_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
         assert_eq!(vec.collect(), vec![10, 1, 2, 5, 4, 6, 7, 8, 9, 21]);
 
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(0, &reader)?;
         vec.update(1, 5)?;
         vec.push(5);
@@ -425,13 +425,13 @@ fn test_raw_vec_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         vec.stamped_flush(Stamp::new(0))?;
 
         vec.truncate_if_needed(10)?;
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(5, &reader)?;
         vec.update(3, 5)?;
         vec.push(21);
         drop(reader);
 
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(0, &reader)?;
         vec.update(1, 5)?;
         vec.push(5);
@@ -471,7 +471,7 @@ fn test_raw_vec_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         vec.truncate_if_needed(10)?;
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(5, &reader)?;
         vec.update(3, 5)?;
         vec.push(21);
@@ -480,7 +480,7 @@ fn test_raw_vec_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         vec.stamped_flush_with_changes(Stamp::new(1))?;
         assert_eq!(vec.stamp(), Stamp::new(1));
 
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(0, &reader)?;
         vec.update(1, 5)?;
         vec.push(5);
@@ -522,13 +522,13 @@ fn test_raw_vec_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         vec.truncate_if_needed(10)?;
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(5, &reader)?;
         vec.update(3, 5)?;
         vec.push(21);
         drop(reader);
 
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(0, &reader)?;
         vec.update(1, 5)?;
         vec.push(5);

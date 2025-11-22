@@ -8,20 +8,27 @@ use std::{
     sync::{Arc, Weak},
 };
 
-use libc::off_t;
 use log::debug;
 use memmap2::{MmapMut, MmapOptions};
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+mod disk_usage;
 pub mod error;
+mod hints;
+mod hole_punch;
 mod layout;
+mod mmap;
 mod reader;
 mod region;
 mod region_metadata;
 mod regions;
 
+pub use disk_usage::*;
 pub use error::*;
+pub use hints::*;
+use hole_punch::*;
 use layout::*;
+use mmap::*;
 use rayon::prelude::*;
 pub use reader::*;
 pub use region::*;
@@ -30,18 +37,19 @@ use regions::*;
 
 pub const PAGE_SIZE: usize = 4096;
 pub const PAGE_SIZE_MINUS_1: usize = PAGE_SIZE - 1;
+/// One gibibyte (1024^3 bytes).
 #[allow(non_upper_case_globals)]
-const GiB: usize = 1024 * 1024 * 1024;
+pub const GiB: usize = 1024 * 1024 * 1024;
 
 /// Memory-mapped database with dynamic space allocation and hole punching.
 ///
 /// Provides efficient storage through memory mapping with automatic region management,
 /// space reclamation via hole punching, and dynamic file growth as needed.
 #[derive(Debug, Clone)]
+#[must_use = "Database should be stored to keep the database open"]
 pub struct Database(Arc<DatabaseInner>);
-
 #[derive(Debug)]
-pub struct DatabaseInner {
+struct DatabaseInner {
     path: PathBuf,
     regions: RwLock<Regions>,
     layout: RwLock<Layout>,
@@ -150,7 +158,7 @@ impl Database {
         let mut layout = self.layout_mut();
 
         let start = if let Some(start) = layout.find_smallest_adequate_hole(PAGE_SIZE) {
-            layout.remove_or_compress_hole(start, PAGE_SIZE);
+            layout.remove_or_compress_hole(start, PAGE_SIZE)?;
             start
         } else {
             let start = layout
@@ -177,16 +185,7 @@ impl Database {
 
     #[inline]
     pub(crate) fn write(&self, start: usize, data: &[u8]) {
-        let mmap = self.mmap();
-        let len = data.len();
-        let end = start + len;
-        if end > mmap.len() {
-            unreachable!("Trying to write beyond mmap")
-        }
-
-        (unsafe { std::slice::from_raw_parts_mut(mmap.as_ptr() as *mut u8, mmap.len()) })
-            [start..end]
-            .copy_from_slice(data);
+        write_to_mmap(&self.mmap(), start, data);
     }
 
     /// Copy data within the mmap, chunked to avoid excessive memory pressure
@@ -247,23 +246,12 @@ impl Database {
         File::open(self.data_path()).map_err(Error::from)
     }
 
-    /// Returns human-readable disk usage of the database file.
+    /// Returns the actual disk usage (accounting for sparse files and hole punching).
     ///
-    /// Uses the `du -h` command to report actual disk space used (accounting for
-    /// sparse files and hole punching).
-    pub fn disk_usage(&self) -> String {
-        let path = self.data_path();
-
-        let output = std::process::Command::new("du")
-            .arg("-h")
-            .arg(&path)
-            .output()
-            .expect("Failed to run du");
-
-        String::from_utf8_lossy(&output.stdout)
-            .replace(path.to_str().unwrap(), " ")
-            .trim()
-            .to_string()
+    /// On Unix systems, this uses `fstat` to get the number of blocks actually allocated.
+    /// On Windows, this falls back to the logical file size (less accurate for sparse files).
+    pub fn disk_usage(&self) -> Result<DiskUsage> {
+        DiskUsage::from_file(&self.file())
     }
 
     /// Flushes all dirty data and metadata to disk.
@@ -303,17 +291,16 @@ impl Database {
                 let len = region_meta.len();
                 let reserved = region_meta.reserved();
                 let ceil_len = Self::ceil_number_to_page_size_multiple(len);
-                assert!(len <= ceil_len);
-                if ceil_len > reserved {
-                    panic!(
-                        "Invariant violated: ceil_len ({}) > reserved ({})",
+                if unlikely(ceil_len > reserved) {
+                    return Err(Error::InvariantViolation(format!(
+                        "ceil_len ({}) > reserved ({})",
                         ceil_len, reserved
-                    )
+                    )));
                 } else if ceil_len < reserved {
                     let start = rstart + ceil_len;
                     let hole = reserved - ceil_len;
                     if Self::approx_has_punchable_data(&mmap, start, hole) {
-                        Self::punch_hole(&file, start, hole)?;
+                        HolePunch::punch(&file, start, hole)?;
                         return Ok(1);
                     }
                 }
@@ -326,7 +313,7 @@ impl Database {
             .par_iter()
             .map(|(&start, &hole)| -> Result<usize> {
                 if Self::approx_has_punchable_data(&mmap, start, hole) {
-                    Self::punch_hole(&file, start, hole)?;
+                    HolePunch::punch(&file, start, hole)?;
                     return Ok(1);
                 }
                 Ok(0)
@@ -383,94 +370,6 @@ impl Database {
         }
 
         false
-    }
-
-    #[cfg(target_os = "macos")]
-    fn punch_hole(file: &File, start: usize, length: usize) -> Result<()> {
-        let fpunchhole = FPunchhole {
-            fp_flags: 0,
-            reserved: 0,
-            fp_offset: start as libc::off_t,
-            fp_length: length as libc::off_t,
-        };
-
-        let result = unsafe {
-            libc::fcntl(
-                file.as_raw_fd(),
-                libc::F_PUNCHHOLE,
-                &fpunchhole as *const FPunchhole,
-            )
-        };
-
-        if result == -1 {
-            let err = std::io::Error::last_os_error();
-            return Err(Error::HolePunchFailed {
-                start,
-                len: length,
-                source: err,
-            });
-        }
-
-        Ok(())
-    }
-
-    #[cfg(target_os = "linux")]
-    fn punch_hole(file: &File, start: usize, length: usize) -> Result<()> {
-        let result = unsafe {
-            libc::fallocate(
-                file.as_raw_fd(),
-                libc::FALLOC_FL_PUNCH_HOLE | libc::FALLOC_FL_KEEP_SIZE,
-                start as libc::off_t,
-                length as libc::off_t,
-            )
-        };
-
-        if result == -1 {
-            let err = std::io::Error::last_os_error();
-            return Err(Error::HolePunchFailed {
-                start,
-                len: length,
-                source: err,
-            });
-        }
-
-        Ok(())
-    }
-
-    #[cfg(target_os = "freebsd")]
-    fn punch_hole(file: &File, start: usize, length: usize) -> Result<()> {
-        let fd = file.as_raw_fd();
-
-        let mut spacectl = libc::spacectl_range {
-            r_offset: start as libc::off_t,
-            r_len: length as libc::off_t,
-        };
-
-        let result = unsafe {
-            libc::fspacectl(
-                fd,
-                libc::SPACECTL_DEALLOC,
-                &spacectl as *const libc::spacectl_range,
-                0,
-                &mut spacectl as *mut libc::spacectl_range,
-            )
-        };
-
-        if result == -1 {
-            let err = std::io::Error::last_os_error();
-            return Err(Error::HolePunchFailed {
-                start,
-                len: length,
-                source: err,
-            });
-        }
-
-        Ok(())
-    }
-
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "freebsd")))]
-    fn punch_hole(_file: &File, _start: usize, _length: usize) -> Result<()> {
-        Err(Error::HolePunchUnsupported)
     }
 
     #[inline(always)]
@@ -536,14 +435,6 @@ impl Database {
     pub fn weak_clone(&self) -> WeakDatabase {
         WeakDatabase(Arc::downgrade(&self.0))
     }
-}
-
-#[repr(C)]
-struct FPunchhole {
-    fp_flags: u32,
-    reserved: u32,
-    fp_offset: off_t,
-    fp_length: off_t,
 }
 
 /// Weak reference to a Database that doesn't prevent it from being dropped.

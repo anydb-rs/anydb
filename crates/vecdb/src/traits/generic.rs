@@ -29,16 +29,10 @@ where
     // Reader Creation
     // ============================================================================
 
-    /// Creates a reader with lifetime tied to self.
+    /// Creates a reader to the underlying region.
     /// Be careful with deadlocks - drop the reader before mutable ops.
-    fn create_reader(&'_ self) -> Reader<'_> {
-        self.create_static_reader()
-    }
-
-    /// Creates a reader with 'static lifetime.
-    /// Be careful with deadlocks - drop the reader before mutable ops.
-    fn create_static_reader(&self) -> Reader<'static> {
-        unsafe { std::mem::transmute(self.region().create_reader()) }
+    fn create_reader(&'_ self) -> Reader {
+        self.region().create_reader()
     }
 
     // ============================================================================

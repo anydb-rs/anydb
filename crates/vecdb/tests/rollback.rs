@@ -176,7 +176,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         // Block 3: Delete some items (create holes)
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(1, &reader)?;
         vec.take(4, &reader)?;
         drop(reader);
@@ -190,7 +190,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
         // Block 4: Mix of updates, holes, and pushes
         vec.update(0, 999)?; // Update first
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(5, &reader)?; // Delete index 5 (removes value 50)
         drop(reader);
         vec.push(130);
@@ -217,7 +217,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         // Block 6: More complex operations
         vec.update(0, 2000)?;
         vec.update(3, 2050)?;
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(8, &reader)?; // Delete index 8 (value 80)
         drop(reader);
         vec.push(160);
@@ -259,7 +259,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         // Fork A - Block 5: Different operations than original
         vec.update(0, 5000)?; // Different update
         vec.update(2, 5035)?;
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(10, &reader)?; // Delete storage index 10 (value 100)
         drop(reader);
         vec.push(5150);
@@ -300,7 +300,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         vec.update(0, 7000)?;
         vec.update(2, 7020)?; // Update index 2, not 1 (which is a hole)
         vec.update(3, 7035)?;
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(6, &reader)?; // Delete index 6 (value 60)
         vec.take(9, &reader)?; // Delete index 9 (value 90)
         drop(reader);
@@ -395,7 +395,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         println!("Stamp 1: {:?}", vec.collect());
 
         // Stamp 2: delete some items (creating holes)
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(1, &reader)?;
         vec.take(3, &reader)?;
         drop(reader);
@@ -460,7 +460,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
         // Stamp 2: delete + update
         // [0, None, 99, 3, 4]
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(1, &reader)?;
         vec.update(2, 99)?;
         drop(reader);
@@ -543,7 +543,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         // - Delete indices 1, 3, 5
         // - Update indices 2, 6, 8
         // - Push new values 100, 101
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(1, &reader)?;
         vec.take(3, &reader)?;
         vec.take(5, &reader)?;
@@ -615,7 +615,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         vec.push(2);
         vec.stamped_flush_with_changes(Stamp::new(5))?; // [10, 1, 2]
 
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(1, &reader)?;
         drop(reader);
         vec.stamped_flush_with_changes(Stamp::new(6))?; // [10, 2]
@@ -712,7 +712,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         println!("Stamp 1: {:?}", vec.collect());
 
         // Stamp 2: Delete every other element
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         for i in (0..10).step_by(2) {
             vec.take(i, &reader)?;
         }
@@ -841,7 +841,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         }
         vec.stamped_flush_with_changes(Stamp::new(2))?;
         println!("Stamp 2: {} elements (half updated)", vec.len());
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         assert_eq!(vec.read_at(0, &reader)?, 10000);
         assert_eq!(vec.read_at(1, &reader)?, 1);
         drop(reader);
@@ -849,7 +849,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         // Rollback
         vec.rollback()?;
         println!("After rollback: {} elements", vec.len());
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         assert_eq!(vec.len(), 1000);
         // After rollback, state is dirty - use get_any_or_read() to check updated map
         assert_eq!(vec.get_or_read(0, &reader)?, Some(0));
@@ -875,7 +875,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         println!("Stamp 1: {:?}", vec.collect());
 
         // Stamp 2: Delete some items, then extend
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         vec.take(2, &reader)?;
         vec.take(5, &reader)?;
         vec.take(7, &reader)?;

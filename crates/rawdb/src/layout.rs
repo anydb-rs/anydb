@@ -1,11 +1,20 @@
 use std::{collections::BTreeMap, mem};
 
+use smallvec::SmallVec;
+
 use crate::{Error, Region, Regions, Result};
 
+/// Tracks the layout of regions and holes in the database file.
+///
+/// Maintains a dual-index for holes: `start_to_hole` for O(1) lookup by position,
+/// and `hole_to_starts` for O(log n) lookup of smallest adequate hole.
 #[derive(Debug, Default)]
 pub struct Layout {
     start_to_region: BTreeMap<usize, Region>,
     start_to_hole: BTreeMap<usize, usize>,
+    /// Secondary index: hole size -> list of starts with that size.
+    /// Enables O(log n) best-fit hole search.
+    hole_to_starts: BTreeMap<usize, SmallVec<[usize; 1]>>,
     start_to_reserved: BTreeMap<usize, usize>,
     /// Holes from region moves that can't be reused until flush
     pending_holes: BTreeMap<usize, usize>,
@@ -23,28 +32,49 @@ impl From<&Regions> for Layout {
                 start_to_region.insert(region.meta().start(), region.clone());
             });
 
-        let mut start_to_hole = BTreeMap::new();
+        let mut layout = Self {
+            start_to_region: start_to_region.clone(),
+            start_to_hole: BTreeMap::default(),
+            hole_to_starts: BTreeMap::default(),
+            start_to_reserved: BTreeMap::default(),
+            pending_holes: BTreeMap::default(),
+        };
 
         let mut prev_end = 0;
-
-        start_to_region.iter().for_each(|(&start, region)| {
+        for (start, region) in start_to_region {
             if prev_end != start {
-                start_to_hole.insert(prev_end, start - prev_end);
+                let size = start - prev_end;
+                layout.insert_hole(prev_end, size);
             }
             let reserved = region.meta().reserved();
             prev_end = start + reserved;
-        });
-
-        Self {
-            start_to_region,
-            start_to_hole,
-            start_to_reserved: BTreeMap::default(),
-            pending_holes: BTreeMap::default(),
         }
+
+        layout
     }
 }
 
 impl Layout {
+    /// Inserts a hole and updates both indexes.
+    fn insert_hole(&mut self, start: usize, size: usize) {
+        self.start_to_hole.insert(start, size);
+        self.hole_to_starts.entry(size).or_default().push(start);
+    }
+
+    /// Removes a hole and updates both indexes.
+    fn remove_hole(&mut self, start: usize) -> Option<usize> {
+        let size = self.start_to_hole.remove(&start)?;
+
+        if let Some(starts) = self.hole_to_starts.get_mut(&size) {
+            starts.retain(|s| *s != start);
+            if starts.is_empty() {
+                self.hole_to_starts.remove(&size);
+            }
+        }
+
+        Some(size)
+    }
+
     pub fn start_to_region(&self) -> &BTreeMap<usize, Region> {
         &self.start_to_region
     }
@@ -93,19 +123,17 @@ impl Layout {
     }
 
     pub fn is_last_anything(&self, region: &Region) -> bool {
-        if let Some((last_start, last_region)) = self.get_last_region()
-            && last_region.index() == region.index()
+        let Some((last_start, last_region)) = self.get_last_region() else {
+            return false;
+        };
+
+        last_region.index() == region.index()
             && self
                 .get_last_hole()
                 .is_none_or(|(hole_start, _)| last_start > hole_start)
             && self
                 .get_last_reserved()
                 .is_none_or(|(reserved_start, _)| last_start > reserved_start)
-        {
-            true
-        } else {
-            false
-        }
     }
 
     pub fn insert_region(&mut self, start: usize, region: &Region) {
@@ -132,11 +160,10 @@ impl Layout {
             return Err(Error::RegionIndexMismatch);
         }
 
-        // Coalesce with adjacent holes
-        reserved += self
-            .start_to_hole
-            .remove(&(start + reserved))
-            .unwrap_or_default();
+        // Coalesce with adjacent hole (remove it from indexes)
+        if let Some(adjacent_size) = self.remove_hole(start + reserved) {
+            reserved += adjacent_size;
+        }
 
         // Mark as pending hole (can't reuse until flush)
         if let Some((&hole_start, gap)) = self.pending_holes.range_mut(..start).next_back()
@@ -154,35 +181,37 @@ impl Layout {
         self.start_to_hole.get(&start).copied()
     }
 
-    pub fn find_smallest_adequate_hole(&self, reserved: usize) -> Option<usize> {
-        let mut best_gap = None;
-
-        for (&start, &gap) in &self.start_to_hole {
-            if gap >= reserved {
-                match best_gap {
-                    None => best_gap = Some((gap, start)),
-                    Some((best_gap_val, best_start)) => {
-                        if gap < best_gap_val || (gap == best_gap_val && start < best_start) {
-                            best_gap = Some((gap, start));
-                        }
-                    }
-                }
-            }
-        }
-
-        best_gap.map(|(_, s)| s)
+    /// Finds the smallest hole that can fit the requested size.
+    ///
+    /// Uses a secondary index for O(log n) best-fit lookup.
+    /// Returns the start position of the smallest adequate hole.
+    pub fn find_smallest_adequate_hole(&self, min_size: usize) -> Option<usize> {
+        // Find the smallest size >= min_size
+        self.hole_to_starts
+            .range(min_size..)
+            .next()
+            .and_then(|(_, starts)| starts.first().copied())
     }
 
-    pub fn remove_or_compress_hole(&mut self, start: usize, compress_by: usize) {
-        if let Some(gap) = self.start_to_hole.remove(&start)
-            && gap != compress_by
-        {
-            if gap > compress_by {
-                self.start_to_hole
-                    .insert(start + compress_by, gap - compress_by);
-            } else {
-                panic!("Hole too small");
-            }
+    pub fn remove_or_compress_hole(&mut self, start: usize, compress_by: usize) -> Result<()> {
+        let Some(size) = self.remove_hole(start) else {
+            return Ok(());
+        };
+
+        if size == compress_by {
+            // Hole fully consumed, already removed
+            Ok(())
+        } else if size > compress_by {
+            // Hole partially consumed, insert remainder
+            let new_start = start + compress_by;
+            let new_size = size - compress_by;
+            self.insert_hole(new_start, new_size);
+            Ok(())
+        } else {
+            Err(Error::HoleTooSmall {
+                hole_size: size,
+                requested: compress_by,
+            })
         }
     }
 
@@ -198,17 +227,19 @@ impl Layout {
         self.start_to_reserved.remove(&start)
     }
 
-    /// Promote pending holes to real holes after flush
-    /// Safe to reuse now that metadata changes are durable
+    /// Promote pending holes to real holes after flush.
+    /// Safe to reuse now that metadata changes are durable.
     pub fn promote_pending_holes(&mut self) {
         for (start, size) in mem::take(&mut self.pending_holes) {
-            // Coalesce with adjacent holes
-            if let Some((&hole_start, gap)) = self.start_to_hole.range_mut(..start).next_back()
-                && hole_start + *gap == start
+            // Try to coalesce with adjacent hole before this one
+            if let Some((&hole_start, &hole_size)) = self.start_to_hole.range(..start).next_back()
+                && hole_start + hole_size == start
             {
-                *gap += size;
+                // Remove old hole and insert coalesced one
+                self.remove_hole(hole_start);
+                self.insert_hole(hole_start, hole_size + size);
             } else {
-                self.start_to_hole.insert(start, size);
+                self.insert_hole(start, size);
             }
         }
     }

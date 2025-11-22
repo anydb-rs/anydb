@@ -9,6 +9,7 @@ use memmap2::{MmapMut, MmapOptions};
 
 use crate::{
     Database, Error, PAGE_SIZE, RegionMetadata, Result, SIZE_OF_REGION_METADATA, region::Region,
+    write_to_mmap,
 };
 
 #[derive(Debug)]
@@ -55,7 +56,12 @@ impl Regions {
     pub(crate) fn fill(&mut self, db: &Database) -> Result<()> {
         let file_len = self.file_len()?;
 
-        assert_eq!(file_len % SIZE_OF_REGION_METADATA, 0);
+        if file_len % SIZE_OF_REGION_METADATA != 0 {
+            return Err(Error::CorruptedMetadata(format!(
+                "regions file size {} is not a multiple of {}",
+                file_len, SIZE_OF_REGION_METADATA
+            )));
+        }
 
         let num_slots = file_len / SIZE_OF_REGION_METADATA;
 
@@ -147,6 +153,15 @@ impl Regions {
     }
 
     pub(crate) fn remove(&mut self, region: &Region) -> Result<()> {
+        // We check 2, because:
+        // 1. Is the passed region
+        // 2. Is in self.index_to_region
+        if Arc::strong_count(region.arc()) > 2 {
+            return Err(Error::RegionStillReferenced {
+                ref_count: Arc::strong_count(region.arc()),
+            });
+        }
+
         if self
             .index_to_region
             .get_mut(region.index())
@@ -154,10 +169,6 @@ impl Regions {
             .is_none()
         {
             return Err(Error::RegionNotFound);
-        } else if Arc::strong_count(region.arc()) > 1 {
-            return Err(Error::RegionStillReferenced {
-                ref_count: Arc::strong_count(region.arc()),
-            });
         }
 
         self.id_to_index.remove(region.meta().id());
@@ -173,12 +184,9 @@ impl Regions {
     }
 
     pub(crate) fn write_at(&self, index: usize, data: &[u8]) {
-        assert!(data.len() == SIZE_OF_REGION_METADATA);
-        let mmap = &self.mmap;
-        let start = index * SIZE_OF_REGION_METADATA;
-        (unsafe { std::slice::from_raw_parts_mut(mmap.as_ptr() as *mut u8, mmap.len()) })
-            [start..start + SIZE_OF_REGION_METADATA]
-            .copy_from_slice(data);
+        debug_assert_eq!(data.len(), SIZE_OF_REGION_METADATA);
+        let offset = index * SIZE_OF_REGION_METADATA;
+        write_to_mmap(&self.mmap, offset, data);
     }
 
     #[inline]

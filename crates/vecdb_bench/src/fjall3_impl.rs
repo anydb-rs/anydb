@@ -1,14 +1,16 @@
 use std::path::Path;
 
 use anyhow::Result;
-use fjall3::{KeyspaceCreateOptions, PersistMode, TxDatabase, TxKeyspace};
+use fjall3::{
+    KeyspaceCreateOptions, PersistMode, Readable, SingleWriterTxDatabase, SingleWriterTxKeyspace,
+};
 use rayon::prelude::*;
 
 use crate::database::DatabaseBenchmark;
 
 pub struct Fjall3Bench {
-    database: TxDatabase,
-    keyspace: TxKeyspace,
+    database: SingleWriterTxDatabase,
+    keyspace: SingleWriterTxKeyspace,
 }
 
 impl DatabaseBenchmark for Fjall3Bench {
@@ -21,7 +23,7 @@ impl DatabaseBenchmark for Fjall3Bench {
     }
 
     fn open(path: &Path) -> Result<Self> {
-        let database = TxDatabase::builder(path)
+        let database = SingleWriterTxDatabase::builder(path)
             .cache_size(1024 * 1024 * 1024)
             .open()?;
         let options = KeyspaceCreateOptions::default();

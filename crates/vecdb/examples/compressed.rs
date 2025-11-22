@@ -166,7 +166,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(vec.stored_len(), 21);
         assert_eq!(vec.len(), 21);
 
-        let reader = vec.create_static_reader();
+        let reader = vec.create_reader();
         assert_eq!(vec.holes(), &BTreeSet::new());
         assert_eq!(vec.get_or_read(0, &reader)?, Some(0));
         assert_eq!(vec.get_or_read(10, &reader)?, Some(10));
