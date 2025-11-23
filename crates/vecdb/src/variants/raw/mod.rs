@@ -35,12 +35,13 @@ const VERSION: Version = Version::ONE;
 /// This is the most basic storage format, writing values directly to disk
 /// with minimal overhead. Ideal for random access patterns and data that
 /// doesn't compress well.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[must_use = "Vector should be stored to keep data accessible"]
 pub struct RawVec<I, T> {
     region: Region,
 
     header: Header,
-    name: &'static str,
+    name: Arc<str>,
     prev_pushed: Vec<T>,
     pushed: Vec<T>,
     has_stored_holes: bool,
@@ -114,8 +115,7 @@ where
                 || (format.is_raw()
                     && !(region_len - HEADER_OFFSET).is_multiple_of(Self::SIZE_OF_T)))
         {
-            dbg!(region_len, region_len, HEADER_OFFSET);
-            return Err(Error::Str("Region was saved incorrectly"));
+            return Err(Error::CorruptedRegion { region_len });
         }
 
         let header = if region_len == 0 {
@@ -140,7 +140,7 @@ where
         let mut this = Self {
             region: region.clone(),
             header,
-            name: Box::leak(Box::new(name.to_string())),
+            name: Arc::from(name),
             prev_pushed: vec![],
             pushed: vec![],
             has_stored_holes: holes.is_some(),
@@ -222,26 +222,6 @@ where
     }
 }
 
-impl<I, T> Clone for RawVec<I, T> {
-    fn clone(&self) -> Self {
-        Self {
-            region: self.region.clone(),
-            header: self.header.clone(),
-            name: self.name,
-            prev_pushed: vec![],
-            pushed: vec![],
-            updated: BTreeMap::new(),
-            prev_updated: BTreeMap::new(),
-            has_stored_holes: false,
-            holes: BTreeSet::new(),
-            prev_holes: BTreeSet::new(),
-            prev_stored_len: 0,
-            stored_len: self.stored_len.clone(),
-            saved_stamped_changes: self.saved_stamped_changes,
-            phantom: PhantomData,
-        }
-    }
-}
 
 impl<I, T> AnyVec for RawVec<I, T>
 where
@@ -255,7 +235,7 @@ where
 
     #[inline]
     fn name(&self) -> &str {
-        self.name
+        &self.name
     }
 
     #[inline]

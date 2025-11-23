@@ -23,6 +23,7 @@ pub use iterator::*;
 /// This allows runtime selection between RawVec and CompressedVec storage formats
 /// based on the data characteristics and access patterns.
 #[derive(Debug, Clone)]
+#[must_use = "Vector should be stored to keep data accessible"]
 pub enum StoredVec<I, T> {
     Raw(RawVec<I, T>),
     Compressed(CompressedVec<I, T>),
@@ -44,8 +45,7 @@ where
 
     pub fn forced_import_with(options: ImportOptions, format: Format) -> Result<Self> {
         if options.version == Version::ZERO {
-            dbg!(options);
-            panic!("Version must be at least 1, can't verify endianness otherwise");
+            return Err(crate::Error::VersionCannotBeZero);
         }
 
         if format.is_compressed() {

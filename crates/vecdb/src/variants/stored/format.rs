@@ -33,33 +33,21 @@ impl Format {
         }
     }
 
-    fn from_bytes(bytes: &[u8]) -> Self {
-        if bytes.len() != 1 {
-            panic!();
-        }
-        if bytes[0] == 1 {
-            Self::Compressed
-        } else if bytes[0] == 0 {
-            Self::Raw
-        } else {
-            panic!()
-        }
-    }
-
     pub fn validate(&self, path: &Path) -> Result<()> {
-        if let Ok(prev_compressed) = Format::try_from(path)
-            && prev_compressed != *self
-        {
+        let Ok(bytes) = fs::read(path) else {
+            return Ok(()); // File doesn't exist yet
+        };
+
+        let prev_format = match bytes.as_slice() {
+            [0] => Self::Raw,
+            [1] => Self::Compressed,
+            _ => return Err(Error::CorruptedFormatFile),
+        };
+
+        if prev_format != *self {
             return Err(Error::DifferentCompressionMode);
         }
 
         Ok(())
-    }
-}
-
-impl TryFrom<&Path> for Format {
-    type Error = Error;
-    fn try_from(value: &Path) -> Result<Self, Self::Error> {
-        Ok(Self::from_bytes(&fs::read(value)?))
     }
 }

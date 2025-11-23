@@ -1,6 +1,7 @@
 use crate::{Error, GiB, PAGE_SIZE, Result, regions::Regions};
 
 pub const SIZE_OF_REGION_METADATA: usize = PAGE_SIZE; // 4096 bytes for atomic writes
+const SIZE_OF_U64: usize = std::mem::size_of::<u64>();
 const MAX_REGION_ID_LEN: usize = 1024;
 const MAX_RESERVED_SIZE: usize = 1024 * GiB; // 1 TiB
 
@@ -112,15 +113,24 @@ impl RegionMetadata {
 
     /// Serialize to bytes using little endian encoding
     fn to_bytes(&self) -> [u8; SIZE_OF_REGION_METADATA] {
+        let mut pos = 0;
         let mut bytes = [0u8; SIZE_OF_REGION_METADATA];
-        bytes[0..8].copy_from_slice(&(self.start as u64).to_le_bytes());
-        bytes[8..16].copy_from_slice(&(self.len as u64).to_le_bytes());
-        bytes[16..24].copy_from_slice(&(self.reserved as u64).to_le_bytes());
+
+        bytes[pos..pos + SIZE_OF_U64].copy_from_slice(&(self.start as u64).to_le_bytes());
+        pos += SIZE_OF_U64;
+
+        bytes[pos..pos + SIZE_OF_U64].copy_from_slice(&(self.len as u64).to_le_bytes());
+        pos += SIZE_OF_U64;
+
+        bytes[pos..pos + SIZE_OF_U64].copy_from_slice(&(self.reserved as u64).to_le_bytes());
+        pos += SIZE_OF_U64;
 
         let id_bytes = self.id.as_bytes();
         let id_len = id_bytes.len();
-        bytes[24..32].copy_from_slice(&(id_len as u64).to_le_bytes());
-        bytes[32..32 + id_len].copy_from_slice(id_bytes);
+        bytes[pos..pos + SIZE_OF_U64].copy_from_slice(&(id_len as u64).to_le_bytes());
+        pos += SIZE_OF_U64;
+
+        bytes[pos..pos + id_len].copy_from_slice(id_bytes);
 
         bytes
     }

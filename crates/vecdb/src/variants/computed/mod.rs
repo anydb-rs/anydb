@@ -49,6 +49,7 @@ pub type ComputedVecFrom3<I, T, S1I, S1T, S2I, S2T, S3I, S3T> =
 /// - Lazy: Values are recomputed on-the-fly during each access
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
+#[must_use = "Vector should be stored to keep data accessible"]
 pub enum ComputedVec<I, T, S1I, S1T, S2I, S2T, S3I, S3T>
 where
     S1T: Clone,

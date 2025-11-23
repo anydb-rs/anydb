@@ -34,7 +34,8 @@ const VERSION: Version = Version::TWO;
 /// Values are compressed in pages for better space efficiency. Best for sequential
 /// access patterns of numerical data. Random access is possible but less efficient
 /// than RawVec - prefer the latter for random access workloads.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+#[must_use = "Vector should be stored to keep data accessible"]
 pub struct CompressedVec<I, T> {
     inner: RawVec<I, T>,
     pages: Arc<RwLock<Pages>>,
@@ -130,17 +131,18 @@ where
 
     /// Stateless: decompress raw bytes into Vec<T>
     #[inline]
-    fn decompress_bytes(compressed_data: &[u8], expected_values: usize) -> Result<Vec<T>> {
+    fn decompress_bytes(compressed_data: &[u8], expected_len: usize) -> Result<Vec<T>> {
         let vec: Vec<T::NumberType> = pco::standalone::simple_decompress(compressed_data)?;
         let vec = T::from_inner_slice(vec);
 
-        if likely(vec.len() == expected_values) {
+        if likely(vec.len() == expected_len) {
             return Ok(vec);
         }
 
-        dbg!((compressed_data.len(), vec.len(), expected_values));
-        dbg!(&vec);
-        unreachable!("Decompressed page has wrong number of values")
+        Err(Error::DecompressionMismatch {
+            expected_len,
+            actual_len: vec.len(),
+        })
     }
 
     #[inline]
@@ -201,19 +203,10 @@ where
 
         // Remove pages region
         let pages = Arc::try_unwrap(self.pages)
-            .map_err(|_| Error::Str("Cannot remove CompressedVec: pages still referenced"))?;
+            .map_err(|_| Error::PagesStillReferenced)?;
         pages.into_inner().remove()?;
 
         Ok(())
-    }
-}
-
-impl<I, T> Clone for CompressedVec<I, T> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            pages: self.pages.clone(),
-        }
     }
 }
 

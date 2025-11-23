@@ -46,11 +46,13 @@ impl Exit {
                 callback();
             }
 
-            if lock_copy.is_locked() {
-                info!("Waiting to exit safely...");
+            if let Some(_lock) = lock_copy.try_write() {
+                info!("Exiting...");
+                exit(0);
             }
-            let _lock = lock_copy.write();
 
+            info!("Waiting to exit safely...");
+            let _lock = lock_copy.write();
             info!("Exiting...");
             exit(0);
         })

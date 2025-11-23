@@ -9,7 +9,7 @@ use log::info;
 use rawdb::Reader;
 use zerocopy::FromBytes;
 
-use crate::{AnyStoredVec, Error, Result, SEPARATOR, Stamp, Version, likely};
+use crate::{AnyStoredVec, Error, Result, SEPARATOR, SIZE_OF_U64, Stamp, Version, likely};
 
 const ONE_KIB: usize = 1024;
 const ONE_MIB: usize = ONE_KIB * ONE_KIB;
@@ -396,13 +396,10 @@ where
         let len = self.len();
         let index_usize = index.to_usize();
         match len.cmp(&index_usize) {
-            Ordering::Less => {
-                dbg!(index, value, len, self.header());
-                Err(Error::IndexTooHigh {
-                    index: index_usize,
-                    len,
-                })
-            }
+            Ordering::Less => Err(Error::IndexTooHigh {
+                index: index_usize,
+                len,
+            }),
             Ordering::Equal => {
                 self.push(value);
                 Ok(())
@@ -746,8 +743,10 @@ where
             && self.stamp() >= stamp
         {
             if s != self.stamp() {
-                dbg!((s, self.stamp(), stamp));
-                return Err(Error::Str("File stamp should be the same as vec stamp"));
+                return Err(Error::StampMismatch {
+                    file: s,
+                    vec: self.stamp(),
+                });
             }
             self.rollback()?;
         }
@@ -773,7 +772,7 @@ where
     /// Deserializes change data and undoes those changes.
     fn deserialize_then_undo_changes(&mut self, bytes: &[u8]) -> Result<()> {
         let mut pos = 0;
-        let mut len = 8;
+        let mut len = SIZE_OF_U64;
 
         let prev_stamp = u64::read_from_bytes(&bytes[..pos + len])?;
         self.mut_header().update_stamp(Stamp::new(prev_stamp));
@@ -824,7 +823,7 @@ where
             }
         }
 
-        len = 8;
+        len = SIZE_OF_U64;
         let prev_pushed_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
         pos += len;
         len = Self::SIZE_OF_T * prev_pushed_len;
@@ -835,7 +834,7 @@ where
         pos += len;
         self.mut_pushed().append(&mut prev_pushed);
 
-        len = 8;
+        len = SIZE_OF_U64;
         let pushed_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
         pos += len;
         len = Self::SIZE_OF_T * pushed_len;
@@ -845,11 +844,11 @@ where
             .collect::<Result<Vec<_>>>()?;
         pos += len;
 
-        len = 8;
+        len = SIZE_OF_U64;
         let prev_modified_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
         pos += len;
-        len = size_of::<usize>() * prev_modified_len;
-        let prev_indexes = bytes[pos..pos + len].chunks(8);
+        len = SIZE_OF_U64 * prev_modified_len;
+        let prev_indexes = bytes[pos..pos + len].chunks(SIZE_OF_U64);
         pos += len;
         len = Self::SIZE_OF_T * prev_modified_len;
         let prev_values = bytes[pos..pos + len].chunks(Self::SIZE_OF_T);
@@ -863,11 +862,11 @@ where
             .collect::<Result<_>>()?;
         pos += len;
 
-        len = 8;
+        len = SIZE_OF_U64;
         let modified_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
         pos += len;
-        len = size_of::<usize>() * modified_len;
-        let indexes = bytes[pos..pos + len].chunks(8);
+        len = SIZE_OF_U64 * modified_len;
+        let indexes = bytes[pos..pos + len].chunks(SIZE_OF_U64);
         pos += len;
         len = Self::SIZE_OF_T * modified_len;
         let values = bytes[pos..pos + len].chunks(Self::SIZE_OF_T);
@@ -881,22 +880,22 @@ where
             .collect::<Result<_>>()?;
         pos += len;
 
-        len = 8;
+        len = SIZE_OF_U64;
         let prev_holes_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
         pos += len;
-        len = size_of::<usize>() * prev_holes_len;
+        len = SIZE_OF_U64 * prev_holes_len;
         let prev_holes = bytes[pos..pos + len]
-            .chunks(8)
+            .chunks(SIZE_OF_U64)
             .map(|b| usize::read_from_bytes(b).map_err(|_| Error::ZeroCopyError))
             .collect::<Result<BTreeSet<_>>>()?;
         pos += len;
 
-        len = 8;
+        len = SIZE_OF_U64;
         let holes_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
         pos += len;
-        len = size_of::<usize>() * holes_len;
+        len = SIZE_OF_U64 * holes_len;
         let _holes = bytes[pos..pos + len]
-            .chunks(8)
+            .chunks(SIZE_OF_U64)
             .map(|b| usize::read_from_bytes(b).map_err(|_| Error::ZeroCopyError))
             .collect::<Result<BTreeSet<_>>>()?;
 

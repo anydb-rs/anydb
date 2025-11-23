@@ -8,7 +8,7 @@ use std::{
 
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
-use crate::{Error, Result};
+use crate::{Error, Result, SIZE_OF_U64};
 
 /// Version tracking for data schema and computed values.
 ///
@@ -87,7 +87,7 @@ impl From<u64> for Version {
 impl TryFrom<&Path> for Version {
     type Error = Error;
     fn try_from(value: &Path) -> Result<Self, Self::Error> {
-        let mut buf = [0; 8];
+        let mut buf = [0; SIZE_OF_U64];
         fs::read(value)?.as_slice().read_exact(&mut buf)?;
         Ok(*(Self::ref_from_bytes(&buf)?))
     }

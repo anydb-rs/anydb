@@ -1509,6 +1509,7 @@ dependencies = [
  "sha2",
  "sonic-rs",
  "tempfile",
+ "thiserror",
  "vecdb_derive",
  "walkdir",
  "zerocopy",

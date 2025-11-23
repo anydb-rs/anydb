@@ -1,93 +1,64 @@
-use std::{
-    fmt::{self, Debug, Display},
-    fs, io, result, time,
-};
+use std::{fmt, fs, io, result, time};
 
-use crate::Version;
+use thiserror::Error;
+
+use crate::{Stamp, Version};
 
 pub type Result<T, E = Error> = result::Result<T, E>;
 
 /// Error types for vecdb operations.
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum Error {
-    IO(io::Error),
-    Format(fmt::Error),
-    TryLockError(fs::TryLockError),
+    #[error(transparent)]
+    IO(#[from] io::Error),
+    #[error(transparent)]
+    Format(#[from] fmt::Error),
+    #[error("Couldn't lock file. It must be already opened by another process.")]
+    TryLockError(#[from] fs::TryLockError),
+    #[error("ZeroCopy error")]
     ZeroCopyError,
-    SystemTimeError(time::SystemTimeError),
-    PCO(pco::errors::PcoError),
-    RawDB(rawdb::Error),
+    #[error(transparent)]
+    SystemTimeError(#[from] time::SystemTimeError),
+    #[error(transparent)]
+    PCO(#[from] pco::errors::PcoError),
+    #[error(transparent)]
+    RawDB(#[from] rawdb::Error),
     #[cfg(feature = "serde_json")]
-    SerdeJSON(serde_json::Error),
+    #[error(transparent)]
+    SerdeJSON(#[from] serde_json::Error),
     #[cfg(feature = "sonic-rs")]
-    SonicRS(sonic_rs::Error),
+    #[error(transparent)]
+    SonicRS(#[from] sonic_rs::Error),
 
-    Str(&'static str),
-    String(String),
-
+    #[error("Wrong length")]
     WrongLength,
+    #[error("Wrong endian")]
     WrongEndian,
-    DifferentVersion {
-        found: Version,
-        expected: Version,
-    },
-    IndexTooHigh {
-        index: usize,
-        len: usize,
-    },
+    #[error("Different version found: {found:?}, expected: {expected:?}")]
+    DifferentVersion { found: Version, expected: Version },
+    #[error("Index too high: index: {index}, len: {len}")]
+    IndexTooHigh { index: usize, len: usize },
+    #[error("Expect vec to have index")]
     ExpectVecToHaveIndex,
+    #[error("Failed to convert key to usize")]
     FailedKeyTryIntoUsize,
+    #[error("Different compression mode chosen")]
     DifferentCompressionMode,
-}
-
-impl From<time::SystemTimeError> for Error {
-    fn from(value: time::SystemTimeError) -> Self {
-        Self::SystemTimeError(value)
-    }
-}
-
-impl From<io::Error> for Error {
-    fn from(value: io::Error) -> Self {
-        Self::IO(value)
-    }
-}
-
-impl From<fmt::Error> for Error {
-    fn from(value: fmt::Error) -> Self {
-        Self::Format(value)
-    }
-}
-
-#[cfg(feature = "serde_json")]
-impl From<serde_json::Error> for Error {
-    fn from(value: serde_json::Error) -> Self {
-        Self::SerdeJSON(value)
-    }
-}
-
-#[cfg(feature = "sonic-rs")]
-impl From<sonic_rs::Error> for Error {
-    fn from(value: sonic_rs::Error) -> Self {
-        Self::SonicRS(value)
-    }
-}
-
-impl From<rawdb::Error> for Error {
-    fn from(value: rawdb::Error) -> Self {
-        Self::RawDB(value)
-    }
-}
-
-impl From<fs::TryLockError> for Error {
-    fn from(value: fs::TryLockError) -> Self {
-        Self::TryLockError(value)
-    }
-}
-
-impl From<pco::errors::PcoError> for Error {
-    fn from(value: pco::errors::PcoError) -> Self {
-        Self::PCO(value)
-    }
+    #[error("Corrupted format file")]
+    CorruptedFormatFile,
+    #[error("Version cannot be zero, can't verify endianness otherwise")]
+    VersionCannotBeZero,
+    #[error("Stamp mismatch: file stamp {file:?} != vec stamp {vec:?}")]
+    StampMismatch { file: Stamp, vec: Stamp },
+    #[error("Corrupted region: invalid length {region_len}")]
+    CorruptedRegion { region_len: usize },
+    #[error("Decompression mismatch: expected {expected_len} values, got {actual_len}")]
+    DecompressionMismatch {
+        expected_len: usize,
+        actual_len: usize,
+    },
+    #[error("Cannot remove CompressedVec: pages still referenced")]
+    PagesStillReferenced,
 }
 
 impl<A, B, C> From<zerocopy::error::ConvertError<A, B, C>> for Error {
@@ -101,43 +72,3 @@ impl<A, B> From<zerocopy::error::SizeError<A, B>> for Error {
         Self::ZeroCopyError
     }
 }
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Error::IO(error) => Display::fmt(&error, f),
-            Error::Format(error) => Display::fmt(&error, f),
-            #[cfg(feature = "serde_json")]
-            Error::SerdeJSON(error) => Display::fmt(&error, f),
-            #[cfg(feature = "sonic-rs")]
-            Error::SonicRS(error) => Display::fmt(&error, f),
-            Error::RawDB(error) => Display::fmt(&error, f),
-            Error::TryLockError(_) => write!(
-                f,
-                "Couldn't lock file. It must be already opened by another process."
-            ),
-            Error::PCO(error) => Display::fmt(&error, f),
-            Error::SystemTimeError(error) => Display::fmt(&error, f),
-            Error::ZeroCopyError => write!(f, "ZeroCopy error"),
-
-            Error::WrongEndian => write!(f, "Wrong endian"),
-            Error::DifferentVersion { found, expected } => {
-                write!(
-                    f,
-                    "Different version found: {found:?}, expected: {expected:?}"
-                )
-            }
-            Error::IndexTooHigh { index, len } => {
-                write!(f, "Index too high: index: {index}, len: {len}")
-            }
-            Error::ExpectVecToHaveIndex => write!(f, "Expect vec to have index"),
-            Error::FailedKeyTryIntoUsize => write!(f, "Failed to convert key to usize"),
-            Error::DifferentCompressionMode => write!(f, "Different compression mode chosen"),
-            Error::WrongLength => write!(f, "Wrong length"),
-            Error::Str(s) => write!(f, "{s}"),
-            Error::String(s) => write!(f, "{s}"),
-        }
-    }
-}
-
-impl std::error::Error for Error {}

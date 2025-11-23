@@ -123,11 +123,9 @@ where
     pub(crate) fn refill_buffer(&mut self) {
         let buffer_len = self.remaining_file_bytes().min(Self::NORMAL_BUFFER_SIZE);
 
-        unsafe {
-            self.file
-                .read_exact(&mut self.buffer[..buffer_len])
-                .unwrap_unchecked()
-        };
+        self.file
+            .read_exact(&mut self.buffer[..buffer_len])
+            .expect("Failed to read file buffer");
 
         self.file_offset += buffer_len;
         self.buffer_len = buffer_len;

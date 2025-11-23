@@ -29,6 +29,7 @@ use crate::{
 /// moving averages, etc.) to eagerly compute and persist derived data. Results are stored on disk
 /// and incrementally updated when source data changes.
 #[derive(Debug, Clone)]
+#[must_use = "Vector should be stored to keep data accessible"]
 pub struct EagerVec<I, T>(StoredVec<I, T>);
 
 impl<I, T> EagerVec<I, T>
@@ -872,10 +873,12 @@ where
                     let prev_sum = prev.unwrap();
                     // Pop the oldest value from our window buffer
                     let value_to_subtract = window_values.pop_front().unwrap();
-                    prev_sum.checked_sub(value_to_subtract).unwrap_or_else(|| {
-                        dbg!(i, prev_sum, value_to_subtract);
-                        panic!()
-                    }) + value
+                    prev_sum
+                        .checked_sub(value_to_subtract)
+                        .unwrap_or_else(|| {
+                            panic!("Underflow: prev_sum={prev_sum:?}, sub={value_to_subtract:?}")
+                        })
+                        + value
                 } else {
                     prev.unwrap() + value
                 };
