@@ -47,9 +47,9 @@ where
     const NO_PAGE: usize = usize::MAX;
 
     pub fn new(vec: &'a CompressedVec<I, T>) -> Result<Self> {
-        let region_lock = vec.inner.region().meta();
+        let region_lock = vec.region().meta();
         let region_start = region_lock.start() as u64;
-        let file = vec.inner.region().open_db_read_only_file()?;
+        let file = vec.region().open_db_read_only_file()?;
 
         let pages = vec.pages.read();
         let stored_len = vec.stored_len();

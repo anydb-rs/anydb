@@ -852,9 +852,9 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
         let reader = vec.create_reader();
         assert_eq!(vec.len(), 1000);
         // After rollback, state is dirty - use get_any_or_read() to check updated map
-        assert_eq!(vec.get_or_read(0, &reader)?, Some(0));
-        assert_eq!(vec.get_or_read(1, &reader)?, Some(1));
-        assert_eq!(vec.get_or_read(999, &reader)?, Some(999));
+        assert_eq!(vec.get_any_or_read(0, &reader)?, Some(0));
+        assert_eq!(vec.get_any_or_read(1, &reader)?, Some(1));
+        assert_eq!(vec.get_any_or_read(999, &reader)?, Some(999));
         drop(reader);
 
         println!("✓ TEST 18 PASSED (LARGE-SCALE)\n");

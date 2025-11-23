@@ -1,21 +1,16 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
-};
+use std::path::PathBuf;
 
 use rawdb::{Database, Reader, Region};
 
 use crate::{
-    AnyStoredVec, AnyVec, BoxedVecIterator, Compressable, GenericStoredVec, Header, IterableVec,
-    Result, TypedVec, VecIndex, Version, variants::ImportOptions,
+    AnyStoredVec, AnyVec, BoxedVecIterator, Compressable, Format, GenericStoredVec, Header,
+    IterableVec, Result, TypedVec, VecIndex, Version, variants::ImportOptions,
 };
 
 use super::{CompressedVec, RawVec};
 
-mod format;
 mod iterator;
 
-pub use format::*;
 pub use iterator::*;
 
 /// Enum wrapper for stored vectors, supporting both raw and compressed formats.
@@ -233,64 +228,6 @@ where
         match self {
             StoredVec::Raw(v) => v.mut_prev_pushed(),
             StoredVec::Compressed(v) => v.mut_prev_pushed(),
-        }
-    }
-
-    #[inline]
-    fn holes(&self) -> &BTreeSet<usize> {
-        match self {
-            StoredVec::Raw(v) => v.holes(),
-            StoredVec::Compressed(v) => v.holes(),
-        }
-    }
-    #[inline]
-    fn mut_holes(&mut self) -> &mut BTreeSet<usize> {
-        match self {
-            StoredVec::Raw(v) => v.mut_holes(),
-            StoredVec::Compressed(v) => v.mut_holes(),
-        }
-    }
-    #[inline]
-    fn prev_holes(&self) -> &BTreeSet<usize> {
-        match self {
-            StoredVec::Raw(v) => v.prev_holes(),
-            StoredVec::Compressed(v) => v.prev_holes(),
-        }
-    }
-    #[inline]
-    fn mut_prev_holes(&mut self) -> &mut BTreeSet<usize> {
-        match self {
-            StoredVec::Raw(v) => v.mut_prev_holes(),
-            StoredVec::Compressed(v) => v.mut_prev_holes(),
-        }
-    }
-
-    #[inline]
-    fn updated(&self) -> &BTreeMap<usize, T> {
-        match self {
-            StoredVec::Raw(v) => v.updated(),
-            StoredVec::Compressed(v) => v.updated(),
-        }
-    }
-    #[inline]
-    fn mut_updated(&mut self) -> &mut BTreeMap<usize, T> {
-        match self {
-            StoredVec::Raw(v) => v.mut_updated(),
-            StoredVec::Compressed(v) => v.mut_updated(),
-        }
-    }
-    #[inline]
-    fn prev_updated(&self) -> &BTreeMap<usize, T> {
-        match self {
-            StoredVec::Raw(v) => v.prev_updated(),
-            StoredVec::Compressed(v) => v.prev_updated(),
-        }
-    }
-    #[inline]
-    fn mut_prev_updated(&mut self) -> &mut BTreeMap<usize, T> {
-        match self {
-            StoredVec::Raw(v) => v.mut_prev_updated(),
-            StoredVec::Compressed(v) => v.mut_prev_updated(),
         }
     }
 

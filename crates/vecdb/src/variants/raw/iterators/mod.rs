@@ -1,6 +1,6 @@
 use std::iter::FusedIterator;
 
-use crate::{RawVec, Result, TypedVecIterator, VecIndex, VecIterator, VecValue};
+use crate::{GenericStoredVec, RawVec, Result, TypedVecIterator, VecIndex, VecIterator, VecValue};
 
 mod clean;
 mod dirty;

@@ -1,15 +1,12 @@
-use std::{
-    cmp::Ordering,
-    collections::{BTreeMap, BTreeSet},
-    fs,
-    path::PathBuf,
-};
+use std::{cmp::Ordering, collections::BTreeMap, fs, path::PathBuf};
 
 use log::info;
 use rawdb::Reader;
-use zerocopy::FromBytes;
+use zerocopy::{FromBytes, IntoBytes};
 
-use crate::{AnyStoredVec, Error, Result, SEPARATOR, SIZE_OF_U64, Stamp, Version, likely};
+use crate::{
+    AnyStoredVec, Error, Result, SIZE_OF_U64, Stamp, Version, likely, vec_region_name_with,
+};
 
 const ONE_KIB: usize = 1024;
 const ONE_MIB: usize = ONE_KIB * ONE_KIB;
@@ -108,90 +105,10 @@ where
     }
 
     // ============================================================================
-    // Get or Read Operations (checks all layers)
-    // ============================================================================
-
-    /// Gets value from any layer (updated, pushed, or storage) using provided reader.
-    /// Returns None if index is in holes or beyond available data.
-    #[inline]
-    fn get_or_read(&self, index: I, reader: &Reader) -> Result<Option<T>> {
-        self.get_or_read_at(index.to_usize(), reader)
-    }
-
-    /// Gets value from any layer, creating a temporary reader if needed.
-    /// For multiple reads, prefer `get_or_read()` with a reused reader.
-    #[inline]
-    fn get_or_read_once(&self, index: I) -> Result<Option<T>> {
-        self.get_or_read(index, &self.create_reader())
-    }
-
-    /// Gets value from any layer at usize index using provided reader.
-    /// Returns None if index is in holes or beyond available data.
-    #[inline]
-    fn get_or_read_at(&self, index: usize, reader: &Reader) -> Result<Option<T>> {
-        // Check holes first
-        let holes = self.holes();
-        if !holes.is_empty() && holes.contains(&index) {
-            return Ok(None);
-        }
-
-        let stored_len = self.stored_len();
-
-        // Check pushed (beyond stored length)
-        if index >= stored_len {
-            return Ok(self.pushed().get(index - stored_len).cloned());
-        }
-
-        // Check updated layer
-        let updated = self.updated();
-        if !updated.is_empty()
-            && let Some(updated_value) = updated.get(&index)
-        {
-            return Ok(Some(updated_value.clone()));
-        }
-
-        // Fall back to reading from storage
-        Ok(Some(self.unchecked_read_at(index, reader)?))
-    }
-
-    /// Gets value from any layer at usize index, creating a temporary reader.
-    /// For multiple reads, prefer `get_or_read_at()` with a reused reader.
-    #[inline]
-    fn get_or_read_at_once(&self, index: usize) -> Result<Option<T>> {
-        self.get_or_read_at(index, &self.create_reader())
-    }
-
-    /// Gets value from any layer using provided reader. Panics on error.
-    #[inline]
-    fn get_or_read_unwrap(&self, index: I, reader: &Reader) -> T {
-        self.get_or_read(index, reader).unwrap().unwrap()
-    }
-
-    /// Gets value from any layer, creating a temporary reader. Panics on error.
-    #[inline]
-    fn get_or_read_unwrap_once(&self, index: I) -> T {
-        self.get_or_read_unwrap(index, &self.create_reader())
-    }
-
-    /// Gets value from any layer at usize index using provided reader. Panics on error.
-    #[inline]
-    fn get_or_read_at_unwrap(&self, index: usize, reader: &Reader) -> T {
-        self.get_or_read_at(index, reader).unwrap().unwrap()
-    }
-
-    /// Gets value from any layer at usize index, creating a temporary reader. Panics on error.
-    /// For multiple reads, prefer `get_or_read_at_unwrap()` with a reused reader.
-    #[inline]
-    fn get_or_read_at_unwrap_once(&self, index: usize) -> T {
-        self.get_or_read_at_unwrap(index, &self.create_reader())
-    }
-
-    // ============================================================================
-    // Get Pushed or Read Operations (skips updated layer)
+    // Get Pushed or Read Operations
     // ============================================================================
 
     /// Gets value from pushed layer or storage using provided reader.
-    /// Does not check the updated layer.
     #[inline(always)]
     fn get_pushed_or_read(&self, index: I, reader: &Reader) -> Result<Option<T>> {
         self.get_pushed_or_read_at(index.to_usize(), reader)
@@ -345,155 +262,6 @@ where
     }
 
     // ============================================================================
-    // Update Operations
-    // ============================================================================
-
-    /// Returns the map of updated (uncommitted modifications to stored) values.
-    fn updated(&self) -> &BTreeMap<usize, T>;
-    /// Returns a mutable reference to the map of updated values.
-    fn mut_updated(&mut self) -> &mut BTreeMap<usize, T>;
-    #[doc(hidden)]
-    fn prev_updated(&self) -> &BTreeMap<usize, T>;
-    #[doc(hidden)]
-    fn mut_prev_updated(&mut self) -> &mut BTreeMap<usize, T>;
-
-    /// Updates the value at the given index.
-    #[inline]
-    fn update(&mut self, index: I, value: T) -> Result<()> {
-        self.update_at(index.to_usize(), value)
-    }
-
-    /// Updates the value at the given usize index.
-    #[inline]
-    fn update_at(&mut self, index: usize, value: T) -> Result<()> {
-        let stored_len = self.stored_len();
-
-        if index >= stored_len {
-            if let Some(prev) = self.mut_pushed().get_mut(index - stored_len) {
-                *prev = value;
-                return Ok(());
-            } else {
-                return Err(Error::IndexTooHigh {
-                    index,
-                    len: stored_len,
-                });
-            }
-        }
-
-        let holes = self.mut_holes();
-        if !holes.is_empty() {
-            holes.remove(&index);
-        }
-
-        self.mut_updated().insert(index, value);
-
-        Ok(())
-    }
-
-    /// Updates the value at the given index if it exists, or pushes it if the index equals length.
-    #[inline]
-    fn update_or_push(&mut self, index: I, value: T) -> Result<()> {
-        let len = self.len();
-        let index_usize = index.to_usize();
-        match len.cmp(&index_usize) {
-            Ordering::Less => Err(Error::IndexTooHigh {
-                index: index_usize,
-                len,
-            }),
-            Ordering::Equal => {
-                self.push(value);
-                Ok(())
-            }
-            Ordering::Greater => self.update(index, value),
-        }
-    }
-
-    // ============================================================================
-    // Holes Management
-    // ============================================================================
-
-    /// Returns the set of deleted indices (holes).
-    fn holes(&self) -> &BTreeSet<usize>;
-    /// Returns a mutable reference to the set of holes.
-    fn mut_holes(&mut self) -> &mut BTreeSet<usize>;
-    #[doc(hidden)]
-    fn prev_holes(&self) -> &BTreeSet<usize>;
-    #[doc(hidden)]
-    fn mut_prev_holes(&mut self) -> &mut BTreeSet<usize>;
-
-    /// Returns the first empty index (either the first hole or the length).
-    #[inline]
-    fn get_first_empty_index(&self) -> I {
-        self.holes()
-            .first()
-            .cloned()
-            .unwrap_or_else(|| self.len_())
-            .into()
-    }
-
-    /// Fills the first hole with the value, or pushes if there are no holes. Returns the index used.
-    #[inline]
-    fn fill_first_hole_or_push(&mut self, value: T) -> Result<I> {
-        Ok(
-            if let Some(hole) = self.mut_holes().pop_first().map(I::from) {
-                self.update(hole, value)?;
-                hole
-            } else {
-                self.push(value);
-                I::from(self.len() - 1)
-            },
-        )
-    }
-
-    // ============================================================================
-    // Delete and Take Operations
-    // ============================================================================
-
-    /// Takes (removes and returns) the value at the given index using provided reader.
-    fn take(&mut self, index: I, reader: &Reader) -> Result<Option<T>> {
-        self.take_at(index.to_usize(), reader)
-    }
-
-    /// Takes (removes and returns) the value at the given usize index using provided reader.
-    fn take_at(&mut self, index: usize, reader: &Reader) -> Result<Option<T>> {
-        let opt = self.get_or_read_at(index, reader)?;
-        if opt.is_some() {
-            self.unchecked_delete_at(index);
-        }
-        Ok(opt)
-    }
-
-    /// Deletes the value at the given index (marks it as a hole).
-    #[inline]
-    fn delete(&mut self, index: I) {
-        self.delete_at(index.to_usize())
-    }
-
-    /// Deletes the value at the given usize index (marks it as a hole).
-    #[inline]
-    fn delete_at(&mut self, index: usize) {
-        if index < self.len() {
-            self.unchecked_delete_at(index);
-        }
-    }
-
-    #[inline]
-    #[doc(hidden)]
-    fn unchecked_delete(&mut self, index: I) {
-        self.unchecked_delete_at(index.to_usize())
-    }
-
-    #[inline]
-    #[doc(hidden)]
-    fn unchecked_delete_at(&mut self, index: usize) {
-        let updated = self.mut_updated();
-        if !updated.is_empty() {
-            updated.remove(&index);
-        }
-        self.mut_holes().insert(index);
-    }
-
-    // ============================================================================
     // Storage Length Management
     // ============================================================================
 
@@ -513,26 +281,17 @@ where
         self.truncate_if_needed_at(index.to_usize())
     }
 
-    /// Truncates the vector to the given usize index if the current length exceeds it.
-    fn truncate_if_needed_at(&mut self, index: usize) -> Result<()> {
+    /// Default truncate implementation handling pushed layer only.
+    /// Returns true if stored_len needs to be updated to `index`.
+    /// RawVec overrides truncate_if_needed_at to also handle holes/updated.
+    #[doc(hidden)]
+    fn default_truncate_if_needed_at(&mut self, index: usize) -> Result<bool> {
         let stored_len = self.stored_len();
         let pushed_len = self.pushed_len();
         let len = stored_len + pushed_len;
 
         if index >= len {
-            return Ok(());
-        }
-
-        if self.holes().last().is_some_and(|&h| h >= index) {
-            self.mut_holes().retain(|&i| i < index);
-        }
-
-        if self
-            .updated()
-            .last_key_value()
-            .is_some_and(|(&k, _)| k >= index)
-        {
-            self.mut_updated().retain(|&i, _| i < index);
+            return Ok(false);
         }
 
         if index <= stored_len {
@@ -541,12 +300,14 @@ where
             self.mut_pushed().truncate(index - stored_len);
         }
 
-        if index >= stored_len {
-            return Ok(());
+        Ok(index < stored_len)
+    }
+
+    /// Truncates the vector to the given usize index if the current length exceeds it.
+    fn truncate_if_needed_at(&mut self, index: usize) -> Result<()> {
+        if self.default_truncate_if_needed_at(index)? {
+            self.update_stored_len(index);
         }
-
-        self.update_stored_len(index);
-
         Ok(())
     }
 
@@ -570,15 +331,16 @@ where
         self.truncate_if_needed_at(0)
     }
 
-    /// Resets uncommitted changes (pushed, holes, and updated layers).
-    fn reset_unsaved(&mut self) {
+    /// Default reset_unsaved implementation - clears pushed layer only.
+    /// RawVec overrides to also clear holes/updated.
+    #[doc(hidden)]
+    fn default_reset_unsaved(&mut self) {
         self.mut_pushed().clear();
-        if !self.holes().is_empty() {
-            self.mut_holes().clear();
-        }
-        if !self.updated().is_empty() {
-            self.mut_updated().clear();
-        }
+    }
+
+    /// Resets uncommitted changes.
+    fn reset_unsaved(&mut self) {
+        self.default_reset_unsaved();
     }
 
     /// Validates the computed version against the stored version, resetting if they don't match.
@@ -602,42 +364,12 @@ where
     }
 
     // ============================================================================
-    // Collection Operations
-    // ============================================================================
-
-    /// Collects all values into a Vec, with None for holes.
-    fn collect_holed(&self) -> Result<Vec<Option<T>>> {
-        self.collect_holed_range(None, None)
-    }
-
-    /// Collects values in the given range into a Vec, with None for holes.
-    fn collect_holed_range(
-        &self,
-        from: Option<usize>,
-        to: Option<usize>,
-    ) -> Result<Vec<Option<T>>> {
-        let len = self.len();
-        let from = from.unwrap_or_default();
-        let to = to.map_or(len, |to| to.min(len));
-
-        if from >= len || from >= to {
-            return Ok(vec![]);
-        }
-
-        let reader = self.create_reader();
-
-        (from..to)
-            .map(|i| self.get_or_read_at(i, &reader))
-            .collect::<Result<Vec<_>>>()
-    }
-
-    // ============================================================================
     // Dirty State Checking
     // ============================================================================
 
-    /// Returns true if there are uncommitted changes (pushed or updated values).
-    fn is_dirty(&mut self) -> bool {
-        !self.is_pushed_empty() || !self.updated().is_empty()
+    /// Returns true if there are uncommitted changes (pushed values).
+    fn is_dirty(&self) -> bool {
+        !self.is_pushed_empty()
     }
 
     // ============================================================================
@@ -659,9 +391,11 @@ where
         }
     }
 
-    /// Flushes with the given stamp, saving changes to enable rollback.
-    #[inline]
-    fn stamped_flush_with_changes(&mut self, stamp: Stamp) -> Result<()> {
+    /// Default implementation of stamped_flush_with_changes.
+    /// Handles file management, serialization, flush, and base prev_ field updates.
+    /// RawVec overrides stamped_flush_with_changes to also update prev_holes/prev_updated.
+    #[doc(hidden)]
+    fn default_stamped_flush_with_changes(&mut self, stamp: Stamp) -> Result<()> {
         let saved_stamped_changes = self.saved_stamped_changes();
 
         if saved_stamped_changes == 0 {
@@ -697,10 +431,6 @@ where
             fs::remove_file(path)?;
         }
 
-        // Save current state BEFORE flush clears it (flush uses mem::take on pushed/updated)
-        let holes_before_flush = self.holes().clone();
-
-        // Flush ?
         fs::write(
             path.join(u64::from(stamp).to_string()),
             self.serialize_changes()?,
@@ -709,18 +439,22 @@ where
         self.stamped_flush(stamp)?;
 
         // Update prev_ fields to reflect the PERSISTED state after flush
-        // After flush: pushed data → stored (on disk), updated → stored (on disk)
-        // So prev_pushed is always empty, prev_updated is ALSO empty (updates are now on disk)
-        *self.mut_prev_stored_len() = self.stored_len(); // Use NEW stored_len after flush
-        *self.mut_prev_pushed() = vec![]; // Always empty after flush - pushed data is now stored
-        *self.mut_prev_updated() = BTreeMap::new(); // Always empty after flush - updated data is now stored
-        *self.mut_prev_holes() = holes_before_flush;
+        *self.mut_prev_stored_len() = self.stored_len();
+        *self.mut_prev_pushed() = vec![];
 
         Ok(())
     }
 
-    /// Rolls back changes to before the given stamp.
-    fn rollback_before(&mut self, stamp: Stamp) -> Result<Stamp> {
+    /// Flushes with the given stamp, saving changes to enable rollback.
+    fn stamped_flush_with_changes(&mut self, stamp: Stamp) -> Result<()> {
+        self.default_stamped_flush_with_changes(stamp)
+    }
+
+    /// Default implementation of rollback_before.
+    /// Handles the rollback loop and base prev_ field updates.
+    /// RawVec overrides rollback_before to also update prev_holes/prev_updated.
+    #[doc(hidden)]
+    fn default_rollback_before(&mut self, stamp: Stamp) -> Result<Stamp> {
         if self.stamp() < stamp {
             return Ok(self.stamp());
         }
@@ -754,10 +488,13 @@ where
         // Save the restored state to prev_ fields so they're available for the next flush
         *self.mut_prev_stored_len() = self.stored_len();
         *self.mut_prev_pushed() = self.pushed().to_vec();
-        *self.mut_prev_updated() = self.updated().clone();
-        *self.mut_prev_holes() = self.holes().clone();
 
         Ok(self.stamp())
+    }
+
+    /// Rolls back changes to before the given stamp.
+    fn rollback_before(&mut self, stamp: Stamp) -> Result<Stamp> {
+        self.default_rollback_before(stamp)
     }
 
     /// Rolls back the most recent change set.
@@ -769,8 +506,17 @@ where
         self.deserialize_then_undo_changes(&bytes)
     }
 
-    /// Deserializes change data and undoes those changes.
-    fn deserialize_then_undo_changes(&mut self, bytes: &[u8]) -> Result<()> {
+    /// Restores a truncated value during deserialization.
+    /// Default implementation pushes it back. RawVec overrides to insert into updated map.
+    #[doc(hidden)]
+    fn restore_truncated_value(&mut self, _index: usize, value: T) {
+        self.push(value);
+    }
+
+    /// Default implementation of deserialize_then_undo_changes.
+    /// Returns the position after parsing the base data so RawVec can continue.
+    #[doc(hidden)]
+    fn default_deserialize_then_undo_changes(&mut self, bytes: &[u8]) -> Result<usize> {
         let mut pos = 0;
         let mut len = SIZE_OF_U64;
 
@@ -788,13 +534,10 @@ where
 
         // Restore to the length BEFORE the changes that we're undoing
         if prev_stored_len < current_stored_len {
-            // Shrinking - truncate will handle this
             self.truncate_if_needed_at(prev_stored_len)?;
         } else if prev_stored_len > current_stored_len {
-            // Expanding - truncate won't handle this, manually set stored_len
             self.update_stored_len(prev_stored_len);
         }
-        // If equal, no change needed
 
         let truncated_count = usize::read_from_bytes(&bytes[pos..pos + len])?;
         pos += len;
@@ -802,12 +545,7 @@ where
         // Clear pushed (will be replaced with prev_pushed from change file)
         self.mut_pushed().clear();
 
-        // DON'T clear updated! The change file only contains indices modified in this stamp.
-        // When doing multiple rollbacks, we need to preserve updates from previous rollbacks.
-        // The update_() calls below will overwrite specific indices as needed.
-
-        // Restore truncated items into the updated map since they're now at indices < stored_len
-        // The disk still has stale data for these indices, so we need to override with correct values
+        // Restore truncated values
         if truncated_count > 0 {
             len = Self::SIZE_OF_T * truncated_count;
             let truncated_values = bytes[pos..pos + len]
@@ -816,10 +554,9 @@ where
                 .collect::<Result<Vec<_>>>()?;
             pos += len;
 
-            // Add truncated values to updated map at their correct indices
             let start_index = prev_stored_len - truncated_count;
             for (i, val) in truncated_values.into_iter().enumerate() {
-                self.mut_updated().insert(start_index + i, val);
+                self.restore_truncated_value(start_index + i, val);
             }
         }
 
@@ -837,84 +574,68 @@ where
         len = SIZE_OF_U64;
         let pushed_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
         pos += len;
-        len = Self::SIZE_OF_T * pushed_len;
-        let _pushed = bytes[pos..pos + len]
-            .chunks(Self::SIZE_OF_T)
-            .map(|s| T::read_from_bytes(s).map_err(|_| Error::ZeroCopyError))
-            .collect::<Result<Vec<_>>>()?;
-        pos += len;
+        // Skip current pushed values (we already restored prev_pushed)
+        pos += Self::SIZE_OF_T * pushed_len;
 
-        len = SIZE_OF_U64;
-        let prev_modified_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
-        pos += len;
-        len = SIZE_OF_U64 * prev_modified_len;
-        let prev_indexes = bytes[pos..pos + len].chunks(SIZE_OF_U64);
-        pos += len;
-        len = Self::SIZE_OF_T * prev_modified_len;
-        let prev_values = bytes[pos..pos + len].chunks(Self::SIZE_OF_T);
-        let _prev_updated: BTreeMap<usize, T> = prev_indexes
-            .zip(prev_values)
-            .map(|(i, v)| {
-                let idx = usize::read_from_bytes(i).map_err(|_| Error::ZeroCopyError)?;
-                let val = T::read_from_bytes(v).map_err(|_| Error::ZeroCopyError)?;
-                Ok((idx, val))
-            })
-            .collect::<Result<_>>()?;
-        pos += len;
+        // After rollback, prev_* should reflect the rolled-back state
+        *self.mut_prev_pushed() = self.pushed().to_vec();
 
-        len = SIZE_OF_U64;
-        let modified_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
-        pos += len;
-        len = SIZE_OF_U64 * modified_len;
-        let indexes = bytes[pos..pos + len].chunks(SIZE_OF_U64);
-        pos += len;
-        len = Self::SIZE_OF_T * modified_len;
-        let values = bytes[pos..pos + len].chunks(Self::SIZE_OF_T);
-        let old_values_to_restore: BTreeMap<usize, T> = indexes
-            .zip(values)
-            .map(|(i, v)| {
-                let idx = usize::read_from_bytes(i).map_err(|_| Error::ZeroCopyError)?;
-                let val = T::read_from_bytes(v).map_err(|_| Error::ZeroCopyError)?;
-                Ok((idx, val))
-            })
-            .collect::<Result<_>>()?;
-        pos += len;
+        Ok(pos)
+    }
 
-        len = SIZE_OF_U64;
-        let prev_holes_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
-        pos += len;
-        len = SIZE_OF_U64 * prev_holes_len;
-        let prev_holes = bytes[pos..pos + len]
-            .chunks(SIZE_OF_U64)
-            .map(|b| usize::read_from_bytes(b).map_err(|_| Error::ZeroCopyError))
-            .collect::<Result<BTreeSet<_>>>()?;
-        pos += len;
+    /// Deserializes change data and undoes those changes.
+    /// Base implementation handles pushed and truncated data. RawVec overrides for holes/updated.
+    fn deserialize_then_undo_changes(&mut self, bytes: &[u8]) -> Result<()> {
+        self.default_deserialize_then_undo_changes(bytes)?;
+        Ok(())
+    }
 
-        len = SIZE_OF_U64;
-        let holes_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
-        pos += len;
-        len = SIZE_OF_U64 * holes_len;
-        let _holes = bytes[pos..pos + len]
-            .chunks(SIZE_OF_U64)
-            .map(|b| usize::read_from_bytes(b).map_err(|_| Error::ZeroCopyError))
-            .collect::<Result<BTreeSet<_>>>()?;
+    // ============================================================================
+    // Serialization
+    // ============================================================================
 
-        if !self.holes().is_empty() || !self.prev_holes().is_empty() || !prev_holes.is_empty() {
-            *self.mut_holes() = prev_holes.clone();
-            *self.mut_prev_holes() = prev_holes;
+    /// Gets a stored value for serialization purposes.
+    /// Default implementation reads directly from disk.
+    /// RawVec overrides to check prev_updated first.
+    #[doc(hidden)]
+    fn get_stored_value_for_serialization(&self, index: usize, reader: &Reader) -> Result<T> {
+        self.unchecked_read_at(index, reader)
+    }
+
+    /// Default implementation of serialize_changes.
+    /// Serializes: stamp, prev_stored_len, stored_len, truncated_count, truncated_values,
+    /// prev_pushed, pushed.
+    /// RawVec calls this and appends holes/updated data.
+    #[doc(hidden)]
+    fn default_serialize_changes(&self) -> Result<Vec<u8>> {
+        let mut bytes = vec![];
+        let reader = self.create_reader();
+
+        bytes.extend(self.stamp().as_bytes());
+
+        let prev_stored_len = self.prev_stored_len();
+        let stored_len = self.stored_len();
+
+        bytes.extend(prev_stored_len.as_bytes());
+        bytes.extend(stored_len.as_bytes());
+
+        let truncated = prev_stored_len.checked_sub(stored_len).unwrap_or_default();
+        bytes.extend(truncated.as_bytes());
+
+        if truncated > 0 {
+            let truncated_vals = (stored_len..prev_stored_len)
+                .map(|i| self.get_stored_value_for_serialization(i, &reader))
+                .collect::<Result<Vec<_>>>()?;
+            bytes.extend(truncated_vals.as_bytes());
         }
 
-        // Restore old values to updated map (the "modified" section contains the values we want to restore)
-        old_values_to_restore
-            .into_iter()
-            .try_for_each(|(i, v)| self.update_at(i, v))?;
+        bytes.extend(self.prev_pushed().len().as_bytes());
+        bytes.extend(self.prev_pushed().iter().flat_map(|v| v.as_bytes()));
 
-        // After rollback, prev_* should reflect the rolled-back state (for the next flush)
-        *self.mut_prev_updated() = self.updated().clone();
-        *self.mut_prev_pushed() = self.pushed().to_vec();
-        // prev_holes and prev_stored_len are already set above
+        bytes.extend(self.pushed().len().as_bytes());
+        bytes.extend(self.pushed().iter().flat_map(|v| v.as_bytes()));
 
-        Ok(())
+        Ok(bytes)
     }
 
     // ============================================================================
@@ -923,20 +644,6 @@ where
 
     /// Returns the region name for this vector.
     fn vec_region_name(&self) -> String {
-        Self::vec_region_name_with(self.name())
-    }
-    /// Returns the region name for the given vector name.
-    /// MUST BE in sync with AnyVec::index_to_name
-    fn vec_region_name_with(name: &str) -> String {
-        format!("{}{SEPARATOR}{}", I::to_string(), name)
-    }
-
-    /// Returns the region name for the holes of this vector.
-    fn holes_region_name(&self) -> String {
-        Self::holes_region_name_with(self.name())
-    }
-    /// Returns the region name for the holes of the given vector name.
-    fn holes_region_name_with(name: &str) -> String {
-        format!("{}_holes", Self::vec_region_name_with(name))
+        vec_region_name_with::<I>(self.name())
     }
 }

@@ -1,5 +1,4 @@
 use rawdb::Database;
-use std::collections::BTreeSet;
 use tempfile::TempDir;
 use vecdb::{
     AnyStoredVec, AnyVec, CollectableVec, CompressedVec, GenericStoredVec, Result, Stamp,
@@ -172,9 +171,8 @@ fn test_compressed_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(vec.len(), 21);
 
         let reader = vec.create_reader();
-        assert_eq!(vec.holes(), &BTreeSet::new());
-        assert_eq!(vec.get_or_read(0, &reader)?, Some(0));
-        assert_eq!(vec.get_or_read(10, &reader)?, Some(10));
+        assert_eq!(vec.get_pushed_or_read(0, &reader)?, Some(0));
+        assert_eq!(vec.get_pushed_or_read(10, &reader)?, Some(10));
         drop(reader);
 
         vec.write()?;

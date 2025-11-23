@@ -47,29 +47,6 @@ impl Version {
     pub fn swap_bytes(self) -> Self {
         Self(self.0.swap_bytes())
     }
-
-    ///
-    /// Ok(true) if existed and is same.
-    ///
-    /// Ok(false) if didn't exist.
-    ///
-    pub fn validate(&self, path: &Path) -> Result<bool> {
-        if let Ok(prev_version) = Version::try_from(path) {
-            if prev_version != *self {
-                if prev_version.swap_bytes() == *self {
-                    return Err(Error::WrongEndian);
-                }
-                return Err(Error::DifferentVersion {
-                    found: prev_version,
-                    expected: *self,
-                });
-            }
-
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
 }
 
 impl From<Version> for u64 {

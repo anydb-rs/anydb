@@ -220,7 +220,7 @@ fn test_data_integrity_rollback_flush_reopen() -> Result<(), Box<dyn std::error:
     let reader = vec.create_reader();
     let mut data_via_gets = Vec::new();
     for i in 0..vec.len() {
-        let value = vec.get_or_read(i, &reader)?;
+        let value = vec.get_any_or_read(i, &reader)?;
         data_via_gets.push(value);
     }
     drop(reader);
@@ -333,7 +333,7 @@ fn test_data_integrity_rollback_flush_reopen() -> Result<(), Box<dyn std::error:
     let reader = vec.create_reader();
     let mut data_via_gets = Vec::new();
     for i in 0..vec.len() {
-        let value = vec.get_or_read(i, &reader)?;
+        let value = vec.get_any_or_read(i, &reader)?;
         data_via_gets.push(value);
     }
     drop(reader);

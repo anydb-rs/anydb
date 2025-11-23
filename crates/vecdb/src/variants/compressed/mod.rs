@@ -1,18 +1,13 @@
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    mem,
-    path::PathBuf,
-    sync::Arc,
-};
+use std::{mem, path::PathBuf, sync::Arc};
 
 use log::info;
 use parking_lot::RwLock;
 use rawdb::{Database, Reader, Region};
 
 use crate::{
-    AnyStoredVec, AnyVec, AsInnerSlice, BoxedVecIterator, Compressable, Error, Format,
-    FromInnerSlice, GenericStoredVec, HEADER_OFFSET, Header, IterableVec, RawVec, Result, TypedVec,
-    VecIndex, Version, likely, unlikely, variants::ImportOptions,
+    AnyStoredVec, AnyVec, AsInnerSlice, BaseVec, BoxedVecIterator, Compressable, Error, Format,
+    FromInnerSlice, GenericStoredVec, HEADER_OFFSET, Header, IterableVec, Result, TypedVec,
+    VecIndex, Version, likely, unlikely, variants::ImportOptions, vec_region_name_with,
 };
 
 mod iterators;
@@ -37,7 +32,7 @@ const VERSION: Version = Version::TWO;
 #[derive(Debug, Clone)]
 #[must_use = "Vector should be stored to keep data accessible"]
 pub struct CompressedVec<I, T> {
-    inner: RawVec<I, T>,
+    base: BaseVec<I, T>,
     pages: Arc<RwLock<Pages>>,
 }
 
@@ -65,10 +60,7 @@ where
                 info!("Resetting {}...", options.name);
                 options
                     .db
-                    .remove_region_if_exists(&Self::vec_region_name_with(options.name))?;
-                options
-                    .db
-                    .remove_region_if_exists(&Self::holes_region_name_with(options.name))?;
+                    .remove_region_if_exists(&vec_region_name_with::<I>(options.name))?;
                 options
                     .db
                     .remove_region_if_exists(&Self::pages_region_name_(options.name))?;
@@ -83,17 +75,23 @@ where
     }
 
     #[inline]
-    pub fn import_with(options: ImportOptions) -> Result<Self> {
-        let inner = RawVec::import_(options, Format::Compressed)?;
+    pub fn import_with(mut options: ImportOptions) -> Result<Self> {
+        options.version = options.version + VERSION;
+        let db = options.db;
+        let name = options.name;
 
-        let pages = Pages::import(options.db, &Self::pages_region_name_(options.name))?;
+        let base = BaseVec::import(options, Format::Compressed)?;
 
-        let this = Self {
-            inner,
+        let pages = Pages::import(db, &Self::pages_region_name_(name))?;
+
+        let mut this = Self {
+            base,
             pages: Arc::new(RwLock::new(pages)),
         };
 
-        this.update_stored_len(this.real_stored_len());
+        let len = this.real_stored_len();
+        *this.mut_prev_stored_len() = len;
+        this.update_stored_len(len);
 
         Ok(this)
     }
@@ -188,7 +186,7 @@ where
         Self::pages_region_name_(self.name())
     }
     fn pages_region_name_(name: &str) -> String {
-        format!("{}_pages", Self::vec_region_name_with(name))
+        format!("{}_pages", vec_region_name_with::<I>(name))
     }
 
     #[inline]
@@ -198,12 +196,11 @@ where
 
     /// Removes this vector and all its associated regions from the database
     pub fn remove(self) -> Result<()> {
-        // Remove main region (through inner RawVec)
-        self.inner.remove()?;
+        // Remove main region
+        self.base.remove()?;
 
         // Remove pages region
-        let pages = Arc::try_unwrap(self.pages)
-            .map_err(|_| Error::PagesStillReferenced)?;
+        let pages = Arc::try_unwrap(self.pages).map_err(|_| Error::PagesStillReferenced)?;
         pages.into_inner().remove()?;
 
         Ok(())
@@ -217,12 +214,12 @@ where
 {
     #[inline]
     fn version(&self) -> Version {
-        self.inner.version()
+        self.base.version()
     }
 
     #[inline]
     fn name(&self) -> &str {
-        self.inner.name()
+        self.base.name()
     }
 
     #[inline]
@@ -242,9 +239,7 @@ where
 
     #[inline]
     fn region_names(&self) -> Vec<String> {
-        let mut v = self.inner.region_names();
-        v.push(self.pages_region_name());
-        v
+        vec![self.base.index_to_name(), self.pages_region_name()]
     }
 }
 
@@ -255,32 +250,32 @@ where
 {
     #[inline]
     fn db_path(&self) -> PathBuf {
-        self.inner.db_path()
+        self.base.db_path()
     }
 
     #[inline]
     fn region(&self) -> &Region {
-        self.inner.region()
+        self.base.region()
     }
 
     #[inline]
     fn header(&self) -> &Header {
-        self.inner.header()
+        self.base.header()
     }
 
     #[inline]
     fn mut_header(&mut self) -> &mut Header {
-        self.inner.mut_header()
+        self.base.mut_header()
     }
 
     #[inline]
     fn saved_stamped_changes(&self) -> u16 {
-        self.inner.saved_stamped_changes()
+        self.base.saved_stamped_changes()
     }
 
     #[inline]
     fn stored_len(&self) -> usize {
-        self.inner.stored_len()
+        self.base.stored_len()
     }
 
     #[inline]
@@ -289,7 +284,7 @@ where
     }
 
     fn write(&mut self) -> Result<()> {
-        self.inner.write_header_if_needed()?;
+        self.base.write_header_if_needed()?;
 
         let stored_len = self.stored_len();
         let pushed_len = self.pushed_len();
@@ -333,7 +328,7 @@ where
                 .map_or(offset, |page| page.start + page.bytes as u64)
         };
 
-        values.append(&mut mem::take(self.inner.mut_pushed()));
+        values.append(&mut mem::take(self.base.mut_pushed()));
 
         let compressed = values
             .chunks(Self::PER_PAGE)
@@ -371,12 +366,12 @@ where
 
     #[inline]
     fn serialize_changes(&self) -> Result<Vec<u8>> {
-        self.inner.serialize_changes()
+        self.default_serialize_changes()
     }
 
     #[inline]
     fn db(&self) -> Database {
-        self.inner.db()
+        self.base.db()
     }
 }
 
@@ -398,65 +393,33 @@ where
 
     #[inline]
     fn pushed(&self) -> &[T] {
-        self.inner.pushed()
+        self.base.pushed()
     }
     #[inline]
     fn mut_pushed(&mut self) -> &mut Vec<T> {
-        self.inner.mut_pushed()
+        self.base.mut_pushed()
     }
     #[inline]
     fn prev_pushed(&self) -> &[T] {
-        self.inner.prev_pushed()
+        self.base.prev_pushed()
     }
     #[inline]
     fn mut_prev_pushed(&mut self) -> &mut Vec<T> {
-        self.inner.mut_prev_pushed()
-    }
-    #[inline]
-    fn holes(&self) -> &BTreeSet<usize> {
-        self.inner.holes()
-    }
-    #[inline]
-    fn mut_holes(&mut self) -> &mut BTreeSet<usize> {
-        panic!("unsupported for now")
-    }
-    #[inline]
-    fn prev_holes(&self) -> &BTreeSet<usize> {
-        self.inner.prev_holes()
-    }
-    #[inline]
-    fn mut_prev_holes(&mut self) -> &mut BTreeSet<usize> {
-        panic!("unsupported for now")
-    }
-    #[inline]
-    fn updated(&self) -> &BTreeMap<usize, T> {
-        self.inner.updated()
-    }
-    #[inline]
-    fn mut_updated(&mut self) -> &mut BTreeMap<usize, T> {
-        panic!("unsupported for now")
-    }
-    #[inline]
-    fn prev_updated(&self) -> &BTreeMap<usize, T> {
-        self.inner.prev_updated()
-    }
-    #[inline]
-    fn mut_prev_updated(&mut self) -> &mut BTreeMap<usize, T> {
-        panic!("unsupported for now")
+        self.base.mut_prev_pushed()
     }
 
     #[inline]
     #[doc(hidden)]
     fn update_stored_len(&self, val: usize) {
-        self.inner.update_stored_len(val);
+        self.base.update_stored_len(val);
     }
     #[inline]
     fn prev_stored_len(&self) -> usize {
-        self.inner.prev_stored_len()
+        self.base.prev_stored_len()
     }
     #[inline]
     fn mut_prev_stored_len(&mut self) -> &mut usize {
-        self.inner.mut_prev_stored_len()
+        self.base.mut_prev_stored_len()
     }
 
     fn reset(&mut self) -> Result<()> {

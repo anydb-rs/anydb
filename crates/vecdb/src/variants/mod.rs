@@ -1,3 +1,4 @@
+mod base;
 mod compressed;
 mod computed;
 mod eager;
@@ -5,6 +6,7 @@ mod lazy;
 mod raw;
 mod stored;
 
+pub use base::*;
 pub use compressed::*;
 pub use computed::*;
 pub use eager::*;

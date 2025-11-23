@@ -151,7 +151,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let reader = vec.create_reader();
         assert_eq!(vec.take(10, &reader)?, Some(10));
         assert_eq!(vec.holes(), &BTreeSet::from([10]));
-        assert_eq!(vec.get_or_read(10, &reader)?, None);
+        assert_eq!(vec.get_any_or_read(10, &reader)?, None);
         drop(reader);
 
         vec.write()?;
@@ -165,7 +165,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert!(vec.holes() == &BTreeSet::from([10]));
 
         let reader = vec.create_reader();
-        assert!(vec.get_or_read(10, &reader)?.is_none());
+        assert!(vec.get_any_or_read(10, &reader)?.is_none());
         drop(reader);
 
         vec.update(10, 10)?;
@@ -173,8 +173,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let reader = vec.create_reader();
         assert_eq!(vec.holes(), &BTreeSet::new());
-        assert_eq!(vec.get_or_read(0, &reader)?, Some(10));
-        assert_eq!(vec.get_or_read(10, &reader)?, Some(10));
+        assert_eq!(vec.get_any_or_read(0, &reader)?, Some(10));
+        assert_eq!(vec.get_any_or_read(10, &reader)?, Some(10));
         drop(reader);
 
         vec.write()?;

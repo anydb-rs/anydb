@@ -1,4 +1,4 @@
-use crate::{Stamp, Version};
+use crate::{Stamp, Version, vec_region_name};
 
 /// Converts an i64 index to usize, supporting negative indexing.
 /// Negative indices count from the end.
@@ -10,8 +10,6 @@ pub fn i64_to_usize(i: i64, len: usize) -> usize {
         if v < 0 { 0 } else { v as usize }
     }
 }
-
-pub const SEPARATOR: &str = "_to_";
 
 /// Common trait for all vectors providing metadata and utility methods.
 pub trait AnyVec: Send + Sync {
@@ -25,7 +23,7 @@ pub trait AnyVec: Send + Sync {
     fn index_type_to_string(&self) -> &'static str;
     /// Returns the combined name of the vector.
     fn index_to_name(&self) -> String {
-        format!("{}{SEPARATOR}{}", self.index_type_to_string(), self.name())
+        vec_region_name(self.name(), self.index_type_to_string())
     }
     /// Returns the list of region names used by this vector.
     fn region_names(&self) -> Vec<String>;

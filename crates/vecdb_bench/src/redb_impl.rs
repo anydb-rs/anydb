@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{cell::RefCell, path::Path};
 
 use anyhow::Result;
 use rayon::prelude::*;
@@ -68,8 +68,6 @@ impl DatabaseBenchmark for RedbBench {
     }
 
     fn read_random_rayon(&self, indices: &[u64]) -> Result<u64> {
-        use std::cell::RefCell;
-
         thread_local! {
             static TXN_CACHE: RefCell<Option<(redb::ReadTransaction, redb::ReadOnlyTable<u64, u64>)>> = const { RefCell::new(None) };
         }

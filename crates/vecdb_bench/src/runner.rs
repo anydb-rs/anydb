@@ -1,6 +1,7 @@
 use crate::database::DatabaseBenchmark;
 use anyhow::Result;
 use rand::{Rng, SeedableRng};
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -335,7 +336,6 @@ impl BenchmarkRunner {
         writeln!(file)?;
 
         // Group results by run_index
-        use std::collections::HashMap;
         let mut run_map: HashMap<usize, Vec<&BenchmarkResult>> = HashMap::new();
 
         for result in results {

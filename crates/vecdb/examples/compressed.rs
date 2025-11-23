@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, fs, path::Path};
+use std::{fs, path::Path};
 
 use vecdb::{
     AnyStoredVec, AnyVec, CollectableVec, CompressedVec, Database, GenericStoredVec, Stamp,
@@ -167,9 +167,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(vec.len(), 21);
 
         let reader = vec.create_reader();
-        assert_eq!(vec.holes(), &BTreeSet::new());
-        assert_eq!(vec.get_or_read(0, &reader)?, Some(0));
-        assert_eq!(vec.get_or_read(10, &reader)?, Some(10));
+        assert_eq!(vec.get_pushed_or_read(0, &reader)?, Some(0));
+        assert_eq!(vec.get_pushed_or_read(10, &reader)?, Some(10));
         drop(reader);
 
         vec.write()?;

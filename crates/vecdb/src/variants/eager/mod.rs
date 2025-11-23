@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::VecDeque,
     f32,
     fmt::Debug,
     iter::Sum,
@@ -1520,40 +1520,6 @@ where
     #[inline]
     fn mut_prev_pushed(&mut self) -> &mut Vec<T> {
         self.0.mut_prev_pushed()
-    }
-
-    #[inline]
-    fn holes(&self) -> &BTreeSet<usize> {
-        self.0.holes()
-    }
-    #[inline]
-    fn mut_holes(&mut self) -> &mut BTreeSet<usize> {
-        self.0.mut_holes()
-    }
-    #[inline]
-    fn prev_holes(&self) -> &BTreeSet<usize> {
-        self.0.prev_holes()
-    }
-    #[inline]
-    fn mut_prev_holes(&mut self) -> &mut BTreeSet<usize> {
-        self.0.mut_prev_holes()
-    }
-
-    #[inline]
-    fn updated(&self) -> &BTreeMap<usize, T> {
-        self.0.updated()
-    }
-    #[inline]
-    fn mut_updated(&mut self) -> &mut BTreeMap<usize, T> {
-        self.0.mut_updated()
-    }
-    #[inline]
-    fn prev_updated(&self) -> &BTreeMap<usize, T> {
-        self.0.prev_updated()
-    }
-    #[inline]
-    fn mut_prev_updated(&mut self) -> &mut BTreeMap<usize, T> {
-        self.0.mut_prev_updated()
     }
 
     #[inline]

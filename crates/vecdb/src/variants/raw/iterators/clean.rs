@@ -35,9 +35,9 @@ where
     const _CHECK_T: () = assert!(Self::SIZE_OF_T > 0, "Can't have T with size_of() == 0");
 
     pub fn new(vec: &'a RawVec<I, T>) -> Result<Self> {
-        let file = vec.region.open_db_read_only_file()?;
+        let file = vec.region().open_db_read_only_file()?;
 
-        let region_meta = vec.region.meta();
+        let region_meta = vec.region().meta();
         let region_start = region_meta.start();
         let start_offset = region_start + HEADER_OFFSET;
         // Support truncated vecs
