@@ -24,7 +24,7 @@ pub use options::*;
 /// This struct holds the core state that all stored vector implementations share:
 /// region storage, header metadata, pushed values, and length tracking.
 #[derive(Debug, Clone)]
-pub(crate) struct StoredVec<I, T> {
+pub(crate) struct BaseVec<I, T> {
     region: Region,
     header: Header,
     name: Arc<str>,
@@ -37,7 +37,7 @@ pub(crate) struct StoredVec<I, T> {
     phantom: PhantomData<I>,
 }
 
-impl<I, T> StoredVec<I, T>
+impl<I, T> BaseVec<I, T>
 where
     I: VecIndex,
     T: VecValue,

@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use rawdb::likely;
 
-use crate::{Error, Result};
+use crate::{Error, RawStrategy, Result};
 
 use super::super::inner::CompressionStrategy;
 use super::value::ZstdVecValue;
@@ -12,6 +12,21 @@ const ZSTD_COMPRESSION_LEVEL: i32 = 3;
 /// Zstd compression strategy for high compression ratios.
 #[derive(Debug, Clone, Copy)]
 pub struct ZstdStrategy<T>(PhantomData<T>);
+
+impl<T> RawStrategy<T> for ZstdStrategy<T>
+where
+    T: ZstdVecValue,
+{
+    #[inline(always)]
+    fn read(bytes: &[u8]) -> Result<T> {
+        T::from_bytes(bytes)
+    }
+
+    #[inline(always)]
+    fn write(value: &T) -> Vec<u8> {
+        value.to_bytes()
+    }
+}
 
 impl<T> CompressionStrategy<T> for ZstdStrategy<T>
 where

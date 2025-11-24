@@ -5,7 +5,7 @@ use crate::{
     likely, unlikely,
 };
 
-use super::{CleanRawVecIterator, RawVecInner, SerializeStrategy};
+use super::{CleanRawVecIterator, RawVecInner, RawStrategy};
 
 /// Dirty raw vec iterator, full-featured with holes/updates/pushed support
 pub struct DirtyRawVecIterator<'a, I, T, S> {
@@ -21,7 +21,7 @@ impl<'a, I, T, S> DirtyRawVecIterator<'a, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     const SIZE_OF_T: usize = size_of::<T>();
 
@@ -81,7 +81,7 @@ impl<I, T, S> Iterator for DirtyRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     type Item = T;
 
@@ -185,7 +185,7 @@ impl<I, T, S> VecIterator for DirtyRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     #[inline]
     fn set_position_to(&mut self, i: usize) {
@@ -212,7 +212,7 @@ impl<I, T, S> TypedVecIterator for DirtyRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     type I = I;
     type T = T;
@@ -222,7 +222,7 @@ impl<I, T, S> ExactSizeIterator for DirtyRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     #[inline(always)]
     fn len(&self) -> usize {
@@ -234,6 +234,6 @@ impl<I, T, S> FusedIterator for DirtyRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
 }

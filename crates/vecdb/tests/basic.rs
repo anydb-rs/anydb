@@ -1,12 +1,8 @@
 use rawdb::Database;
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, AnyVec, CollectableVec, GenericStoredVec, Importable, PcoVec, Result, Stamp,
-    TypedVecIterator, Version,
+    BytesVec, EagerVec, LZ4Vec, PcoVec, Result, Stamp, StoredVec, Version, ZeroCopyVec, ZstdVec,
 };
-
-#[allow(clippy::upper_case_acronyms)]
-type VEC = PcoVec<usize, u32>;
 
 /// Helper to create a temporary test database
 pub fn setup_test_db() -> Result<(Database, TempDir)> {
@@ -15,20 +11,23 @@ pub fn setup_test_db() -> Result<(Database, TempDir)> {
     Ok((db, temp_dir))
 }
 
-#[test]
-fn test_compressed_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
+/// Generic test function for basic vec operations
+fn run_vec_operations<V>() -> Result<(), Box<dyn std::error::Error>>
+where
+    V: StoredVec<I = usize, T = u32>,
+{
     let version = Version::TWO;
     let (database, _temp) = setup_test_db()?;
     let options = (&database, "vec", version).into();
 
     {
-        let mut vec: VEC = PcoVec::forced_import_with(options)?;
+        let mut vec: V = V::forced_import_with(options)?;
 
         (0..21_u32).for_each(|v| {
             vec.push(v);
         });
 
-        let mut iter = vec.into_iter();
+        let mut iter = vec.iter();
         assert_eq!(iter.get(0), Some(0));
         assert_eq!(iter.get(1), Some(1));
         assert_eq!(iter.get(2), Some(2));
@@ -42,13 +41,13 @@ fn test_compressed_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     {
-        let mut vec: VEC = PcoVec::forced_import_with(options)?;
+        let mut vec: V = V::forced_import_with(options)?;
 
         vec.mut_header().update_stamp(Stamp::new(100));
 
         assert_eq!(vec.header().stamp(), Stamp::new(100));
 
-        let mut iter = vec.into_iter();
+        let mut iter = vec.iter();
         assert_eq!(iter.get(0), Some(0));
         assert_eq!(iter.get(1), Some(1));
         assert_eq!(iter.get(2), Some(2));
@@ -67,7 +66,7 @@ fn test_compressed_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(vec.pushed_len(), 2);
         assert_eq!(vec.len(), 23);
 
-        let mut iter = vec.into_iter();
+        let mut iter = vec.iter();
         assert_eq!(iter.get(20), Some(20));
         assert_eq!(iter.get(21), Some(21));
         assert_eq!(iter.get(22), Some(22));
@@ -78,7 +77,7 @@ fn test_compressed_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     {
-        let mut vec: VEC = PcoVec::forced_import_with(options)?;
+        let mut vec: V = V::forced_import_with(options)?;
 
         assert_eq!(vec.header().stamp(), Stamp::new(100));
 
@@ -86,7 +85,7 @@ fn test_compressed_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(vec.pushed_len(), 0);
         assert_eq!(vec.len(), 23);
 
-        let mut iter = vec.into_iter();
+        let mut iter = vec.iter();
         assert_eq!(iter.get(0), Some(0));
         assert_eq!(iter.get(20), Some(20));
         assert_eq!(iter.get(21), Some(21));
@@ -99,7 +98,7 @@ fn test_compressed_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(vec.pushed_len(), 0);
         assert_eq!(vec.len(), 14);
 
-        let mut iter = vec.into_iter();
+        let mut iter = vec.iter();
         assert_eq!(iter.get(0), Some(0));
         assert_eq!(iter.get(5), Some(5));
         assert_eq!(iter.get(20), None);
@@ -111,25 +110,25 @@ fn test_compressed_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         vec.push(vec.len() as u32);
-        assert_eq!(vec.iter()?.last(), Some(14));
+        assert_eq!(vec.iter().last(), Some(14));
 
         vec.write()?;
 
         assert_eq!(
-            vec.into_iter().collect::<Vec<_>>(),
+            vec.iter().collect::<Vec<_>>(),
             vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
         );
     }
 
     {
-        let mut vec: VEC = PcoVec::forced_import_with(options)?;
+        let mut vec: V = V::forced_import_with(options)?;
 
         assert_eq!(
-            vec.into_iter().collect::<Vec<_>>(),
+            vec.iter().collect::<Vec<_>>(),
             vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
         );
 
-        let mut iter = vec.into_iter();
+        let mut iter = vec.iter();
         assert_eq!(iter.get(0), Some(0));
         assert_eq!(iter.get(5), Some(5));
         assert_eq!(iter.get(20), None);
@@ -154,7 +153,7 @@ fn test_compressed_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(vec.stored_len(), 0);
         assert_eq!(vec.len(), 21);
 
-        let mut iter = vec.into_iter();
+        let mut iter = vec.iter();
         assert_eq!(iter.get(0), Some(0));
         assert_eq!(iter.get(20), Some(20));
         assert_eq!(iter.get(21), None);
@@ -164,7 +163,7 @@ fn test_compressed_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     {
-        let mut vec: VEC = PcoVec::forced_import_with(options)?;
+        let mut vec: V = V::forced_import_with(options)?;
 
         assert_eq!(vec.pushed_len(), 0);
         assert_eq!(vec.stored_len(), 21);
@@ -179,7 +178,7 @@ fn test_compressed_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     {
-        let vec: VEC = PcoVec::forced_import_with(options)?;
+        let vec: V = V::forced_import_with(options)?;
 
         assert_eq!(
             vec.collect(),
@@ -190,4 +189,43 @@ fn test_compressed_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+// ============================================================================
+// Concrete Test Instances
+// ============================================================================
+
+#[test]
+fn test_zerocopy_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
+    run_vec_operations::<ZeroCopyVec<usize, u32>>()
+}
+
+#[test]
+fn test_bytes_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
+    run_vec_operations::<BytesVec<usize, u32>>()
+}
+
+#[test]
+fn test_pco_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
+    run_vec_operations::<PcoVec<usize, u32>>()
+}
+
+#[test]
+fn test_lz4_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
+    run_vec_operations::<LZ4Vec<usize, u32>>()
+}
+
+#[test]
+fn test_zstd_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
+    run_vec_operations::<ZstdVec<usize, u32>>()
+}
+
+#[test]
+fn test_eager_zerocopy_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
+    run_vec_operations::<EagerVec<ZeroCopyVec<usize, u32>>>()
+}
+
+#[test]
+fn test_eager_pco_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
+    run_vec_operations::<EagerVec<PcoVec<usize, u32>>>()
 }

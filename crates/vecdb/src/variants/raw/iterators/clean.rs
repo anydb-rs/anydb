@@ -13,7 +13,7 @@ use crate::{
     unlikely,
 };
 
-use super::{RawVecInner, SerializeStrategy};
+use super::{RawVecInner, RawStrategy};
 
 /// Clean raw vec iterator, to read on disk data
 pub struct CleanRawVecIterator<'a, I, T, S> {
@@ -33,7 +33,7 @@ impl<'a, I, T, S> CleanRawVecIterator<'a, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     const SIZE_OF_T: usize = size_of::<T>();
     const NORMAL_BUFFER_SIZE: usize = RawVecInner::<I, T, S>::aligned_buffer_size();
@@ -168,7 +168,7 @@ impl<I, T, S> Iterator for CleanRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     type Item = T;
 
@@ -234,7 +234,7 @@ impl<I, T, S> VecIterator for CleanRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     #[inline]
     fn set_position_to(&mut self, i: usize) {
@@ -272,7 +272,7 @@ impl<I, T, S> TypedVecIterator for CleanRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     type I = I;
     type T = T;
@@ -282,7 +282,7 @@ impl<I, T, S> ExactSizeIterator for CleanRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     #[inline(always)]
     fn len(&self) -> usize {
@@ -294,6 +294,6 @@ impl<I, T, S> FusedIterator for CleanRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
 }

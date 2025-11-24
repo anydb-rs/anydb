@@ -2,7 +2,7 @@ use std::iter::FusedIterator;
 
 use crate::{GenericStoredVec, Result, TypedVecIterator, VecIndex, VecIterator, VecValue};
 
-use super::{RawVecInner, SerializeStrategy};
+use super::{RawVecInner, RawStrategy};
 
 mod clean;
 mod dirty;
@@ -19,7 +19,7 @@ impl<'a, I, T, S> RawVecIterator<'a, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     #[inline]
     pub fn new(vec: &'a RawVecInner<I, T, S>) -> Result<Self> {
@@ -43,7 +43,7 @@ impl<I, T, S> Iterator for RawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     type Item = T;
 
@@ -92,7 +92,7 @@ impl<I, T, S> VecIterator for RawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     #[inline]
     fn set_position_to(&mut self, i: usize) {
@@ -122,7 +122,7 @@ impl<I, T, S> TypedVecIterator for RawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     type I = I;
     type T = T;
@@ -132,7 +132,7 @@ impl<I, T, S> ExactSizeIterator for RawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     #[inline(always)]
     fn len(&self) -> usize {
@@ -147,6 +147,6 @@ impl<I, T, S> FusedIterator for RawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
 }

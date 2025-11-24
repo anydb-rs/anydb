@@ -8,10 +8,10 @@ use rawdb::{Database, Region};
 
 use crate::{
     AnyStoredVec, AnyVec, BoxedVecIterator, Format, GenericStoredVec, HEADER_OFFSET, Header,
-    Importable, ImportOptions, IterableVec, Result, Stamp, TypedVec, VecIndex, Version,
+    ImportOptions, Importable, IterableVec, Result, Stamp, TypedVec, VecIndex, Version,
 };
 
-use super::{CleanRawVecIterator, DirtyRawVecIterator, RawVecInner, RawVecIterator};
+use super::RawVecInner;
 
 mod iterators;
 mod strategy;
@@ -65,22 +65,22 @@ where
 
     #[inline]
     pub fn iter(&self) -> Result<ZeroCopyVecIterator<'_, I, T>> {
-        RawVecIterator::new(&self.0)
+        self.0.iter()
     }
 
     #[inline]
     pub fn clean_iter(&self) -> Result<CleanZeroCopyVecIterator<'_, I, T>> {
-        CleanRawVecIterator::new(&self.0)
+        self.0.clean_iter()
     }
 
     #[inline]
     pub fn dirty_iter(&self) -> Result<DirtyZeroCopyVecIterator<'_, I, T>> {
-        DirtyRawVecIterator::new(&self.0)
+        self.0.dirty_iter()
     }
 
     #[inline]
     pub fn boxed_iter(&self) -> Result<BoxedVecIterator<'_, I, T>> {
-        Ok(Box::new(self.iter()?))
+        self.0.boxed_iter()
     }
 
     // ============================================================================
@@ -284,7 +284,7 @@ where
         self.0.unchecked_read_at(index, reader)
     }
 
-    #[inline]
+    #[inline(always)]
     fn read_value_from_bytes(&self, bytes: &[u8]) -> Result<T> {
         self.0.read_value_from_bytes(bytes)
     }

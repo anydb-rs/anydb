@@ -1,16 +1,20 @@
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, Database, EagerVec, Exit, GenericStoredVec, Importable, IterableVec, PcoVec,
+    AnyStoredVec, BytesVec, Database, EagerVec, Exit, GenericStoredVec, Importable, IterableVec,
+    LZ4Vec, PcoVec, StoredVec, ZeroCopyVec, ZstdVec,
 };
 
-#[test]
-fn test_mmap_write_file_read_consistency() {
+/// Generic test function for mmap write/file read consistency
+fn run_mmap_write_file_read_consistency<V>()
+where
+    V: StoredVec<I = usize, T = u64>,
+{
     let temp_dir = TempDir::new().unwrap();
     let db = Database::open(&temp_dir.path().join("test.db")).unwrap();
     let exit = Exit::new();
 
-    // Create a compressed vec (which uses mmap for writes)
-    let mut vec: EagerVec<PcoVec<usize, u64>> =
+    // Create a vec (which uses mmap for writes)
+    let mut vec: EagerVec<V> =
         EagerVec::forced_import(&db, "test_vec", vecdb::Version::ONE).unwrap();
 
     // Write some data
@@ -42,13 +46,16 @@ fn test_mmap_write_file_read_consistency() {
     println!("Test passed! All values consistent.");
 }
 
-#[test]
-fn test_immediate_read_after_write() {
+/// Generic test function for immediate read after write
+fn run_immediate_read_after_write<V>()
+where
+    V: StoredVec<I = usize, T = u64>,
+{
     let temp_dir = TempDir::new().unwrap();
     let db = Database::open(&temp_dir.path().join("test2.db")).unwrap();
     let exit = Exit::new();
 
-    let mut vec: EagerVec<PcoVec<usize, u64>> =
+    let mut vec: EagerVec<V> =
         EagerVec::forced_import(&db, "test_vec", vecdb::Version::ONE).unwrap();
 
     // Write, flush, read immediately (mimics the txinindex -> txindex pattern)
@@ -80,4 +87,58 @@ fn test_immediate_read_after_write() {
     }
 
     println!("Immediate read test passed!");
+}
+
+// ============================================================================
+// Concrete Test Instances
+// ============================================================================
+
+#[test]
+fn test_bytes_mmap_write_file_read_consistency() {
+    run_mmap_write_file_read_consistency::<BytesVec<usize, u64>>();
+}
+
+#[test]
+fn test_zerocopy_mmap_write_file_read_consistency() {
+    run_mmap_write_file_read_consistency::<ZeroCopyVec<usize, u64>>();
+}
+
+#[test]
+fn test_pco_mmap_write_file_read_consistency() {
+    run_mmap_write_file_read_consistency::<PcoVec<usize, u64>>();
+}
+
+#[test]
+fn test_lz4_mmap_write_file_read_consistency() {
+    run_mmap_write_file_read_consistency::<LZ4Vec<usize, u64>>();
+}
+
+#[test]
+fn test_zstd_mmap_write_file_read_consistency() {
+    run_mmap_write_file_read_consistency::<ZstdVec<usize, u64>>();
+}
+
+#[test]
+fn test_bytes_immediate_read_after_write() {
+    run_immediate_read_after_write::<BytesVec<usize, u64>>();
+}
+
+#[test]
+fn test_zerocopy_immediate_read_after_write() {
+    run_immediate_read_after_write::<ZeroCopyVec<usize, u64>>();
+}
+
+#[test]
+fn test_pco_immediate_read_after_write() {
+    run_immediate_read_after_write::<PcoVec<usize, u64>>();
+}
+
+#[test]
+fn test_lz4_immediate_read_after_write() {
+    run_immediate_read_after_write::<LZ4Vec<usize, u64>>();
+}
+
+#[test]
+fn test_zstd_immediate_read_after_write() {
+    run_immediate_read_after_write::<ZstdVec<usize, u64>>();
 }

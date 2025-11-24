@@ -6,8 +6,8 @@ use std::{
 use rawdb::{Database, Region};
 
 use crate::{
-    AnyStoredVec, AnyVec, BoxedVecIterator, Format, GenericStoredVec, Header, Importable,
-    ImportOptions, IterableVec, Result, TypedVec, VecIndex, Version,
+    AnyStoredVec, AnyVec, BoxedVecIterator, Format, GenericStoredVec, Header, ImportOptions,
+    Importable, IterableVec, Result, TypedVec, VecIndex, Version,
 };
 
 use super::CompressedVecInner;
@@ -75,22 +75,22 @@ where
 {
     #[inline]
     pub fn iter(&self) -> Result<PcodecVecIterator<'_, I, T>> {
-        PcodecVecIterator::new(&self.0)
+        self.0.iter()
     }
 
     #[inline]
     pub fn clean_iter(&self) -> Result<CleanPcodecVecIterator<'_, I, T>> {
-        CleanPcodecVecIterator::new(&self.0)
+        self.0.clean_iter()
     }
 
     #[inline]
     pub fn dirty_iter(&self) -> Result<DirtyPcodecVecIterator<'_, I, T>> {
-        DirtyPcodecVecIterator::new(&self.0)
+        self.0.dirty_iter()
     }
 
     #[inline]
     pub fn boxed_iter(&self) -> Result<BoxedVecIterator<'_, I, T>> {
-        Ok(Box::new(PcodecVecIterator::new(&self.0)?))
+        self.0.boxed_iter()
     }
 
     /// Removes this vector and all its associated regions from the database
@@ -237,7 +237,7 @@ where
         self.0.unchecked_read_at(index, reader)
     }
 
-    #[inline]
+    #[inline(always)]
     fn read_value_from_bytes(&self, bytes: &[u8]) -> Result<T> {
         self.0.read_value_from_bytes(bytes)
     }

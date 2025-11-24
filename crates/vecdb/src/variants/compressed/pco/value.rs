@@ -1,16 +1,16 @@
-use std::mem::{align_of, size_of};
+use std::mem::{ManuallyDrop, align_of, size_of};
 
 use pco::data_types::Number;
 
-use crate::VecValue;
+use crate::{Bytes, VecValue};
 
 pub trait TransparentPcoVecValue<T> {}
 
 pub trait PcoVecValue
 where
-    Self: VecValue + Copy + 'static + TransparentPcoVecValue<Self::NumberType>,
+    Self: VecValue + Bytes + Copy + TransparentPcoVecValue<Self::NumberType>,
 {
-    type NumberType: pco::data_types::Number;
+    type NumberType: Number;
 }
 
 pub trait AsInnerSlice<T>
@@ -52,7 +52,7 @@ where
     const _ALIGN_CHECK: () = assert!(align_of::<T>() == align_of::<T::NumberType>());
 
     fn from_inner_slice(vec: Vec<T::NumberType>) -> Vec<T> {
-        let mut vec = std::mem::ManuallyDrop::new(vec);
+        let mut vec = ManuallyDrop::new(vec);
         unsafe { Vec::from_raw_parts(vec.as_mut_ptr() as *mut T, vec.len(), vec.capacity()) }
     }
 }
@@ -60,9 +60,8 @@ where
 macro_rules! impl_stored_compressed {
     ($($t:ty),*) => {
         $(
-            impl
-TransparentPcoVecValue<$t> for $t {}
-impl PcoVecValue for $t {
+            impl TransparentPcoVecValue<$t> for $t {}
+            impl PcoVecValue for $t {
                 type NumberType = $t;
             }
         )*

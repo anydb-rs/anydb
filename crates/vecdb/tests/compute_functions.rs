@@ -1,8 +1,8 @@
 use rawdb::Database;
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, CollectableVec, EagerVec, Exit, GenericStoredVec, Importable, PcoVec, Result,
-    Version,
+    AnyStoredVec, CollectableVec, EagerVec, Exit, GenericStoredVec, Importable, LZ4Vec, PcoVec,
+    Result, StoredVec, Version, ZeroCopyVec, ZstdVec,
 };
 
 /// Helper to create a temporary test database
@@ -24,18 +24,18 @@ fn assert_f32_eq(actual: f32, expected: f32, tolerance: f32, message: &str) {
     );
 }
 
-#[test]
-fn test_compute_sum_of_others() -> Result<()> {
+/// Generic test function for compute_sum_of_others
+fn run_compute_sum_of_others<V>() -> Result<()>
+where
+    V: StoredVec<I = usize, T = u64>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
     // Create source vectors
-    let mut vec1: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "vec1", Version::ONE)?;
-    let mut vec2: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "vec2", Version::ONE)?;
-    let mut vec3: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "vec3", Version::ONE)?;
+    let mut vec1: EagerVec<V> = EagerVec::forced_import(&db, "vec1", Version::ONE)?;
+    let mut vec2: EagerVec<V> = EagerVec::forced_import(&db, "vec2", Version::ONE)?;
+    let mut vec3: EagerVec<V> = EagerVec::forced_import(&db, "vec3", Version::ONE)?;
 
     // Fill with test data
     for i in 0..10 {
@@ -48,8 +48,7 @@ fn test_compute_sum_of_others() -> Result<()> {
     vec3.safe_flush(&exit)?;
 
     // Compute sum of others
-    let mut result: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<V> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_sum_of_others(0, &[&vec1, &vec2, &vec3], &exit)?;
     result.safe_flush(&exit)?;
 
@@ -67,17 +66,16 @@ fn test_compute_sum_of_others() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_min_of_others() -> Result<()> {
+fn run_compute_min_of_others<V>() -> Result<()>
+where
+    V: StoredVec<I = usize, T = u64>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut vec1: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "vec1", Version::ONE)?;
-    let mut vec2: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "vec2", Version::ONE)?;
-    let mut vec3: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "vec3", Version::ONE)?;
+    let mut vec1: EagerVec<V> = EagerVec::forced_import(&db, "vec1", Version::ONE)?;
+    let mut vec2: EagerVec<V> = EagerVec::forced_import(&db, "vec2", Version::ONE)?;
+    let mut vec3: EagerVec<V> = EagerVec::forced_import(&db, "vec3", Version::ONE)?;
 
     // Test data: [50, 51, 52...], [10, 11, 12...], [100, 101, 102...]
     for i in 0..10 {
@@ -89,8 +87,7 @@ fn test_compute_min_of_others() -> Result<()> {
     vec2.safe_flush(&exit)?;
     vec3.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<V> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_min_of_others(0, &[&vec1, &vec2, &vec3], &exit)?;
     result.safe_flush(&exit)?;
 
@@ -108,17 +105,16 @@ fn test_compute_min_of_others() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_max_of_others() -> Result<()> {
+fn run_compute_max_of_others<V>() -> Result<()>
+where
+    V: StoredVec<I = usize, T = u64>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut vec1: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "vec1", Version::ONE)?;
-    let mut vec2: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "vec2", Version::ONE)?;
-    let mut vec3: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "vec3", Version::ONE)?;
+    let mut vec1: EagerVec<V> = EagerVec::forced_import(&db, "vec1", Version::ONE)?;
+    let mut vec2: EagerVec<V> = EagerVec::forced_import(&db, "vec2", Version::ONE)?;
+    let mut vec3: EagerVec<V> = EagerVec::forced_import(&db, "vec3", Version::ONE)?;
 
     for i in 0..10 {
         vec1.truncate_push(i, (50 + i) as u64)?;
@@ -135,8 +131,7 @@ fn test_compute_max_of_others() -> Result<()> {
     dbg!(vec2.collect(), vec2.region());
     dbg!(vec3.collect(), vec3.region());
 
-    let mut result: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<V> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_max_of_others(0, &[&vec1, &vec2, &vec3], &exit)?;
     result.safe_flush(&exit)?;
 
@@ -154,12 +149,15 @@ fn test_compute_max_of_others() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_previous_value() -> Result<()> {
+fn run_compute_previous_value<VS, VR>() -> Result<()>
+where
+    VS: StoredVec<I = usize, T = u16>,
+    VR: StoredVec<I = usize, T = f32>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut source = EagerVec::<PcoVec<usize, u16>>::forced_import(&db, "source", Version::ONE)?;
+    let mut source = EagerVec::<VS>::forced_import(&db, "source", Version::ONE)?;
 
     // Fill with test data: [10, 20, 30, 40, 50]
     for i in 0..5 {
@@ -167,7 +165,7 @@ fn test_compute_previous_value() -> Result<()> {
     }
     source.safe_flush(&exit)?;
 
-    let mut result = EagerVec::<PcoVec<usize, f32>>::forced_import(&db, "result", Version::ONE)?;
+    let mut result = EagerVec::<VR>::forced_import(&db, "result", Version::ONE)?;
     result.compute_previous_value(0, &source, 1, &exit)?;
     result.safe_flush(&exit)?;
 
@@ -197,13 +195,14 @@ fn test_compute_previous_value() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_change() -> Result<()> {
+fn run_compute_change<V>() -> Result<()>
+where
+    V: StoredVec<I = usize, T = u32>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut source: EagerVec<PcoVec<usize, u32>> =
-        EagerVec::forced_import(&db, "source", Version::ONE)?;
+    let mut source: EagerVec<V> = EagerVec::forced_import(&db, "source", Version::ONE)?;
 
     // Fill with test data: [10, 20, 25, 30, 50]
     let values = [10, 20, 25, 30, 50];
@@ -212,8 +211,7 @@ fn test_compute_change() -> Result<()> {
     }
     source.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, u32>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<V> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_change(0, &source, 1, &exit)?;
     result.safe_flush(&exit)?;
 
@@ -236,13 +234,15 @@ fn test_compute_change() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_percentage_change() -> Result<()> {
+fn run_compute_percentage_change<VS, VR>() -> Result<()>
+where
+    VS: StoredVec<I = usize, T = u16>,
+    VR: StoredVec<I = usize, T = f32>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut source: EagerVec<PcoVec<usize, u16>> =
-        EagerVec::forced_import(&db, "source", Version::ONE)?;
+    let mut source: EagerVec<VS> = EagerVec::forced_import(&db, "source", Version::ONE)?;
 
     // Fill with test data: [100, 110, 121, 133]
     let values = [100, 110, 121, 133];
@@ -251,8 +251,7 @@ fn test_compute_percentage_change() -> Result<()> {
     }
     source.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, f32>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<VR> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_percentage_change(0, &source, 1, &exit)?;
     result.safe_flush(&exit)?;
 
@@ -277,13 +276,14 @@ fn test_compute_percentage_change() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_sliding_window_max() -> Result<()> {
+fn run_compute_sliding_window_max<V>() -> Result<()>
+where
+    V: StoredVec<I = usize, T = u32>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut source: EagerVec<PcoVec<usize, u32>> =
-        EagerVec::forced_import(&db, "source", Version::ONE)?;
+    let mut source: EagerVec<V> = EagerVec::forced_import(&db, "source", Version::ONE)?;
 
     // Test data: [3, 1, 4, 1, 5, 9, 2, 6]
     let values = [3, 1, 4, 1, 5, 9, 2, 6];
@@ -292,8 +292,7 @@ fn test_compute_sliding_window_max() -> Result<()> {
     }
     source.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, u32>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<V> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_max(0, &source, 3, &exit)?; // Window size 3
     result.safe_flush(&exit)?;
 
@@ -317,13 +316,14 @@ fn test_compute_sliding_window_max() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_sliding_window_min() -> Result<()> {
+fn run_compute_sliding_window_min<V>() -> Result<()>
+where
+    V: StoredVec<I = usize, T = u32>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut source: EagerVec<PcoVec<usize, u32>> =
-        EagerVec::forced_import(&db, "source", Version::ONE)?;
+    let mut source: EagerVec<V> = EagerVec::forced_import(&db, "source", Version::ONE)?;
 
     // Test data: [3, 1, 4, 1, 5, 9, 2, 6]
     let values = [3, 1, 4, 1, 5, 9, 2, 6];
@@ -332,8 +332,7 @@ fn test_compute_sliding_window_min() -> Result<()> {
     }
     source.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, u32>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<V> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_min(0, &source, 3, &exit)?; // Window size 3
     result.safe_flush(&exit)?;
 
@@ -357,13 +356,14 @@ fn test_compute_sliding_window_min() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_all_time_high() -> Result<()> {
+fn run_compute_all_time_high<V>() -> Result<()>
+where
+    V: StoredVec<I = usize, T = u32>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut source: EagerVec<PcoVec<usize, u32>> =
-        EagerVec::forced_import(&db, "source", Version::ONE)?;
+    let mut source: EagerVec<V> = EagerVec::forced_import(&db, "source", Version::ONE)?;
 
     // Test data: [10, 15, 12, 20, 18, 25, 22]
     let values = [10, 15, 12, 20, 18, 25, 22];
@@ -372,8 +372,7 @@ fn test_compute_all_time_high() -> Result<()> {
     }
     source.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, u32>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<V> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_all_time_high(0, &source, &exit)?;
     result.safe_flush(&exit)?;
 
@@ -391,13 +390,14 @@ fn test_compute_all_time_high() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_all_time_low() -> Result<()> {
+fn run_compute_all_time_low<V>() -> Result<()>
+where
+    V: StoredVec<I = usize, T = u32>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut source: EagerVec<PcoVec<usize, u32>> =
-        EagerVec::forced_import(&db, "source", Version::ONE)?;
+    let mut source: EagerVec<V> = EagerVec::forced_import(&db, "source", Version::ONE)?;
 
     // Test data: [10, 5, 12, 3, 18, 2, 22]
     let values = [10, 5, 12, 3, 18, 2, 22];
@@ -406,8 +406,7 @@ fn test_compute_all_time_low() -> Result<()> {
     }
     source.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, u32>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<V> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_all_time_low_(0, &source, &exit, false)?;
     result.safe_flush(&exit)?;
 
@@ -425,12 +424,14 @@ fn test_compute_all_time_low() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_cagr() -> Result<()> {
+fn run_compute_cagr<V>() -> Result<()>
+where
+    V: StoredVec<I = usize, T = f32>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut percentage_returns: EagerVec<PcoVec<usize, f32>> =
+    let mut percentage_returns: EagerVec<V> =
         EagerVec::forced_import(&db, "returns", Version::ONE)?;
 
     // Test data: 100% return over different periods
@@ -442,8 +443,7 @@ fn test_compute_cagr() -> Result<()> {
     }
     percentage_returns.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, f32>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<V> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_cagr(0, &percentage_returns, 730, &exit)?; // 2 years (730 days)
     result.safe_flush(&exit)?;
 
@@ -463,15 +463,16 @@ fn test_compute_cagr() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_zscore() -> Result<()> {
+fn run_compute_zscore<V>() -> Result<()>
+where
+    V: StoredVec<I = usize, T = f32>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut source: EagerVec<PcoVec<usize, f32>> =
-        EagerVec::forced_import(&db, "source", Version::ONE)?;
-    let mut sma: EagerVec<PcoVec<usize, f32>> = EagerVec::forced_import(&db, "sma", Version::ONE)?;
-    let mut sd: EagerVec<PcoVec<usize, f32>> = EagerVec::forced_import(&db, "sd", Version::ONE)?;
+    let mut source: EagerVec<V> = EagerVec::forced_import(&db, "source", Version::ONE)?;
+    let mut sma: EagerVec<V> = EagerVec::forced_import(&db, "sma", Version::ONE)?;
+    let mut sd: EagerVec<V> = EagerVec::forced_import(&db, "sd", Version::ONE)?;
 
     // Test data
     // Source: [10.0, 12.0, 14.0, 16.0]
@@ -487,8 +488,7 @@ fn test_compute_zscore() -> Result<()> {
     sma.safe_flush(&exit)?;
     sd.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, f32>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<V> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_zscore(0, &source, &sma, &sd, &exit)?;
     result.safe_flush(&exit)?;
 
@@ -512,16 +512,16 @@ fn test_compute_zscore() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_functions_with_resume() -> Result<()> {
+fn run_compute_functions_with_resume<V>() -> Result<()>
+where
+    V: StoredVec<I = usize, T = u32>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
     // Test that compute functions can resume properly
-    let mut source: EagerVec<PcoVec<usize, u32>> =
-        EagerVec::forced_import(&db, "source", Version::ONE)?;
-    let mut result: EagerVec<PcoVec<usize, u32>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut source: EagerVec<V> = EagerVec::forced_import(&db, "source", Version::ONE)?;
+    let mut result: EagerVec<V> = EagerVec::forced_import(&db, "result", Version::ONE)?;
 
     // First batch: compute for first 5 elements
     for i in 0..5 {
@@ -559,15 +559,15 @@ fn test_compute_functions_with_resume() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_add() -> Result<()> {
+fn run_compute_add<V>() -> Result<()>
+where
+    V: StoredVec<I = usize, T = u64>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut vec1: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "vec1", Version::ONE)?;
-    let mut vec2: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "vec2", Version::ONE)?;
+    let mut vec1: EagerVec<V> = EagerVec::forced_import(&db, "vec1", Version::ONE)?;
+    let mut vec2: EagerVec<V> = EagerVec::forced_import(&db, "vec2", Version::ONE)?;
 
     for i in 0..10 {
         vec1.truncate_push(i, (i * 10) as u64)?;
@@ -576,8 +576,7 @@ fn test_compute_add() -> Result<()> {
     vec1.safe_flush(&exit)?;
     vec2.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<V> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_add(0, &vec1, &vec2, &exit)?;
     result.safe_flush(&exit)?;
 
@@ -590,15 +589,15 @@ fn test_compute_add() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_subtract() -> Result<()> {
+fn run_compute_subtract<V>() -> Result<()>
+where
+    V: StoredVec<I = usize, T = u64>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut vec1: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "vec1", Version::ONE)?;
-    let mut vec2: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "vec2", Version::ONE)?;
+    let mut vec1: EagerVec<V> = EagerVec::forced_import(&db, "vec1", Version::ONE)?;
+    let mut vec2: EagerVec<V> = EagerVec::forced_import(&db, "vec2", Version::ONE)?;
 
     for i in 0..10 {
         vec1.truncate_push(i, (100 + i * 10) as u64)?;
@@ -607,8 +606,7 @@ fn test_compute_subtract() -> Result<()> {
     vec1.safe_flush(&exit)?;
     vec2.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<V> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_subtract(0, &vec1, &vec2, &exit)?;
     result.safe_flush(&exit)?;
 
@@ -621,15 +619,15 @@ fn test_compute_subtract() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_multiply() -> Result<()> {
+fn run_compute_multiply<V>() -> Result<()>
+where
+    V: StoredVec<I = usize, T = u32>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut vec1: EagerVec<PcoVec<usize, u32>> =
-        EagerVec::forced_import(&db, "vec1", Version::ONE)?;
-    let mut vec2: EagerVec<PcoVec<usize, u32>> =
-        EagerVec::forced_import(&db, "vec2", Version::ONE)?;
+    let mut vec1: EagerVec<V> = EagerVec::forced_import(&db, "vec1", Version::ONE)?;
+    let mut vec2: EagerVec<V> = EagerVec::forced_import(&db, "vec2", Version::ONE)?;
 
     for i in 0..10 {
         vec1.truncate_push(i, (i + 1) as u32)?;
@@ -638,8 +636,7 @@ fn test_compute_multiply() -> Result<()> {
     vec1.safe_flush(&exit)?;
     vec2.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, u32>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<V> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_multiply(0, &vec1, &vec2, &exit)?;
     result.safe_flush(&exit)?;
 
@@ -652,15 +649,15 @@ fn test_compute_multiply() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_divide() -> Result<()> {
+fn run_compute_divide<V>() -> Result<()>
+where
+    V: StoredVec<I = usize, T = f32>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut vec1: EagerVec<PcoVec<usize, f32>> =
-        EagerVec::forced_import(&db, "vec1", Version::ONE)?;
-    let mut vec2: EagerVec<PcoVec<usize, f32>> =
-        EagerVec::forced_import(&db, "vec2", Version::ONE)?;
+    let mut vec1: EagerVec<V> = EagerVec::forced_import(&db, "vec1", Version::ONE)?;
+    let mut vec2: EagerVec<V> = EagerVec::forced_import(&db, "vec2", Version::ONE)?;
 
     for i in 0..10 {
         vec1.truncate_push(i, 100.0 + i as f32 * 10.0)?;
@@ -669,8 +666,7 @@ fn test_compute_divide() -> Result<()> {
     vec1.safe_flush(&exit)?;
     vec2.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, f32>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<V> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_divide(0, &vec1, &vec2, &exit)?;
     result.safe_flush(&exit)?;
 
@@ -683,13 +679,14 @@ fn test_compute_divide() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_max() -> Result<()> {
+fn run_compute_max<V>() -> Result<()>
+where
+    V: StoredVec<I = usize, T = u64>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut source: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "source", Version::ONE)?;
+    let mut source: EagerVec<V> = EagerVec::forced_import(&db, "source", Version::ONE)?;
 
     // Create data with a peak in the middle
     for i in 0..10 {
@@ -698,8 +695,7 @@ fn test_compute_max() -> Result<()> {
     }
     source.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<V> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_max(0, &source, usize::MAX, &exit)?;
     result.safe_flush(&exit)?;
 
@@ -717,13 +713,14 @@ fn test_compute_max() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_min() -> Result<()> {
+fn run_compute_min<V>() -> Result<()>
+where
+    V: StoredVec<I = usize, T = u64>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut source: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "source", Version::ONE)?;
+    let mut source: EagerVec<V> = EagerVec::forced_import(&db, "source", Version::ONE)?;
 
     // Create data with a valley in the middle
     for i in 0..10 {
@@ -736,8 +733,7 @@ fn test_compute_min() -> Result<()> {
     }
     source.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<V> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_min(0, &source, usize::MAX, &exit)?;
     result.safe_flush(&exit)?;
 
@@ -755,21 +751,21 @@ fn test_compute_min() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_sum() -> Result<()> {
+fn run_compute_sum<V>() -> Result<()>
+where
+    V: StoredVec<I = usize, T = u64>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut source: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "source", Version::ONE)?;
+    let mut source: EagerVec<V> = EagerVec::forced_import(&db, "source", Version::ONE)?;
 
     for i in 0..10 {
         source.truncate_push(i, (i + 1) as u64)?;
     }
     source.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, u64>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<V> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_sum(0, &source, usize::MAX, &exit)?;
     result.safe_flush(&exit)?;
 
@@ -784,21 +780,22 @@ fn test_compute_sum() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_sma() -> Result<()> {
+fn run_compute_sma<VS, VR>() -> Result<()>
+where
+    VS: StoredVec<I = usize, T = u16>,
+    VR: StoredVec<I = usize, T = f32>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut source: EagerVec<PcoVec<usize, u16>> =
-        EagerVec::forced_import(&db, "source", Version::ONE)?;
+    let mut source: EagerVec<VS> = EagerVec::forced_import(&db, "source", Version::ONE)?;
 
     for i in 0..10 {
         source.truncate_push(i, (i * 10) as u16)?;
     }
     source.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, f32>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<VR> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_sma(0, &source, 3, &exit)?;
     result.safe_flush(&exit)?;
 
@@ -821,21 +818,22 @@ fn test_compute_sma() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_ema() -> Result<()> {
+fn run_compute_ema<VS, VR>() -> Result<()>
+where
+    VS: StoredVec<I = usize, T = u16>,
+    VR: StoredVec<I = usize, T = f32>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut source: EagerVec<PcoVec<usize, u16>> =
-        EagerVec::forced_import(&db, "source", Version::ONE)?;
+    let mut source: EagerVec<VS> = EagerVec::forced_import(&db, "source", Version::ONE)?;
 
     for i in 0..10 {
         source.truncate_push(i, 100)?; // Constant value for easier verification
     }
     source.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, f32>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<VR> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_ema(0, &source, 3, &exit)?;
     result.safe_flush(&exit)?;
 
@@ -849,15 +847,16 @@ fn test_compute_ema() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_percentage() -> Result<()> {
+fn run_compute_percentage<VS, VR>() -> Result<()>
+where
+    VS: StoredVec<I = usize, T = u16>,
+    VR: StoredVec<I = usize, T = f32>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut numerator: EagerVec<PcoVec<usize, u16>> =
-        EagerVec::forced_import(&db, "numerator", Version::ONE)?;
-    let mut denominator: EagerVec<PcoVec<usize, u16>> =
-        EagerVec::forced_import(&db, "denominator", Version::ONE)?;
+    let mut numerator: EagerVec<VS> = EagerVec::forced_import(&db, "numerator", Version::ONE)?;
+    let mut denominator: EagerVec<VS> = EagerVec::forced_import(&db, "denominator", Version::ONE)?;
 
     for i in 0..10 {
         numerator.truncate_push(i, (i + 1) as u16)?;
@@ -866,8 +865,7 @@ fn test_compute_percentage() -> Result<()> {
     numerator.safe_flush(&exit)?;
     denominator.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, f32>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<VR> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_percentage(0, &numerator, &denominator, &exit)?;
     result.safe_flush(&exit)?;
 
@@ -885,15 +883,16 @@ fn test_compute_percentage() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_compute_percentage_difference() -> Result<()> {
+fn run_compute_percentage_difference<VS, VR>() -> Result<()>
+where
+    VS: StoredVec<I = usize, T = u16>,
+    VR: StoredVec<I = usize, T = f32>,
+{
     let (db, _temp) = setup_test_db()?;
     let exit = Exit::new();
 
-    let mut vec1: EagerVec<PcoVec<usize, u16>> =
-        EagerVec::forced_import(&db, "vec1", Version::ONE)?;
-    let mut vec2: EagerVec<PcoVec<usize, u16>> =
-        EagerVec::forced_import(&db, "vec2", Version::ONE)?;
+    let mut vec1: EagerVec<VS> = EagerVec::forced_import(&db, "vec1", Version::ONE)?;
+    let mut vec2: EagerVec<VS> = EagerVec::forced_import(&db, "vec2", Version::ONE)?;
 
     for i in 0..10 {
         vec1.truncate_push(i, (100 + i * 10) as u16)?;
@@ -902,8 +901,7 @@ fn test_compute_percentage_difference() -> Result<()> {
     vec1.safe_flush(&exit)?;
     vec2.safe_flush(&exit)?;
 
-    let mut result: EagerVec<PcoVec<usize, f32>> =
-        EagerVec::forced_import(&db, "result", Version::ONE)?;
+    let mut result: EagerVec<VR> = EagerVec::forced_import(&db, "result", Version::ONE)?;
     result.compute_percentage_difference(0, &vec1, &vec2, &exit)?;
     result.safe_flush(&exit)?;
 
@@ -919,4 +917,512 @@ fn test_compute_percentage_difference() -> Result<()> {
     }
 
     Ok(())
+}
+
+// ============================================================================
+// Concrete test instances for all tests
+// ============================================================================
+
+// test_compute_sum_of_others
+#[test]
+fn test_pco_compute_sum_of_others() -> Result<()> {
+    run_compute_sum_of_others::<PcoVec<usize, u64>>()
+}
+
+#[test]
+fn test_zerocopy_compute_sum_of_others() -> Result<()> {
+    run_compute_sum_of_others::<ZeroCopyVec<usize, u64>>()
+}
+
+#[test]
+fn test_lz4_compute_sum_of_others() -> Result<()> {
+    run_compute_sum_of_others::<LZ4Vec<usize, u64>>()
+}
+
+#[test]
+fn test_zstd_compute_sum_of_others() -> Result<()> {
+    run_compute_sum_of_others::<ZstdVec<usize, u64>>()
+}
+
+// test_compute_min_of_others
+#[test]
+fn test_pco_compute_min_of_others() -> Result<()> {
+    run_compute_min_of_others::<PcoVec<usize, u64>>()
+}
+
+#[test]
+fn test_zerocopy_compute_min_of_others() -> Result<()> {
+    run_compute_min_of_others::<ZeroCopyVec<usize, u64>>()
+}
+
+#[test]
+fn test_lz4_compute_min_of_others() -> Result<()> {
+    run_compute_min_of_others::<LZ4Vec<usize, u64>>()
+}
+
+#[test]
+fn test_zstd_compute_min_of_others() -> Result<()> {
+    run_compute_min_of_others::<ZstdVec<usize, u64>>()
+}
+
+// test_compute_max_of_others
+#[test]
+fn test_pco_compute_max_of_others() -> Result<()> {
+    run_compute_max_of_others::<PcoVec<usize, u64>>()
+}
+
+#[test]
+fn test_zerocopy_compute_max_of_others() -> Result<()> {
+    run_compute_max_of_others::<ZeroCopyVec<usize, u64>>()
+}
+
+#[test]
+fn test_lz4_compute_max_of_others() -> Result<()> {
+    run_compute_max_of_others::<LZ4Vec<usize, u64>>()
+}
+
+#[test]
+fn test_zstd_compute_max_of_others() -> Result<()> {
+    run_compute_max_of_others::<ZstdVec<usize, u64>>()
+}
+
+// test_compute_previous_value
+#[test]
+fn test_pco_compute_previous_value() -> Result<()> {
+    run_compute_previous_value::<PcoVec<usize, u16>, PcoVec<usize, f32>>()
+}
+
+#[test]
+fn test_zerocopy_compute_previous_value() -> Result<()> {
+    run_compute_previous_value::<ZeroCopyVec<usize, u16>, ZeroCopyVec<usize, f32>>()
+}
+
+#[test]
+fn test_lz4_compute_previous_value() -> Result<()> {
+    run_compute_previous_value::<LZ4Vec<usize, u16>, LZ4Vec<usize, f32>>()
+}
+
+#[test]
+fn test_zstd_compute_previous_value() -> Result<()> {
+    run_compute_previous_value::<ZstdVec<usize, u16>, ZstdVec<usize, f32>>()
+}
+
+// test_compute_change
+#[test]
+fn test_pco_compute_change() -> Result<()> {
+    run_compute_change::<PcoVec<usize, u32>>()
+}
+
+#[test]
+fn test_zerocopy_compute_change() -> Result<()> {
+    run_compute_change::<ZeroCopyVec<usize, u32>>()
+}
+
+#[test]
+fn test_lz4_compute_change() -> Result<()> {
+    run_compute_change::<LZ4Vec<usize, u32>>()
+}
+
+#[test]
+fn test_zstd_compute_change() -> Result<()> {
+    run_compute_change::<ZstdVec<usize, u32>>()
+}
+
+// test_compute_percentage_change
+#[test]
+fn test_pco_compute_percentage_change() -> Result<()> {
+    run_compute_percentage_change::<PcoVec<usize, u16>, PcoVec<usize, f32>>()
+}
+
+#[test]
+fn test_zerocopy_compute_percentage_change() -> Result<()> {
+    run_compute_percentage_change::<ZeroCopyVec<usize, u16>, ZeroCopyVec<usize, f32>>()
+}
+
+#[test]
+fn test_lz4_compute_percentage_change() -> Result<()> {
+    run_compute_percentage_change::<LZ4Vec<usize, u16>, LZ4Vec<usize, f32>>()
+}
+
+#[test]
+fn test_zstd_compute_percentage_change() -> Result<()> {
+    run_compute_percentage_change::<ZstdVec<usize, u16>, ZstdVec<usize, f32>>()
+}
+
+// test_compute_sliding_window_max
+#[test]
+fn test_pco_compute_sliding_window_max() -> Result<()> {
+    run_compute_sliding_window_max::<PcoVec<usize, u32>>()
+}
+
+#[test]
+fn test_zerocopy_compute_sliding_window_max() -> Result<()> {
+    run_compute_sliding_window_max::<ZeroCopyVec<usize, u32>>()
+}
+
+#[test]
+fn test_lz4_compute_sliding_window_max() -> Result<()> {
+    run_compute_sliding_window_max::<LZ4Vec<usize, u32>>()
+}
+
+#[test]
+fn test_zstd_compute_sliding_window_max() -> Result<()> {
+    run_compute_sliding_window_max::<ZstdVec<usize, u32>>()
+}
+
+// test_compute_sliding_window_min
+#[test]
+fn test_pco_compute_sliding_window_min() -> Result<()> {
+    run_compute_sliding_window_min::<PcoVec<usize, u32>>()
+}
+
+#[test]
+fn test_zerocopy_compute_sliding_window_min() -> Result<()> {
+    run_compute_sliding_window_min::<ZeroCopyVec<usize, u32>>()
+}
+
+#[test]
+fn test_lz4_compute_sliding_window_min() -> Result<()> {
+    run_compute_sliding_window_min::<LZ4Vec<usize, u32>>()
+}
+
+#[test]
+fn test_zstd_compute_sliding_window_min() -> Result<()> {
+    run_compute_sliding_window_min::<ZstdVec<usize, u32>>()
+}
+
+// test_compute_all_time_high
+#[test]
+fn test_pco_compute_all_time_high() -> Result<()> {
+    run_compute_all_time_high::<PcoVec<usize, u32>>()
+}
+
+#[test]
+fn test_zerocopy_compute_all_time_high() -> Result<()> {
+    run_compute_all_time_high::<ZeroCopyVec<usize, u32>>()
+}
+
+#[test]
+fn test_lz4_compute_all_time_high() -> Result<()> {
+    run_compute_all_time_high::<LZ4Vec<usize, u32>>()
+}
+
+#[test]
+fn test_zstd_compute_all_time_high() -> Result<()> {
+    run_compute_all_time_high::<ZstdVec<usize, u32>>()
+}
+
+// test_compute_all_time_low
+#[test]
+fn test_pco_compute_all_time_low() -> Result<()> {
+    run_compute_all_time_low::<PcoVec<usize, u32>>()
+}
+
+#[test]
+fn test_zerocopy_compute_all_time_low() -> Result<()> {
+    run_compute_all_time_low::<ZeroCopyVec<usize, u32>>()
+}
+
+#[test]
+fn test_lz4_compute_all_time_low() -> Result<()> {
+    run_compute_all_time_low::<LZ4Vec<usize, u32>>()
+}
+
+#[test]
+fn test_zstd_compute_all_time_low() -> Result<()> {
+    run_compute_all_time_low::<ZstdVec<usize, u32>>()
+}
+
+// test_compute_cagr
+#[test]
+fn test_pco_compute_cagr() -> Result<()> {
+    run_compute_cagr::<PcoVec<usize, f32>>()
+}
+
+#[test]
+fn test_zerocopy_compute_cagr() -> Result<()> {
+    run_compute_cagr::<ZeroCopyVec<usize, f32>>()
+}
+
+#[test]
+fn test_lz4_compute_cagr() -> Result<()> {
+    run_compute_cagr::<LZ4Vec<usize, f32>>()
+}
+
+#[test]
+fn test_zstd_compute_cagr() -> Result<()> {
+    run_compute_cagr::<ZstdVec<usize, f32>>()
+}
+
+// test_compute_zscore
+#[test]
+fn test_pco_compute_zscore() -> Result<()> {
+    run_compute_zscore::<PcoVec<usize, f32>>()
+}
+
+#[test]
+fn test_zerocopy_compute_zscore() -> Result<()> {
+    run_compute_zscore::<ZeroCopyVec<usize, f32>>()
+}
+
+#[test]
+fn test_lz4_compute_zscore() -> Result<()> {
+    run_compute_zscore::<LZ4Vec<usize, f32>>()
+}
+
+#[test]
+fn test_zstd_compute_zscore() -> Result<()> {
+    run_compute_zscore::<ZstdVec<usize, f32>>()
+}
+
+// test_compute_functions_with_resume
+#[test]
+fn test_pco_compute_functions_with_resume() -> Result<()> {
+    run_compute_functions_with_resume::<PcoVec<usize, u32>>()
+}
+
+#[test]
+fn test_zerocopy_compute_functions_with_resume() -> Result<()> {
+    run_compute_functions_with_resume::<ZeroCopyVec<usize, u32>>()
+}
+
+#[test]
+fn test_lz4_compute_functions_with_resume() -> Result<()> {
+    run_compute_functions_with_resume::<LZ4Vec<usize, u32>>()
+}
+
+#[test]
+fn test_zstd_compute_functions_with_resume() -> Result<()> {
+    run_compute_functions_with_resume::<ZstdVec<usize, u32>>()
+}
+
+// test_compute_add
+#[test]
+fn test_pco_compute_add() -> Result<()> {
+    run_compute_add::<PcoVec<usize, u64>>()
+}
+
+#[test]
+fn test_zerocopy_compute_add() -> Result<()> {
+    run_compute_add::<ZeroCopyVec<usize, u64>>()
+}
+
+#[test]
+fn test_lz4_compute_add() -> Result<()> {
+    run_compute_add::<LZ4Vec<usize, u64>>()
+}
+
+#[test]
+fn test_zstd_compute_add() -> Result<()> {
+    run_compute_add::<ZstdVec<usize, u64>>()
+}
+
+// test_compute_subtract
+#[test]
+fn test_pco_compute_subtract() -> Result<()> {
+    run_compute_subtract::<PcoVec<usize, u64>>()
+}
+
+#[test]
+fn test_zerocopy_compute_subtract() -> Result<()> {
+    run_compute_subtract::<ZeroCopyVec<usize, u64>>()
+}
+
+#[test]
+fn test_lz4_compute_subtract() -> Result<()> {
+    run_compute_subtract::<LZ4Vec<usize, u64>>()
+}
+
+#[test]
+fn test_zstd_compute_subtract() -> Result<()> {
+    run_compute_subtract::<ZstdVec<usize, u64>>()
+}
+
+// test_compute_multiply
+#[test]
+fn test_pco_compute_multiply() -> Result<()> {
+    run_compute_multiply::<PcoVec<usize, u32>>()
+}
+
+#[test]
+fn test_zerocopy_compute_multiply() -> Result<()> {
+    run_compute_multiply::<ZeroCopyVec<usize, u32>>()
+}
+
+#[test]
+fn test_lz4_compute_multiply() -> Result<()> {
+    run_compute_multiply::<LZ4Vec<usize, u32>>()
+}
+
+#[test]
+fn test_zstd_compute_multiply() -> Result<()> {
+    run_compute_multiply::<ZstdVec<usize, u32>>()
+}
+
+// test_compute_divide
+#[test]
+fn test_pco_compute_divide() -> Result<()> {
+    run_compute_divide::<PcoVec<usize, f32>>()
+}
+
+#[test]
+fn test_zerocopy_compute_divide() -> Result<()> {
+    run_compute_divide::<ZeroCopyVec<usize, f32>>()
+}
+
+#[test]
+fn test_lz4_compute_divide() -> Result<()> {
+    run_compute_divide::<LZ4Vec<usize, f32>>()
+}
+
+#[test]
+fn test_zstd_compute_divide() -> Result<()> {
+    run_compute_divide::<ZstdVec<usize, f32>>()
+}
+
+// test_compute_max
+#[test]
+fn test_pco_compute_max() -> Result<()> {
+    run_compute_max::<PcoVec<usize, u64>>()
+}
+
+#[test]
+fn test_zerocopy_compute_max() -> Result<()> {
+    run_compute_max::<ZeroCopyVec<usize, u64>>()
+}
+
+#[test]
+fn test_lz4_compute_max() -> Result<()> {
+    run_compute_max::<LZ4Vec<usize, u64>>()
+}
+
+#[test]
+fn test_zstd_compute_max() -> Result<()> {
+    run_compute_max::<ZstdVec<usize, u64>>()
+}
+
+// test_compute_min
+#[test]
+fn test_pco_compute_min() -> Result<()> {
+    run_compute_min::<PcoVec<usize, u64>>()
+}
+
+#[test]
+fn test_zerocopy_compute_min() -> Result<()> {
+    run_compute_min::<ZeroCopyVec<usize, u64>>()
+}
+
+#[test]
+fn test_lz4_compute_min() -> Result<()> {
+    run_compute_min::<LZ4Vec<usize, u64>>()
+}
+
+#[test]
+fn test_zstd_compute_min() -> Result<()> {
+    run_compute_min::<ZstdVec<usize, u64>>()
+}
+
+// test_compute_sum
+#[test]
+fn test_pco_compute_sum() -> Result<()> {
+    run_compute_sum::<PcoVec<usize, u64>>()
+}
+
+#[test]
+fn test_zerocopy_compute_sum() -> Result<()> {
+    run_compute_sum::<ZeroCopyVec<usize, u64>>()
+}
+
+#[test]
+fn test_lz4_compute_sum() -> Result<()> {
+    run_compute_sum::<LZ4Vec<usize, u64>>()
+}
+
+#[test]
+fn test_zstd_compute_sum() -> Result<()> {
+    run_compute_sum::<ZstdVec<usize, u64>>()
+}
+
+// test_compute_sma
+#[test]
+fn test_pco_compute_sma() -> Result<()> {
+    run_compute_sma::<PcoVec<usize, u16>, PcoVec<usize, f32>>()
+}
+
+#[test]
+fn test_zerocopy_compute_sma() -> Result<()> {
+    run_compute_sma::<ZeroCopyVec<usize, u16>, ZeroCopyVec<usize, f32>>()
+}
+
+#[test]
+fn test_lz4_compute_sma() -> Result<()> {
+    run_compute_sma::<LZ4Vec<usize, u16>, LZ4Vec<usize, f32>>()
+}
+
+#[test]
+fn test_zstd_compute_sma() -> Result<()> {
+    run_compute_sma::<ZstdVec<usize, u16>, ZstdVec<usize, f32>>()
+}
+
+// test_compute_ema
+#[test]
+fn test_pco_compute_ema() -> Result<()> {
+    run_compute_ema::<PcoVec<usize, u16>, PcoVec<usize, f32>>()
+}
+
+#[test]
+fn test_zerocopy_compute_ema() -> Result<()> {
+    run_compute_ema::<ZeroCopyVec<usize, u16>, ZeroCopyVec<usize, f32>>()
+}
+
+#[test]
+fn test_lz4_compute_ema() -> Result<()> {
+    run_compute_ema::<LZ4Vec<usize, u16>, LZ4Vec<usize, f32>>()
+}
+
+#[test]
+fn test_zstd_compute_ema() -> Result<()> {
+    run_compute_ema::<ZstdVec<usize, u16>, ZstdVec<usize, f32>>()
+}
+
+// test_compute_percentage
+#[test]
+fn test_pco_compute_percentage() -> Result<()> {
+    run_compute_percentage::<PcoVec<usize, u16>, PcoVec<usize, f32>>()
+}
+
+#[test]
+fn test_zerocopy_compute_percentage() -> Result<()> {
+    run_compute_percentage::<ZeroCopyVec<usize, u16>, ZeroCopyVec<usize, f32>>()
+}
+
+#[test]
+fn test_lz4_compute_percentage() -> Result<()> {
+    run_compute_percentage::<LZ4Vec<usize, u16>, LZ4Vec<usize, f32>>()
+}
+
+#[test]
+fn test_zstd_compute_percentage() -> Result<()> {
+    run_compute_percentage::<ZstdVec<usize, u16>, ZstdVec<usize, f32>>()
+}
+
+// test_compute_percentage_difference
+#[test]
+fn test_pco_compute_percentage_difference() -> Result<()> {
+    run_compute_percentage_difference::<PcoVec<usize, u16>, PcoVec<usize, f32>>()
+}
+
+#[test]
+fn test_zerocopy_compute_percentage_difference() -> Result<()> {
+    run_compute_percentage_difference::<ZeroCopyVec<usize, u16>, ZeroCopyVec<usize, f32>>()
+}
+
+#[test]
+fn test_lz4_compute_percentage_difference() -> Result<()> {
+    run_compute_percentage_difference::<LZ4Vec<usize, u16>, LZ4Vec<usize, f32>>()
+}
+
+#[test]
+fn test_zstd_compute_percentage_difference() -> Result<()> {
+    run_compute_percentage_difference::<ZstdVec<usize, u16>, ZstdVec<usize, f32>>()
 }

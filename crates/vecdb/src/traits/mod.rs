@@ -1,4 +1,5 @@
 mod any;
+mod any_stored;
 mod collectable;
 mod formattable;
 mod from_coarser;
@@ -13,6 +14,7 @@ mod value;
 mod writable;
 
 pub use any::*;
+pub use any_stored::*;
 pub use collectable::*;
 pub use formattable::*;
 pub use from_coarser::*;

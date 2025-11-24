@@ -18,8 +18,8 @@ pub use saturating_add::*;
 
 use crate::{
     AnyStoredVec, AnyVec, BoxedVecIterator, CollectableVec, Exit, GenericStoredVec, Header,
-    ImportOptions, Importable, IterableVec, PrintableIndex, Result, TypedStoredVec, TypedVec,
-    VecIndex, VecValue, Version,
+    ImportOptions, Importable, IterableVec, PrintableIndex, Result, StoredVec, TypedVec, VecIndex,
+    VecValue, Version,
 };
 
 /// Stored vector with eager computation methods for deriving values from other vectors.
@@ -29,7 +29,7 @@ use crate::{
 /// and incrementally updated when source data changes.
 #[derive(Debug, Clone)]
 #[must_use = "Vector should be stored to keep data accessible"]
-pub struct EagerVec<V>(pub V);
+pub struct EagerVec<V>(V);
 
 impl<V: Importable> Importable for EagerVec<V> {
     fn import(db: &Database, name: &str, version: Version) -> Result<Self> {
@@ -51,9 +51,7 @@ impl<V: Importable> Importable for EagerVec<V> {
 
 impl<V> EagerVec<V>
 where
-    V: TypedStoredVec + GenericStoredVec<V::I, V::T> + IterableVec<V::I, V::T> + Clone,
-    V::I: VecIndex,
-    V::T: VecValue,
+    V: StoredVec,
 {
     #[inline]
     pub fn inner_version(&self) -> Version {
@@ -1362,13 +1360,8 @@ where
 // Methods that need lookback functionality
 impl<V> EagerVec<V>
 where
-    V: TypedStoredVec
-        + GenericStoredVec<V::I, V::T>
-        + IterableVec<V::I, V::T>
-        + CollectableVec<V::I, V::T>
-        + Clone,
-    V::I: VecIndex + CheckedSub,
-    V::T: VecValue,
+    V: StoredVec,
+    V::I: CheckedSub,
 {
     fn compute_with_lookback<A, F>(
         &mut self,
@@ -1407,9 +1400,7 @@ where
 
 impl<V> AnyVec for EagerVec<V>
 where
-    V: TypedStoredVec,
-    V::I: VecIndex,
-    V::T: VecValue,
+    V: StoredVec,
 {
     #[inline]
     fn version(&self) -> Version {
@@ -1444,9 +1435,7 @@ where
 
 impl<V> AnyStoredVec for EagerVec<V>
 where
-    V: TypedStoredVec,
-    V::I: VecIndex,
-    V::T: VecValue,
+    V: StoredVec,
 {
     #[inline]
     fn db_path(&self) -> PathBuf {
@@ -1505,16 +1494,14 @@ where
 
 impl<V> GenericStoredVec<V::I, V::T> for EagerVec<V>
 where
-    V: TypedVec + GenericStoredVec<V::I, V::T>,
-    V::I: VecIndex,
-    V::T: VecValue,
+    V: StoredVec,
 {
     #[inline]
     fn unchecked_read_at(&self, index: usize, reader: &Reader) -> Result<V::T> {
         self.0.unchecked_read_at(index, reader)
     }
 
-    #[inline]
+    #[inline(always)]
     fn read_value_from_bytes(&self, bytes: &[u8]) -> Result<V::T> {
         self.0.read_value_from_bytes(bytes)
     }
@@ -1568,10 +1555,8 @@ where
 
 impl<'a, V> IntoIterator for &'a EagerVec<V>
 where
-    V: TypedVec,
+    V: StoredVec,
     &'a V: IntoIterator<Item = V::T>,
-    V::I: VecIndex,
-    V::T: VecValue,
 {
     type Item = V::T;
     type IntoIter = <&'a V as IntoIterator>::IntoIter;
@@ -1583,9 +1568,7 @@ where
 
 impl<V> IterableVec<V::I, V::T> for EagerVec<V>
 where
-    V: TypedStoredVec + IterableVec<V::I, V::T>,
-    V::I: VecIndex,
-    V::T: VecValue,
+    V: StoredVec,
 {
     fn iter(&self) -> BoxedVecIterator<'_, V::I, V::T> {
         self.0.iter()
@@ -1594,7 +1577,7 @@ where
 
 impl<V> TypedVec for EagerVec<V>
 where
-    V: TypedStoredVec,
+    V: StoredVec,
 {
     type I = V::I;
     type T = V::T;

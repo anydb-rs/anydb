@@ -1,7 +1,5 @@
 use std::{fmt::Debug, ops::Add};
 
-use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
-
 use crate::PrintableIndex;
 
 pub trait VecIndex
@@ -17,10 +15,6 @@ where
         + From<usize>
         + Into<usize>
         + Add<usize, Output = Self>
-        + TryFromBytes
-        + IntoBytes
-        + Immutable
-        + KnownLayout
         + Send
         + Sync
         + PrintableIndex
@@ -49,10 +43,6 @@ impl<I> VecIndex for I where
         + From<usize>
         + Into<usize>
         + Add<usize, Output = Self>
-        + TryFromBytes
-        + IntoBytes
-        + Immutable
-        + KnownLayout
         + Send
         + Sync
         + PrintableIndex

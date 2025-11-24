@@ -12,8 +12,9 @@ use rawdb::{Database, Reader, Region};
 use zerocopy::{FromBytes, IntoBytes};
 
 use crate::{
-    AnyStoredVec, AnyVec, BUFFER_SIZE, Error, Format, GenericStoredVec, HEADER_OFFSET, Header,
-    ImportOptions, Result, SIZE_OF_U64, Stamp, StoredVec, TypedVec, VecIndex, VecValue, Version,
+    AnyStoredVec, AnyVec, BUFFER_SIZE, BaseVec, BoxedVecIterator, CleanRawVecIterator,
+    DirtyRawVecIterator, Error, Format, GenericStoredVec, HEADER_OFFSET, Header, ImportOptions,
+    IterableVec, RawVecIterator, Result, SIZE_OF_U64, Stamp, TypedVec, VecIndex, VecValue, Version,
     vec_region_name_with,
 };
 
@@ -28,7 +29,7 @@ const VERSION: Version = Version::ONE;
 #[derive(Debug, Clone)]
 #[must_use = "Vector should be stored to keep data accessible"]
 pub struct RawVecInner<I, T, S> {
-    pub(crate) base: StoredVec<I, T>,
+    pub(crate) base: BaseVec<I, T>,
     has_stored_holes: bool,
     holes: BTreeSet<usize>,
     prev_holes: BTreeSet<usize>,
@@ -41,7 +42,7 @@ impl<I, T, S> RawVecInner<I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     /// The size of T in bytes as determined by the strategy.
     pub const SIZE_OF_T: usize = size_of::<T>();
@@ -71,7 +72,7 @@ where
         let db = options.db;
         let name = options.name;
 
-        let base = StoredVec::import(options, format)?;
+        let base = BaseVec::import(options, format)?;
 
         // Raw format requires data to be aligned to SIZE_OF_T
         let region_len = base.region().meta().len();
@@ -439,13 +440,37 @@ where
     pub fn index_to_name(&self) -> String {
         vec_region_name_with::<I>(self.name())
     }
+
+    // ====================
+    // Iterators
+    // ====================
+
+    #[inline]
+    pub fn iter(&self) -> Result<RawVecIterator<'_, I, T, S>> {
+        RawVecIterator::new(self)
+    }
+
+    #[inline]
+    pub fn clean_iter(&self) -> Result<CleanRawVecIterator<'_, I, T, S>> {
+        CleanRawVecIterator::new(self)
+    }
+
+    #[inline]
+    pub fn dirty_iter(&self) -> Result<DirtyRawVecIterator<'_, I, T, S>> {
+        DirtyRawVecIterator::new(self)
+    }
+
+    #[inline]
+    pub fn boxed_iter(&self) -> Result<BoxedVecIterator<'_, I, T>> {
+        Ok(Box::new(self.iter()?))
+    }
 }
 
 impl<I, T, S> AnyVec for RawVecInner<I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     #[inline]
     fn version(&self) -> Version {
@@ -482,7 +507,7 @@ impl<I, T, S> AnyStoredVec for RawVecInner<I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     #[inline]
     fn db_path(&self) -> PathBuf {
@@ -646,7 +671,7 @@ impl<I, T, S> GenericStoredVec<I, T> for RawVecInner<I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     #[inline(always)]
     fn unchecked_read_at(&self, index: usize, reader: &Reader) -> Result<T> {
@@ -863,11 +888,36 @@ where
     }
 }
 
+impl<'a, I, T, S> IntoIterator for &'a RawVecInner<I, T, S>
+where
+    I: VecIndex,
+    T: VecValue,
+    S: RawStrategy<T>,
+{
+    type Item = T;
+    type IntoIter = RawVecIterator<'a, I, T, S>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter().expect("RawVecIterator::new(self) to work")
+    }
+}
+
+impl<I, T, S> IterableVec<I, T> for RawVecInner<I, T, S>
+where
+    I: VecIndex,
+    T: VecValue,
+    S: RawStrategy<T>,
+{
+    fn iter(&self) -> BoxedVecIterator<'_, I, T> {
+        Box::new(self.into_iter())
+    }
+}
+
 impl<I, T, S> TypedVec for RawVecInner<I, T, S>
 where
     I: VecIndex,
     T: VecValue,
-    S: SerializeStrategy<T>,
+    S: RawStrategy<T>,
 {
     type I = I;
     type T = T;

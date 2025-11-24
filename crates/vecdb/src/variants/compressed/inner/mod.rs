@@ -5,9 +5,10 @@ use parking_lot::RwLock;
 use rawdb::{Database, Reader, Region};
 
 use crate::{
-    AnyStoredVec, AnyVec, Error, Format, GenericStoredVec, HEADER_OFFSET, Header, ImportOptions,
-    Result, StoredVec, TypedVec, VecIndex, VecValue, Version, likely, unlikely,
-    vec_region_name_with,
+    AnyStoredVec, AnyVec, BaseVec, BoxedVecIterator, CleanCompressedVecIterator,
+    CompressedVecIterator, DirtyCompressedVecIterator, Error, Format, GenericStoredVec,
+    HEADER_OFFSET, Header, ImportOptions, IterableVec, Result, TypedVec, VecIndex, VecValue,
+    Version, likely, unlikely, vec_region_name_with,
 };
 
 mod page;
@@ -28,7 +29,7 @@ const VERSION: Version = Version::TWO;
 #[derive(Debug, Clone)]
 #[must_use = "Vector should be stored to keep data accessible"]
 pub struct CompressedVecInner<I, T, S> {
-    base: StoredVec<I, T>,
+    base: BaseVec<I, T>,
     pages: Arc<RwLock<Pages>>,
     _strategy: PhantomData<S>,
 }
@@ -69,7 +70,7 @@ where
         let db = options.db;
         let name = options.name;
 
-        let base = StoredVec::import(options, format)?;
+        let base = BaseVec::import(options, format)?;
 
         let pages = Pages::import(db, &Self::pages_region_name_(name))?;
 
@@ -182,6 +183,30 @@ where
     #[inline]
     pub(crate) fn pages(&self) -> &Arc<RwLock<Pages>> {
         &self.pages
+    }
+
+    // ====================
+    // Iterators
+    // ====================
+
+    #[inline]
+    pub fn iter(&self) -> Result<CompressedVecIterator<'_, I, T, S>> {
+        CompressedVecIterator::new(self)
+    }
+
+    #[inline]
+    pub fn clean_iter(&self) -> Result<CleanCompressedVecIterator<'_, I, T, S>> {
+        CleanCompressedVecIterator::new(self)
+    }
+
+    #[inline]
+    pub fn dirty_iter(&self) -> Result<DirtyCompressedVecIterator<'_, I, T, S>> {
+        DirtyCompressedVecIterator::new(self)
+    }
+
+    #[inline]
+    pub fn boxed_iter(&self) -> Result<BoxedVecIterator<'_, I, T>> {
+        Ok(Box::new(self.iter()?))
     }
 }
 
@@ -375,14 +400,13 @@ where
         })
     }
 
-    // TODO: Implement properly
-    fn read_value_from_bytes(&self, _bytes: &[u8]) -> Result<T> {
-        todo!("CompressedVecInner serialization")
+    #[inline(always)]
+    fn read_value_from_bytes(&self, bytes: &[u8]) -> Result<T> {
+        S::read(bytes)
     }
 
-    // TODO: Implement properly
-    fn value_to_bytes(&self, _value: &T) -> Vec<u8> {
-        todo!("CompressedVecInner serialization")
+    fn value_to_bytes(&self, value: &T) -> Vec<u8> {
+        S::write(value)
     }
 
     #[inline]
@@ -419,6 +443,32 @@ where
     fn reset(&mut self) -> Result<()> {
         self.pages.write().reset();
         self.clear()
+    }
+}
+
+impl<'a, I, T, S> IntoIterator for &'a CompressedVecInner<I, T, S>
+where
+    I: VecIndex,
+    T: VecValue,
+    S: CompressionStrategy<T>,
+{
+    type Item = T;
+    type IntoIter = CompressedVecIterator<'a, I, T, S>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+            .expect("CompressedVecIterator::new(self) to work")
+    }
+}
+
+impl<I, T, S> IterableVec<I, T> for CompressedVecInner<I, T, S>
+where
+    I: VecIndex,
+    T: VecValue,
+    S: CompressionStrategy<T>,
+{
+    fn iter(&self) -> BoxedVecIterator<'_, I, T> {
+        Box::new(self.into_iter())
     }
 }
 
