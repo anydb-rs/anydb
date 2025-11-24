@@ -441,8 +441,11 @@ where
     }
 
     fn reset(&mut self) -> Result<()> {
+        // Reset pages (specific to CompressedVecInner)
         self.pages.write().reset();
-        self.clear()
+
+        // Use default reset for common cleanup
+        self.default_reset()
     }
 }
 

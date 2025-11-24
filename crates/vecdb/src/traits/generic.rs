@@ -341,6 +341,28 @@ where
     /// Resets the vector state.
     fn reset(&mut self) -> Result<()>;
 
+    /// Default reset implementation - clears data and rollback history.
+    /// Clears pushed data, resets stored_len to 0, and removes rollback changes directory.
+    /// Vector types should call this and perform any additional type-specific cleanup.
+    #[doc(hidden)]
+    fn default_reset(&mut self) -> Result<()> {
+        // Clear the data
+        self.clear()?;
+
+        // Reset to fresh state - clear rollback history
+        *self.mut_prev_stored_len() = 0;
+        *self.mut_prev_pushed() = vec![];
+        self.update_stamp(Stamp::default());
+
+        // Remove changes directory if it exists
+        let changes_path = self.changes_path();
+        if changes_path.exists() {
+            std::fs::remove_dir_all(&changes_path)?;
+        }
+
+        Ok(())
+    }
+
     /// Clears all values from the vector.
     #[inline]
     fn clear(&mut self) -> Result<()> {

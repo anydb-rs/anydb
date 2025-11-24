@@ -720,7 +720,14 @@ where
     }
 
     fn reset(&mut self) -> Result<()> {
-        self.clear()
+        // Clear holes and updated data (specific to RawVecInner)
+        self.holes.clear();
+        self.updated.clear();
+        self.prev_holes.clear();
+        self.prev_updated.clear();
+
+        // Use default reset for common cleanup
+        self.default_reset()
     }
 
     // ============================================================================
