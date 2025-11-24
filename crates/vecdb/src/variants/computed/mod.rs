@@ -1,5 +1,5 @@
 use crate::{
-    AnyVec, BoxedVecIterator, Compressable, Exit, Format, IterableBoxedVec, IterableVec, Result,
+    AnyVec, BoxedVecIterator, Exit, Format, IterableBoxedVec, IterableVec, PcodecVecValue, Result,
     TypedVec, VecIndex, VecValue, Version, variants::ImportOptions,
 };
 
@@ -68,7 +68,7 @@ where
 impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> ComputedVec<I, T, S1I, S1T, S2I, S2T, S3I, S3T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
     S1I: VecIndex,
     S1T: VecValue,
     S2I: VecIndex,
@@ -275,7 +275,7 @@ where
 impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> AnyVec for ComputedVec<I, T, S1I, S1T, S2I, S2T, S3I, S3T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
     S1I: VecIndex,
     S1T: VecValue,
     S2I: VecIndex,
@@ -334,7 +334,7 @@ impl<'a, I, T, S1I, S1T, S2I, S2T, S3I, S3T> IntoIterator
     for &'a ComputedVec<I, T, S1I, S1T, S2I, S2T, S3I, S3T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
     S1I: VecIndex,
     S1T: VecValue,
     S2I: VecIndex,
@@ -354,7 +354,7 @@ impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> IterableVec<I, T>
     for ComputedVec<I, T, S1I, S1T, S2I, S2T, S3I, S3T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
     S1I: VecIndex,
     S1T: VecValue,
     S2I: VecIndex,
@@ -371,7 +371,7 @@ impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> TypedVec
     for ComputedVec<I, T, S1I, S1T, S2I, S2T, S3I, S3T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
     S1I: VecIndex,
     S1T: VecValue,
     S2I: VecIndex,

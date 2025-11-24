@@ -1,6 +1,5 @@
 mod any;
 mod collectable;
-mod compressable;
 mod formattable;
 mod from_coarser;
 mod generic;
@@ -14,7 +13,6 @@ mod writable;
 
 pub use any::*;
 pub use collectable::*;
-pub use compressable::*;
 pub use formattable::*;
 pub use from_coarser::*;
 pub use generic::*;

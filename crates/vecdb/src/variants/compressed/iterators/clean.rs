@@ -8,17 +8,16 @@ use parking_lot::RwLockReadGuard;
 use rawdb::RegionMetadata;
 
 use crate::{
-    AnyStoredVec, BUFFER_SIZE, Compressable, CompressedVec, GenericStoredVec, Result,
-    TypedVecIterator, VecIndex, VecIterator, likely, unlikely,
-    variants::MAX_UNCOMPRESSED_PAGE_SIZE,
+    AnyStoredVec, BUFFER_SIZE, GenericStoredVec, Result, TypedVecIterator, VecIndex, VecIterator,
+    VecValue, likely, unlikely, variants::compressed::inner::Pages,
 };
 
-use super::super::pages::Pages;
+use super::super::inner::{CompressedVecInner, CompressionStrategy, MAX_UNCOMPRESSED_PAGE_SIZE};
 
 /// Clean compressed vec iterator, for reading stored compressed data
 /// Uses dedicated file handle for sequential reads (better OS readahead than mmap)
-pub struct CleanCompressedVecIterator<'a, I, T> {
-    pub(crate) _vec: &'a CompressedVec<I, T>,
+pub struct CleanCompressedVecIterator<'a, I, T, S> {
+    pub(crate) _vec: &'a CompressedVecInner<I, T, S>,
     file: File,         // Dedicated file handle for sequential reads
     file_position: u64, // Current position in the file
     region_start: u64,  // Absolute start offset of this region in the database file
@@ -35,23 +34,25 @@ pub struct CleanCompressedVecIterator<'a, I, T> {
     index: usize,
     end_index: usize,
     _region_lock: RwLockReadGuard<'a, RegionMetadata>,
+    // _strategy: PhantomData<S>,
 }
 
-impl<'a, I, T> CleanCompressedVecIterator<'a, I, T>
+impl<'a, I, T, S> CleanCompressedVecIterator<'a, I, T, S>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
+    S: CompressionStrategy<T>,
 {
     const SIZE_OF_T: usize = size_of::<T>();
     const PER_PAGE: usize = MAX_UNCOMPRESSED_PAGE_SIZE / Self::SIZE_OF_T;
     const NO_PAGE: usize = usize::MAX;
 
-    pub fn new(vec: &'a CompressedVec<I, T>) -> Result<Self> {
+    pub fn new(vec: &'a CompressedVecInner<I, T, S>) -> Result<Self> {
         let region_lock = vec.region().meta();
         let region_start = region_lock.start() as u64;
         let file = vec.region().open_db_read_only_file()?;
 
-        let pages = vec.pages.read();
+        let pages = vec.pages().read();
         let stored_len = vec.stored_len();
 
         Ok(Self {
@@ -158,8 +159,7 @@ where
         let in_buffer_offset = (compressed_offset - buffer_start_offset) as usize;
         let compressed_data = &self.buffer[in_buffer_offset..in_buffer_offset + compressed_size];
 
-        self.decoded_values =
-            CompressedVec::<I, T>::decompress_bytes(compressed_data, values_count).ok()?;
+        self.decoded_values = S::decompress(compressed_data, values_count).ok()?;
         self.decoded_page_index = page_index;
         self.decoded_len = self.decoded_values.len();
 
@@ -205,10 +205,11 @@ where
     }
 }
 
-impl<I, T> Iterator for CleanCompressedVecIterator<'_, I, T>
+impl<I, T, S> Iterator for CleanCompressedVecIterator<'_, I, T, S>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
+    S: CompressionStrategy<T>,
 {
     type Item = T;
 
@@ -227,12 +228,12 @@ where
 
         // Fast path: read from current decoded page
         if likely(self.has_decoded_page() && self.decoded_page_index == page_index) {
-            return self.decoded_values.get(in_page_index).copied();
+            return self.decoded_values.get(in_page_index).cloned();
         }
 
         // Slow path: decode new page
         self.decode_page(page_index)?;
-        self.decoded_values.get(in_page_index).copied()
+        self.decoded_values.get(in_page_index).cloned()
     }
 
     #[inline]
@@ -273,10 +274,11 @@ where
     }
 }
 
-impl<I, T> VecIterator for CleanCompressedVecIterator<'_, I, T>
+impl<I, T, S> VecIterator for CleanCompressedVecIterator<'_, I, T, S>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
+    S: CompressionStrategy<T>,
 {
     #[inline]
     fn set_position_to(&mut self, i: usize) {
@@ -314,19 +316,21 @@ where
     }
 }
 
-impl<I, T> TypedVecIterator for CleanCompressedVecIterator<'_, I, T>
+impl<I, T, S> TypedVecIterator for CleanCompressedVecIterator<'_, I, T, S>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
+    S: CompressionStrategy<T>,
 {
     type I = I;
     type T = T;
 }
 
-impl<I, T> ExactSizeIterator for CleanCompressedVecIterator<'_, I, T>
+impl<I, T, S> ExactSizeIterator for CleanCompressedVecIterator<'_, I, T, S>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
+    S: CompressionStrategy<T>,
 {
     #[inline(always)]
     fn len(&self) -> usize {
@@ -334,307 +338,10 @@ where
     }
 }
 
-impl<I, T> FusedIterator for CleanCompressedVecIterator<'_, I, T>
+impl<I, T, S> FusedIterator for CleanCompressedVecIterator<'_, I, T, S>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
+    S: CompressionStrategy<T>,
 {
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{CompressedVec, Version};
-    use rawdb::Database;
-    use tempfile::TempDir;
-
-    fn setup() -> (TempDir, Database, CompressedVec<usize, i32>) {
-        let temp = TempDir::new().unwrap();
-        let db = Database::open(&temp.path().join("test.db")).unwrap();
-        let vec = CompressedVec::import(&db, "test", Version::ONE).unwrap();
-        (temp, db, vec)
-    }
-
-    #[test]
-    fn test_compressed_clean_iter_basic() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..100 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let collected: Vec<i32> = vec.clean_iter().unwrap().collect();
-        assert_eq!(collected.len(), 100);
-        assert_eq!(collected[0], 0);
-        assert_eq!(collected[99], 99);
-    }
-
-    #[test]
-    fn test_compressed_clean_iter_large() {
-        let (_temp, _db, mut vec) = setup();
-
-        // Push enough to span multiple pages
-        for i in 0..10000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let collected: Vec<i32> = vec.clean_iter().unwrap().collect();
-        assert_eq!(collected.len(), 10000);
-
-        for (i, &val) in collected.iter().enumerate() {
-            assert_eq!(val, i as i32);
-        }
-    }
-
-    #[test]
-    fn test_compressed_clean_iter_nth() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..1000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let mut iter = vec.clean_iter().unwrap();
-        assert_eq!(iter.next(), Some(0));
-        assert_eq!(iter.nth(99), Some(100));
-        assert_eq!(iter.next(), Some(101));
-    }
-
-    #[test]
-    fn test_compressed_clean_iter_skip_across_pages() {
-        let (_temp, _db, mut vec) = setup();
-
-        // Push enough to span multiple pages
-        for i in 0..10000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let iter = vec.clean_iter().unwrap().skip(5000);
-        let collected: Vec<i32> = iter.collect();
-
-        assert_eq!(collected.len(), 5000);
-        assert_eq!(collected[0], 5000);
-        assert_eq!(collected[4999], 9999);
-    }
-
-    #[test]
-    fn test_compressed_clean_iter_take() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..1000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let iter = vec.clean_iter().unwrap().take(100);
-        let collected: Vec<i32> = iter.collect();
-
-        assert_eq!(collected.len(), 100);
-        assert_eq!(collected[0], 0);
-        assert_eq!(collected[99], 99);
-    }
-
-    #[test]
-    fn test_compressed_clean_iter_skip_take_combined() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..5000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let iter = vec.clean_iter().unwrap().skip(1000).take(2000);
-        let collected: Vec<i32> = iter.collect();
-
-        assert_eq!(collected.len(), 2000);
-        assert_eq!(collected[0], 1000);
-        assert_eq!(collected[1999], 2999);
-    }
-
-    #[test]
-    fn test_compressed_clean_iter_set_position() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..5000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let mut iter = vec.clean_iter().unwrap();
-        iter.set_position_to(2500);
-        assert_eq!(iter.next(), Some(2500));
-        assert_eq!(iter.next(), Some(2501));
-    }
-
-    #[test]
-    fn test_compressed_clean_iter_set_position_tosame_page() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..1000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let mut iter = vec.clean_iter().unwrap();
-        iter.next(); // Decode first page
-        iter.set_position_to(50); // Should reuse same page
-        assert_eq!(iter.next(), Some(50));
-    }
-
-    #[test]
-    fn test_compressed_clean_iter_last() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..1000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let iter = vec.clean_iter().unwrap();
-        assert_eq!(iter.last(), Some(999));
-    }
-
-    #[test]
-    fn test_compressed_clean_iter_last_empty() {
-        let (_temp, _db, vec) = setup();
-
-        let iter = vec.clean_iter().unwrap();
-        assert_eq!(iter.last(), None);
-    }
-
-    #[test]
-    fn test_compressed_clean_iter_exact_size() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..1000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let mut iter = vec.clean_iter().unwrap();
-        assert_eq!(iter.len(), 1000);
-
-        iter.next();
-        assert_eq!(iter.len(), 999);
-
-        iter.nth(100);
-        assert_eq!(iter.len(), 898);
-    }
-
-    #[test]
-    fn test_compressed_clean_iter_page_boundaries() {
-        let (_temp, _db, mut vec) = setup();
-
-        // Push data that spans multiple pages
-        for i in 0..10000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        // Iterate and ensure no gaps at page boundaries
-        let mut iter = vec.clean_iter().unwrap();
-        for i in 0..10000 {
-            assert_eq!(iter.next(), Some(i));
-        }
-        assert_eq!(iter.next(), None);
-    }
-
-    #[test]
-    fn test_compressed_clean_iter_multiple_set_position() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..10000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let mut iter = vec.clean_iter().unwrap();
-
-        // Jump to different pages
-        iter.set_position_to(1000);
-        assert_eq!(iter.next(), Some(1000));
-
-        iter.set_position_to(5000);
-        assert_eq!(iter.next(), Some(5000));
-
-        iter.set_position_to(100);
-        assert_eq!(iter.next(), Some(100));
-    }
-
-    #[test]
-    fn test_compressed_clean_iter_buffer_efficiency() {
-        let (_temp, _db, mut vec) = setup();
-
-        // Push enough data to fill multiple pages
-        for i in 0..20000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        // Sequential iteration should reuse buffer efficiently
-        let collected: Vec<i32> = vec.clean_iter().unwrap().collect();
-        assert_eq!(collected.len(), 20000);
-
-        for (i, &val) in collected.iter().enumerate() {
-            assert_eq!(val, i as i32);
-        }
-    }
-
-    #[test]
-    fn test_compressed_clean_iter_skip_take_multiple() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..10000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let collected: Vec<i32> = vec
-            .clean_iter()
-            .unwrap()
-            .skip(1000)
-            .take(5000)
-            .skip(500)
-            .take(2000)
-            .collect();
-
-        assert_eq!(collected.len(), 2000);
-        assert_eq!(collected[0], 1500);
-        assert_eq!(collected[1999], 3499);
-    }
-
-    #[test]
-    fn test_compressed_clean_iter_nth_beyond_end() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..100 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let mut iter = vec.clean_iter().unwrap();
-        assert_eq!(iter.nth(200), None);
-        assert_eq!(iter.next(), None);
-    }
-
-    #[test]
-    fn test_compressed_clean_iter_set_end_middle_of_page() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..5000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let mut iter = vec.clean_iter().unwrap();
-        iter.set_end_to(2500); // Middle of a page
-
-        let collected: Vec<i32> = iter.collect();
-        assert_eq!(collected.len(), 2500);
-        assert_eq!(collected[2499], 2499);
-    }
 }

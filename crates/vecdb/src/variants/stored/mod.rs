@@ -3,11 +3,11 @@ use std::path::PathBuf;
 use rawdb::{Database, Reader, Region};
 
 use crate::{
-    AnyStoredVec, AnyVec, BoxedVecIterator, Compressable, Format, GenericStoredVec, Header,
-    IterableVec, Result, TypedVec, VecIndex, Version, variants::ImportOptions,
+    AnyStoredVec, AnyVec, BoxedVecIterator, Format, GenericStoredVec, Header, IterableVec,
+    PcodecVecValue, Result, TypedVec, VecIndex, Version, variants::ImportOptions,
 };
 
-use super::{CompressedVec, RawVec};
+use super::{BytesVec, CompressedVec, PcoVec, RawVec, ZeroCopyVec};
 
 mod iterator;
 
@@ -15,8 +15,8 @@ pub use iterator::*;
 
 /// Enum wrapper for stored vectors, supporting both raw and compressed formats.
 ///
-/// This allows runtime selection between RawVec and CompressedVec storage formats
-/// based on the data characteristics and access patterns.
+/// This allows runtime selection between raw formats (ZeroCopy, Bytes) and
+/// compressed formats (Pcodec, LZ4, Zstd) based on data characteristics.
 #[derive(Debug, Clone)]
 #[must_use = "Vector should be stored to keep data accessible"]
 pub enum StoredVec<I, T> {
@@ -27,7 +27,7 @@ pub enum StoredVec<I, T> {
 impl<I, T> StoredVec<I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
 {
     pub fn forced_import(
         db: &Database,
@@ -43,12 +43,20 @@ where
             return Err(crate::Error::VersionCannotBeZero);
         }
 
-        if format.is_compressed() {
-            Ok(Self::Compressed(CompressedVec::forced_import_with(
+        match format {
+            // Raw formats
+            Format::ZeroCopy => Ok(Self::Raw(RawVec::ZeroCopy(
+                ZeroCopyVec::forced_import_with(options)?,
+            ))),
+            Format::Bytes => Ok(Self::Raw(RawVec::Bytes(BytesVec::forced_import_with(
                 options,
-            )?))
-        } else {
-            Ok(Self::Raw(RawVec::forced_import_with(options)?))
+            )?))),
+            // Compressed formats
+            Format::Pcodec => Ok(Self::Compressed(CompressedVec::Pco(
+                PcoVec::forced_import_with(options)?,
+            ))),
+            Format::LZ4 => todo!("LZ4 compression not yet implemented"),
+            Format::Zstd => todo!("Zstd compression not yet implemented"),
         }
     }
 
@@ -64,7 +72,7 @@ where
 impl<I, T> AnyVec for StoredVec<I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
 {
     #[inline]
     fn version(&self) -> Version {
@@ -108,7 +116,7 @@ where
 impl<I, T> AnyStoredVec for StoredVec<I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
 {
     #[inline]
     fn db_path(&self) -> PathBuf {
@@ -192,13 +200,29 @@ where
 impl<I, T> GenericStoredVec<I, T> for StoredVec<I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
 {
     #[inline]
     fn unchecked_read_at(&self, index: usize, reader: &Reader) -> Result<T> {
         match self {
             StoredVec::Raw(v) => v.unchecked_read_at(index, reader),
             StoredVec::Compressed(v) => v.unchecked_read_at(index, reader),
+        }
+    }
+
+    #[inline]
+    fn read_value_from_bytes(&self, bytes: &[u8]) -> Result<T> {
+        match self {
+            StoredVec::Raw(v) => v.read_value_from_bytes(bytes),
+            StoredVec::Compressed(v) => v.read_value_from_bytes(bytes),
+        }
+    }
+
+    #[inline]
+    fn value_to_bytes(&self, value: &T) -> Vec<u8> {
+        match self {
+            StoredVec::Raw(v) => v.value_to_bytes(value),
+            StoredVec::Compressed(v) => v.value_to_bytes(value),
         }
     }
 
@@ -272,7 +296,7 @@ where
 impl<'a, I, T> IntoIterator for &'a StoredVec<I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
 {
     type Item = T;
     type IntoIter = StoredVecIterator<'a, I, T>;
@@ -288,7 +312,7 @@ where
 impl<I, T> IterableVec<I, T> for StoredVec<I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
 {
     fn iter(&self) -> BoxedVecIterator<'_, I, T> {
         Box::new(self.into_iter())
@@ -298,7 +322,7 @@ where
 impl<I, T> TypedVec for StoredVec<I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
 {
     type I = I;
     type T = T;

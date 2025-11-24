@@ -2,13 +2,13 @@ use std::mem::{align_of, size_of};
 
 use pco::data_types::Number;
 
-use super::VecValue;
+use crate::VecValue;
 
-pub trait TransparentCompressable<T> {}
+pub trait TransparentPcodecVecValue<T> {}
 
-pub trait Compressable
+pub trait PcodecVecValue
 where
-    Self: VecValue + Copy + 'static + TransparentCompressable<Self::NumberType>,
+    Self: VecValue + Copy + 'static + TransparentPcodecVecValue<Self::NumberType>,
 {
     type NumberType: pco::data_types::Number;
 }
@@ -25,7 +25,7 @@ where
 
 impl<T> AsInnerSlice<T::NumberType> for [T]
 where
-    T: Compressable,
+    T: PcodecVecValue,
 {
     const _SIZE_CHECK: () = assert!(size_of::<T>() == size_of::<T::NumberType>());
     const _ALIGN_CHECK: () = assert!(align_of::<T>() == align_of::<T::NumberType>());
@@ -46,7 +46,7 @@ pub trait FromInnerSlice<T> {
 
 impl<T> FromInnerSlice<T::NumberType> for T
 where
-    T: Compressable,
+    T: PcodecVecValue,
 {
     const _SIZE_CHECK: () = assert!(size_of::<T>() == size_of::<T::NumberType>());
     const _ALIGN_CHECK: () = assert!(align_of::<T>() == align_of::<T::NumberType>());
@@ -61,8 +61,8 @@ macro_rules! impl_stored_compressed {
     ($($t:ty),*) => {
         $(
             impl
-TransparentCompressable<$t> for $t {}
-impl Compressable for $t {
+TransparentPcodecVecValue<$t> for $t {}
+impl PcodecVecValue for $t {
                 type NumberType = $t;
             }
         )*

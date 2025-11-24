@@ -1,461 +1,137 @@
-use std::{mem, path::PathBuf, sync::Arc};
-
-use log::info;
-use parking_lot::RwLock;
-use rawdb::{Database, Reader, Region};
-
-use crate::{
-    AnyStoredVec, AnyVec, AsInnerSlice, BaseVec, BoxedVecIterator, Compressable, Error, Format,
-    FromInnerSlice, GenericStoredVec, HEADER_OFFSET, Header, IterableVec, Result, TypedVec,
-    VecIndex, Version, likely, unlikely, variants::ImportOptions, vec_region_name_with,
-};
-
+mod inner;
 mod iterators;
-mod page;
-mod pages;
+#[cfg(feature = "lz4")]
+mod lz4;
+#[cfg(feature = "pco")]
+mod pco;
+#[cfg(feature = "zstd")]
+mod zstd;
 
+pub(crate) use inner::*;
 pub use iterators::*;
-use page::*;
-use pages::*;
+#[cfg(feature = "lz4")]
+pub use lz4::*;
+#[cfg(feature = "pco")]
+pub use pco::*;
+#[cfg(feature = "zstd")]
+pub use zstd::*;
 
-const PCO_COMPRESSION_LEVEL: usize = 4;
-/// Maximum size in bytes of a single compressed (pco) page
-pub(crate) const MAX_UNCOMPRESSED_PAGE_SIZE: usize = 16 * 1024; // 16 KiB
+use crate::{AnyVec, BoxedVecIterator, IterableVec, TypedVec, VecIndex, VecValue, Version};
 
-const VERSION: Version = Version::TWO;
-
-/// Compressed storage vector using Pcodec for lossless numerical compression.
+/// Enum wrapper for compressed storage vectors.
 ///
-/// Values are compressed in pages for better space efficiency. Best for sequential
-/// access patterns of numerical data. Random access is possible but less efficient
-/// than RawVec - prefer the latter for random access workloads.
+/// Supports Pcodec, LZ4, and Zstd compression algorithms.
 #[derive(Debug, Clone)]
 #[must_use = "Vector should be stored to keep data accessible"]
-pub struct CompressedVec<I, T> {
-    base: BaseVec<I, T>,
-    pages: Arc<RwLock<Pages>>,
-}
-
-impl<I, T> CompressedVec<I, T>
-where
-    I: VecIndex,
-    T: Compressable,
-{
-    const PER_PAGE: usize = MAX_UNCOMPRESSED_PAGE_SIZE / Self::SIZE_OF_T;
-
-    /// Same as import but will reset the vec under certain errors, so be careful !
-    pub fn forced_import(db: &Database, name: &str, version: Version) -> Result<Self> {
-        Self::forced_import_with((db, name, version).into())
-    }
-
-    /// Same as import but will reset the vec under certain errors, so be careful !
-    pub fn forced_import_with(mut options: ImportOptions) -> Result<Self> {
-        options.version = options.version + VERSION;
-        let res = Self::import_with(options);
-        match res {
-            Err(Error::DifferentCompressionMode)
-            | Err(Error::WrongEndian)
-            | Err(Error::WrongLength)
-            | Err(Error::DifferentVersion { .. }) => {
-                info!("Resetting {}...", options.name);
-                options
-                    .db
-                    .remove_region_if_exists(&vec_region_name_with::<I>(options.name))?;
-                options
-                    .db
-                    .remove_region_if_exists(&Self::pages_region_name_(options.name))?;
-                Self::import_with(options)
-            }
-            _ => res,
-        }
-    }
-
-    pub fn import(db: &Database, name: &str, version: Version) -> Result<Self> {
-        Self::import_with((db, name, version).into())
-    }
-
-    #[inline]
-    pub fn import_with(mut options: ImportOptions) -> Result<Self> {
-        options.version = options.version + VERSION;
-        let db = options.db;
-        let name = options.name;
-
-        let base = BaseVec::import(options, Format::Compressed)?;
-
-        let pages = Pages::import(db, &Self::pages_region_name_(name))?;
-
-        let mut this = Self {
-            base,
-            pages: Arc::new(RwLock::new(pages)),
-        };
-
-        let len = this.real_stored_len();
-        *this.mut_prev_stored_len() = len;
-        this.update_stored_len(len);
-
-        Ok(this)
-    }
-
-    #[inline]
-    fn decode_page(&self, page_index: usize, reader: &Reader) -> Result<Vec<T>> {
-        Self::decode_page_(self.stored_len(), page_index, reader, &self.pages.read())
-    }
-
-    #[inline]
-    fn decode_page_(
-        stored_len: usize,
-        page_index: usize,
-        reader: &Reader,
-        pages: &Pages,
-    ) -> Result<Vec<T>> {
-        let index = Self::page_index_to_index(page_index);
-
-        if unlikely(index >= stored_len) {
-            return Err(Error::IndexTooHigh {
-                index,
-                len: stored_len,
-            });
-        } else if unlikely(page_index >= pages.len()) {
-            return Err(Error::ExpectVecToHaveIndex);
-        }
-
-        let page = pages.get(page_index).unwrap();
-        let len = page.bytes as usize;
-        let offset = page.start as usize;
-
-        let compressed_data = reader.unchecked_read(offset, len);
-        Self::decompress_bytes(compressed_data, page.values as usize)
-    }
-
-    /// Stateless: decompress raw bytes into Vec<T>
-    #[inline]
-    fn decompress_bytes(compressed_data: &[u8], expected_len: usize) -> Result<Vec<T>> {
-        let vec: Vec<T::NumberType> = pco::standalone::simple_decompress(compressed_data)?;
-        let vec = T::from_inner_slice(vec);
-
-        if likely(vec.len() == expected_len) {
-            return Ok(vec);
-        }
-
-        Err(Error::DecompressionMismatch {
-            expected_len,
-            actual_len: vec.len(),
-        })
-    }
-
-    #[inline]
-    fn compress_page(chunk: &[T]) -> Vec<u8> {
-        if chunk.len() > Self::PER_PAGE {
-            panic!();
-        }
-
-        pco::standalone::simpler_compress(chunk.as_inner_slice(), PCO_COMPRESSION_LEVEL).unwrap()
-    }
-
-    #[inline]
-    fn index_to_page_index(index: usize) -> usize {
-        index / Self::PER_PAGE
-    }
-
-    #[inline]
-    fn page_index_to_index(page_index: usize) -> usize {
-        page_index * Self::PER_PAGE
-    }
-
-    #[inline]
-    pub fn iter(&self) -> Result<CompressedVecIterator<'_, I, T>> {
-        CompressedVecIterator::new(self)
-    }
-
-    #[inline]
-    pub fn clean_iter(&self) -> Result<CleanCompressedVecIterator<'_, I, T>> {
-        CleanCompressedVecIterator::new(self)
-    }
-
-    #[inline]
-    pub fn dirty_iter(&self) -> Result<DirtyCompressedVecIterator<'_, I, T>> {
-        DirtyCompressedVecIterator::new(self)
-    }
-
-    #[inline]
-    pub fn boxed_iter(&self) -> Result<BoxedVecIterator<'_, I, T>> {
-        Ok(Box::new(CompressedVecIterator::new(self)?))
-    }
-
-    fn pages_region_name(&self) -> String {
-        Self::pages_region_name_(self.name())
-    }
-    fn pages_region_name_(name: &str) -> String {
-        format!("{}_pages", vec_region_name_with::<I>(name))
-    }
-
-    #[inline]
-    pub fn is_dirty(&self) -> bool {
-        !self.is_pushed_empty()
-    }
-
-    /// Removes this vector and all its associated regions from the database
-    pub fn remove(self) -> Result<()> {
-        // Remove main region
-        self.base.remove()?;
-
-        // Remove pages region
-        let pages = Arc::try_unwrap(self.pages).map_err(|_| Error::PagesStillReferenced)?;
-        pages.into_inner().remove()?;
-
-        Ok(())
-    }
+pub enum CompressedVec<I, T> {
+    #[cfg(feature = "pco")]
+    Pco(PcoVec<I, T>),
+    #[cfg(feature = "lz4")]
+    LZ4(LZ4Vec<I, T>),
+    #[cfg(feature = "zstd")]
+    Zstd(ZstdVec<I, T>),
 }
 
 impl<I, T> AnyVec for CompressedVec<I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
 {
     #[inline]
     fn version(&self) -> Version {
-        self.base.version()
+        match self {
+            #[cfg(feature = "pco")]
+            CompressedVec::Pco(v) => v.version(),
+            #[cfg(feature = "lz4")]
+            CompressedVec::LZ4(v) => v.version(),
+            #[cfg(feature = "zstd")]
+            CompressedVec::Zstd(v) => v.version(),
+        }
     }
 
     #[inline]
     fn name(&self) -> &str {
-        self.base.name()
+        match self {
+            #[cfg(feature = "pco")]
+            CompressedVec::Pco(v) => v.name(),
+            #[cfg(feature = "lz4")]
+            CompressedVec::LZ4(v) => v.name(),
+            #[cfg(feature = "zstd")]
+            CompressedVec::Zstd(v) => v.name(),
+        }
     }
 
     #[inline]
     fn len(&self) -> usize {
-        self.len_()
+        match self {
+            #[cfg(feature = "pco")]
+            CompressedVec::Pco(v) => v.len(),
+            #[cfg(feature = "lz4")]
+            CompressedVec::LZ4(v) => v.len(),
+            #[cfg(feature = "zstd")]
+            CompressedVec::Zstd(v) => v.len(),
+        }
     }
 
     #[inline]
     fn index_type_to_string(&self) -> &'static str {
-        I::to_string()
+        match self {
+            #[cfg(feature = "pco")]
+            CompressedVec::Pco(v) => v.index_type_to_string(),
+            #[cfg(feature = "lz4")]
+            CompressedVec::LZ4(v) => v.index_type_to_string(),
+            #[cfg(feature = "zstd")]
+            CompressedVec::Zstd(v) => v.index_type_to_string(),
+        }
     }
 
     #[inline]
     fn value_type_to_size_of(&self) -> usize {
-        size_of::<T>()
+        match self {
+            #[cfg(feature = "pco")]
+            CompressedVec::Pco(v) => v.value_type_to_size_of(),
+            #[cfg(feature = "lz4")]
+            CompressedVec::LZ4(v) => v.value_type_to_size_of(),
+            #[cfg(feature = "zstd")]
+            CompressedVec::Zstd(v) => v.value_type_to_size_of(),
+        }
     }
 
     #[inline]
     fn region_names(&self) -> Vec<String> {
-        vec![self.base.index_to_name(), self.pages_region_name()]
-    }
-}
-
-impl<I, T> AnyStoredVec for CompressedVec<I, T>
-where
-    I: VecIndex,
-    T: Compressable,
-{
-    #[inline]
-    fn db_path(&self) -> PathBuf {
-        self.base.db_path()
-    }
-
-    #[inline]
-    fn region(&self) -> &Region {
-        self.base.region()
-    }
-
-    #[inline]
-    fn header(&self) -> &Header {
-        self.base.header()
-    }
-
-    #[inline]
-    fn mut_header(&mut self) -> &mut Header {
-        self.base.mut_header()
-    }
-
-    #[inline]
-    fn saved_stamped_changes(&self) -> u16 {
-        self.base.saved_stamped_changes()
-    }
-
-    #[inline]
-    fn stored_len(&self) -> usize {
-        self.base.stored_len()
-    }
-
-    #[inline]
-    fn real_stored_len(&self) -> usize {
-        self.pages.read().stored_len(Self::PER_PAGE)
-    }
-
-    fn write(&mut self) -> Result<()> {
-        self.base.write_header_if_needed()?;
-
-        let stored_len = self.stored_len();
-        let pushed_len = self.pushed_len();
-        let real_stored_len = self.real_stored_len();
-        assert!(stored_len <= real_stored_len);
-        let truncated = stored_len != real_stored_len;
-        let has_new_data = pushed_len != 0;
-
-        if !has_new_data && !truncated {
-            // info!("Nothing to push {}", self.region_index());
-            return Ok(());
+        match self {
+            #[cfg(feature = "pco")]
+            CompressedVec::Pco(v) => v.region_names(),
+            #[cfg(feature = "lz4")]
+            CompressedVec::LZ4(v) => v.region_names(),
+            #[cfg(feature = "zstd")]
+            CompressedVec::Zstd(v) => v.region_names(),
         }
-
-        let mut pages = self.pages.write();
-        let pages_len = pages.len();
-        let starting_page_index = Self::index_to_page_index(stored_len);
-        assert!(starting_page_index <= pages_len);
-
-        let mut values = vec![];
-
-        let offset = HEADER_OFFSET as u64;
-
-        let truncate_at = if starting_page_index < pages_len {
-            let len = stored_len % Self::PER_PAGE;
-
-            if len != 0 {
-                let mut page_values = Self::decode_page_(
-                    stored_len,
-                    starting_page_index,
-                    &self.create_reader(),
-                    &pages,
-                )?;
-                page_values.truncate(len);
-                values = page_values;
-            }
-
-            pages.truncate(starting_page_index).unwrap().start
-        } else {
-            pages
-                .last()
-                .map_or(offset, |page| page.start + page.bytes as u64)
-        };
-
-        values.append(&mut mem::take(self.base.mut_pushed()));
-
-        let compressed = values
-            .chunks(Self::PER_PAGE)
-            .map(|chunk| (Self::compress_page(chunk), chunk.len()))
-            .collect::<Vec<_>>();
-
-        compressed.iter().enumerate().for_each(|(i, (bytes, len))| {
-            let page_index = starting_page_index + i;
-
-            let start = if page_index != 0 {
-                let prev = pages.get(page_index - 1).unwrap();
-                prev.start + prev.bytes as u64
-            } else {
-                offset
-            };
-
-            let page = Page::new(start, bytes.len() as u32, *len as u32);
-
-            pages.checked_push(page_index, page);
-        });
-
-        let buf = compressed
-            .into_iter()
-            .flat_map(|(v, _)| v)
-            .collect::<Vec<_>>();
-
-        self.region().truncate_write(truncate_at as usize, &buf)?;
-
-        self.update_stored_len(stored_len + pushed_len);
-
-        pages.flush()?;
-
-        Ok(())
-    }
-
-    #[inline]
-    fn serialize_changes(&self) -> Result<Vec<u8>> {
-        self.default_serialize_changes()
-    }
-
-    #[inline]
-    fn db(&self) -> Database {
-        self.base.db()
-    }
-}
-
-impl<I, T> GenericStoredVec<I, T> for CompressedVec<I, T>
-where
-    I: VecIndex,
-    T: Compressable,
-{
-    #[inline]
-    fn unchecked_read_at(&self, index: usize, reader: &Reader) -> Result<T> {
-        let page_index = Self::index_to_page_index(index);
-        let decoded_index = index % Self::PER_PAGE;
-        Ok(unsafe {
-            *self
-                .decode_page(page_index, reader)?
-                .get_unchecked(decoded_index)
-        })
-    }
-
-    #[inline]
-    fn pushed(&self) -> &[T] {
-        self.base.pushed()
-    }
-    #[inline]
-    fn mut_pushed(&mut self) -> &mut Vec<T> {
-        self.base.mut_pushed()
-    }
-    #[inline]
-    fn prev_pushed(&self) -> &[T] {
-        self.base.prev_pushed()
-    }
-    #[inline]
-    fn mut_prev_pushed(&mut self) -> &mut Vec<T> {
-        self.base.mut_prev_pushed()
-    }
-
-    #[inline]
-    #[doc(hidden)]
-    fn update_stored_len(&self, val: usize) {
-        self.base.update_stored_len(val);
-    }
-    #[inline]
-    fn prev_stored_len(&self) -> usize {
-        self.base.prev_stored_len()
-    }
-    #[inline]
-    fn mut_prev_stored_len(&mut self) -> &mut usize {
-        self.base.mut_prev_stored_len()
-    }
-
-    fn reset(&mut self) -> Result<()> {
-        self.pages.write().reset();
-        self.clear()
-    }
-}
-
-impl<'a, I, T> IntoIterator for &'a CompressedVec<I, T>
-where
-    I: VecIndex,
-    T: Compressable,
-{
-    type Item = T;
-    type IntoIter = CompressedVecIterator<'a, I, T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter().expect("CompressedVecIter::new(self) to work")
-    }
-}
-
-impl<I, T> IterableVec<I, T> for CompressedVec<I, T>
-where
-    I: VecIndex,
-    T: Compressable,
-{
-    fn iter(&self) -> BoxedVecIterator<'_, I, T> {
-        Box::new(self.into_iter())
     }
 }
 
 impl<I, T> TypedVec for CompressedVec<I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
 {
     type I = I;
     type T = T;
+}
+
+impl<I, T> IterableVec<I, T> for CompressedVec<I, T>
+where
+    I: VecIndex,
+    T: VecValue,
+{
+    fn iter(&self) -> BoxedVecIterator<'_, I, T> {
+        match self {
+            #[cfg(feature = "pco")]
+            CompressedVec::Pco(v) => v.iter(),
+            #[cfg(feature = "lz4")]
+            CompressedVec::LZ4(v) => v.iter(),
+            #[cfg(feature = "zstd")]
+            CompressedVec::Zstd(v) => v.iter(),
+        }
+    }
 }

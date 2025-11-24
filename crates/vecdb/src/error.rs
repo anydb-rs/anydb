@@ -19,8 +19,12 @@ pub enum Error {
     ZeroCopyError,
     #[error(transparent)]
     SystemTimeError(#[from] time::SystemTimeError),
+    #[cfg(feature = "pco")]
     #[error(transparent)]
     PCO(#[from] pco::errors::PcoError),
+    #[cfg(feature = "lz4")]
+    #[error(transparent)]
+    LZ4(#[from] lz4_flex::block::DecompressError),
     #[error(transparent)]
     RawDB(#[from] rawdb::Error),
     #[cfg(feature = "serde_json")]
@@ -57,7 +61,7 @@ pub enum Error {
         expected_len: usize,
         actual_len: usize,
     },
-    #[error("Cannot remove CompressedVec: pages still referenced")]
+    #[error("Cannot remove PcodecVec: pages still referenced")]
     PagesStillReferenced,
 }
 

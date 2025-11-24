@@ -53,18 +53,22 @@ impl Header {
         self.inner.write().computed_version = computed_version;
     }
 
+    #[inline(always)]
     pub fn modified(&self) -> bool {
         self.modified
     }
 
+    #[inline(always)]
     pub fn vec_version(&self) -> Version {
         self.inner.read().vec_version
     }
 
+    #[inline(always)]
     pub fn computed_version(&self) -> Version {
         self.inner.read().computed_version
     }
 
+    #[inline(always)]
     pub fn stamp(&self) -> Stamp {
         self.inner.read().stamp
     }

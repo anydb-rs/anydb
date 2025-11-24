@@ -1,7 +1,7 @@
 use std::iter::FusedIterator;
 
 use crate::{
-    Compressable, ComputedVec, TypedVecIterator, VecIndex, VecIterator, VecValue,
+    ComputedVec, PcodecVecValue, TypedVecIterator, VecIndex, VecIterator, VecValue,
     variants::{
         LazyVecFrom1Iterator, LazyVecFrom2Iterator, LazyVecFrom3Iterator, StoredVecIterator,
     },
@@ -23,7 +23,7 @@ impl<'a, I, T, S1I, S1T, S2I, S2T, S3I, S3T>
     ComputedVecIterator<'a, I, T, S1I, S1T, S2I, S2T, S3I, S3T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
     S1I: VecIndex,
     S1T: VecValue,
     S2I: VecIndex,
@@ -45,7 +45,7 @@ impl<'a, I, T, S1I, S1T, S2I, S2T, S3I, S3T> Iterator
     for ComputedVecIterator<'a, I, T, S1I, S1T, S2I, S2T, S3I, S3T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
     S1I: VecIndex,
     S1T: VecValue,
     S2I: VecIndex,
@@ -110,7 +110,7 @@ impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> VecIterator
     for ComputedVecIterator<'_, I, T, S1I, S1T, S2I, S2T, S3I, S3T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
     S1I: VecIndex,
     S1T: VecValue,
     S2I: VecIndex,
@@ -153,7 +153,7 @@ impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> TypedVecIterator
     for ComputedVecIterator<'_, I, T, S1I, S1T, S2I, S2T, S3I, S3T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
     S1I: VecIndex,
     S1T: VecValue,
     S2I: VecIndex,
@@ -169,7 +169,7 @@ impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> ExactSizeIterator
     for ComputedVecIterator<'_, I, T, S1I, S1T, S2I, S2T, S3I, S3T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
     S1I: VecIndex,
     S1T: VecValue,
     S2I: VecIndex,
@@ -192,7 +192,7 @@ impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> FusedIterator
     for ComputedVecIterator<'_, I, T, S1I, S1T, S2I, S2T, S3I, S3T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
     S1I: VecIndex,
     S1T: VecValue,
     S2I: VecIndex,

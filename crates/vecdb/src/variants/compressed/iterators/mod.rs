@@ -1,6 +1,8 @@
 use std::iter::FusedIterator;
 
-use crate::{Compressable, CompressedVec, Result, TypedVecIterator, VecIndex, VecIterator};
+use crate::{Result, TypedVecIterator, VecIndex, VecIterator, VecValue};
+
+use super::inner::CompressionStrategy;
 
 mod clean;
 mod dirty;
@@ -8,18 +10,19 @@ mod dirty;
 pub use clean::*;
 pub use dirty::*;
 
-pub enum CompressedVecIterator<'a, I, T> {
-    Clean(CleanCompressedVecIterator<'a, I, T>),
-    Dirty(DirtyCompressedVecIterator<'a, I, T>),
+pub enum CompressedVecIterator<'a, I, T, S> {
+    Clean(CleanCompressedVecIterator<'a, I, T, S>),
+    Dirty(DirtyCompressedVecIterator<'a, I, T, S>),
 }
 
-impl<'a, I, T> CompressedVecIterator<'a, I, T>
+impl<'a, I, T, S> CompressedVecIterator<'a, I, T, S>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
+    S: CompressionStrategy<T>,
 {
     #[inline]
-    pub fn new(vec: &'a CompressedVec<I, T>) -> Result<Self> {
+    pub fn new(vec: &'a super::inner::CompressedVecInner<I, T, S>) -> Result<Self> {
         Ok(if vec.is_dirty() {
             Self::Dirty(DirtyCompressedVecIterator::new(vec)?)
         } else {
@@ -28,10 +31,11 @@ where
     }
 }
 
-impl<I, T> Iterator for CompressedVecIterator<'_, I, T>
+impl<I, T, S> Iterator for CompressedVecIterator<'_, I, T, S>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
+    S: CompressionStrategy<T>,
 {
     type Item = T;
 
@@ -76,10 +80,11 @@ where
     }
 }
 
-impl<I, T> VecIterator for CompressedVecIterator<'_, I, T>
+impl<I, T, S> VecIterator for CompressedVecIterator<'_, I, T, S>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
+    S: CompressionStrategy<T>,
 {
     #[inline]
     fn set_position_to(&mut self, i: usize) {
@@ -106,19 +111,21 @@ where
     }
 }
 
-impl<I, T> TypedVecIterator for CompressedVecIterator<'_, I, T>
+impl<I, T, S> TypedVecIterator for CompressedVecIterator<'_, I, T, S>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
+    S: CompressionStrategy<T>,
 {
     type I = I;
     type T = T;
 }
 
-impl<I, T> ExactSizeIterator for CompressedVecIterator<'_, I, T>
+impl<I, T, S> ExactSizeIterator for CompressedVecIterator<'_, I, T, S>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
+    S: CompressionStrategy<T>,
 {
     #[inline(always)]
     fn len(&self) -> usize {
@@ -129,9 +136,10 @@ where
     }
 }
 
-impl<I, T> FusedIterator for CompressedVecIterator<'_, I, T>
+impl<I, T, S> FusedIterator for CompressedVecIterator<'_, I, T, S>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
+    S: CompressionStrategy<T>,
 {
 }

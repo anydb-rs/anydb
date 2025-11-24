@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, AnyVec, CollectableVec, GenericStoredVec, ImportOptions, RawVec, Result, Stamp,
+    AnyStoredVec, AnyVec, CollectableVec, GenericStoredVec, ImportOptions, ZeroCopyVec, Result, Stamp,
     Version,
 };
 
@@ -87,7 +87,7 @@ fn test_data_integrity_rollback_flush_reopen() -> Result<(), Box<dyn std::error:
     let options: ImportOptions = (&database, "vec", Version::TWO).into();
     let options = options.with_saved_stamped_changes(10); // Enable rollback with history
 
-    let mut vec: RawVec<usize, u32> = RawVec::forced_import_with(options)?;
+    let mut vec: ZeroCopyVec<usize, u32> = ZeroCopyVec::forced_import_with(options)?;
     println!("✓ Created vecdb");
 
     // Step 1: Do initial work
@@ -210,7 +210,7 @@ fn test_data_integrity_rollback_flush_reopen() -> Result<(), Box<dyn std::error:
     // Reopen the database
     let options: ImportOptions = (&database, "vec", Version::TWO).into();
     let options = options.with_saved_stamped_changes(10);
-    let mut vec: RawVec<usize, u32> = RawVec::forced_import_with(options)?;
+    let mut vec: ZeroCopyVec<usize, u32> = ZeroCopyVec::forced_import_with(options)?;
     println!("✓ Reopened vecdb");
     println!("  Stamp after reopen: {:?}", vec.stamp());
     println!("  Length after reopen: {}", vec.len());
@@ -323,7 +323,7 @@ fn test_data_integrity_rollback_flush_reopen() -> Result<(), Box<dyn std::error:
 
     let options: ImportOptions = (&database, "vec", Version::TWO).into();
     let options = options.with_saved_stamped_changes(10);
-    let vec: RawVec<usize, u32> = RawVec::forced_import_with(options)?;
+    let vec: ZeroCopyVec<usize, u32> = ZeroCopyVec::forced_import_with(options)?;
     println!("✓ Reopened vecdb");
     println!("  Stamp after reopen: {:?}", vec.stamp());
     println!("  Length after reopen: {}", vec.len());

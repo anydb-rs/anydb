@@ -1,25 +1,24 @@
 use std::iter::FusedIterator;
 
-use crate::{
-    Compressable, CompressedVec, GenericStoredVec, Result, TypedVecIterator, VecIndex, VecIterator,
-    likely,
-};
+use crate::{GenericStoredVec, Result, TypedVecIterator, VecIndex, VecIterator, VecValue, likely};
 
+use super::super::inner::{CompressedVecInner, CompressionStrategy};
 use super::CleanCompressedVecIterator;
 
 /// Dirty compressed vec iterator, handles pushed values on top of stored data
-pub struct DirtyCompressedVecIterator<'a, I, T> {
-    inner: CleanCompressedVecIterator<'a, I, T>,
+pub struct DirtyCompressedVecIterator<'a, I, T, S> {
+    inner: CleanCompressedVecIterator<'a, I, T, S>,
     index: usize,
     pushed_len: usize,
 }
 
-impl<'a, I, T> DirtyCompressedVecIterator<'a, I, T>
+impl<'a, I, T, S> DirtyCompressedVecIterator<'a, I, T, S>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
+    S: CompressionStrategy<T>,
 {
-    pub fn new(vec: &'a CompressedVec<I, T>) -> Result<Self> {
+    pub fn new(vec: &'a CompressedVecInner<I, T, S>) -> Result<Self> {
         let pushed_len = vec.pushed_len();
 
         Ok(Self {
@@ -53,10 +52,11 @@ where
     }
 }
 
-impl<I, T> Iterator for DirtyCompressedVecIterator<'_, I, T>
+impl<I, T, S> Iterator for DirtyCompressedVecIterator<'_, I, T, S>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
+    S: CompressionStrategy<T>,
 {
     type Item = T;
 
@@ -72,7 +72,7 @@ where
         self.inner
             ._vec
             .get_pushed_at(index, self.inner.stored_len)
-            .copied()
+            .cloned()
     }
 
     #[inline]
@@ -121,15 +121,16 @@ where
             self.inner
                 ._vec
                 .get_pushed_at(last_index, self.inner.stored_len)
-                .copied()
+                .cloned()
         }
     }
 }
 
-impl<I, T> VecIterator for DirtyCompressedVecIterator<'_, I, T>
+impl<I, T, S> VecIterator for DirtyCompressedVecIterator<'_, I, T, S>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
+    S: CompressionStrategy<T>,
 {
     #[inline]
     fn set_position_to(&mut self, i: usize) {
@@ -152,19 +153,21 @@ where
     }
 }
 
-impl<I, T> TypedVecIterator for DirtyCompressedVecIterator<'_, I, T>
+impl<I, T, S> TypedVecIterator for DirtyCompressedVecIterator<'_, I, T, S>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
+    S: CompressionStrategy<T>,
 {
     type I = I;
     type T = T;
 }
 
-impl<I, T> ExactSizeIterator for DirtyCompressedVecIterator<'_, I, T>
+impl<I, T, S> ExactSizeIterator for DirtyCompressedVecIterator<'_, I, T, S>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
+    S: CompressionStrategy<T>,
 {
     #[inline(always)]
     fn len(&self) -> usize {
@@ -172,262 +175,10 @@ where
     }
 }
 
-impl<I, T> FusedIterator for DirtyCompressedVecIterator<'_, I, T>
+impl<I, T, S> FusedIterator for DirtyCompressedVecIterator<'_, I, T, S>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
+    S: CompressionStrategy<T>,
 {
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{AnyStoredVec, CompressedVec, GenericStoredVec, Version};
-    use rawdb::Database;
-    use tempfile::TempDir;
-
-    fn setup() -> (TempDir, Database, CompressedVec<usize, i32>) {
-        let temp = TempDir::new().unwrap();
-        let db = Database::open(&temp.path().join("test.db")).unwrap();
-        let vec = CompressedVec::import(&db, "test", Version::ONE).unwrap();
-        (temp, db, vec)
-    }
-
-    #[test]
-    fn test_compressed_dirty_iter_only_stored() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..1000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let collected: Vec<i32> = vec.dirty_iter().unwrap().collect();
-        assert_eq!(collected.len(), 1000);
-        assert_eq!(collected[0], 0);
-        assert_eq!(collected[999], 999);
-    }
-
-    #[test]
-    fn test_compressed_dirty_iter_only_pushed() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..500 {
-            vec.push(i);
-        }
-        // Don't flush
-
-        let collected: Vec<i32> = vec.dirty_iter().unwrap().collect();
-        assert_eq!(collected.len(), 500);
-
-        for (i, &val) in collected.iter().enumerate() {
-            assert_eq!(val, i as i32);
-        }
-    }
-
-    #[test]
-    fn test_compressed_dirty_iter_stored_and_pushed() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..5000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        for i in 5000..10000 {
-            vec.push(i);
-        }
-
-        let collected: Vec<i32> = vec.dirty_iter().unwrap().collect();
-        assert_eq!(collected.len(), 10000);
-
-        for (i, &val) in collected.iter().enumerate() {
-            assert_eq!(val, i as i32);
-        }
-    }
-
-    #[test]
-    fn test_compressed_dirty_iter_skip_across_boundary() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..5000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        for i in 5000..10000 {
-            vec.push(i);
-        }
-
-        // Skip from stored into pushed
-        let collected: Vec<i32> = vec.dirty_iter().unwrap().skip(4500).collect();
-        assert_eq!(collected.len(), 5500);
-        assert_eq!(collected[0], 4500);
-        assert_eq!(collected[5499], 9999);
-    }
-
-    #[test]
-    fn test_compressed_dirty_iter_take_across_boundary() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..5000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        for i in 5000..10000 {
-            vec.push(i);
-        }
-
-        // Take from stored through pushed
-        let collected: Vec<i32> = vec.dirty_iter().unwrap().skip(4000).take(2000).collect();
-
-        assert_eq!(collected.len(), 2000);
-        assert_eq!(collected[0], 4000);
-        assert_eq!(collected[1999], 5999);
-    }
-
-    #[test]
-    fn test_compressed_dirty_iter_nth_across_boundary() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..5000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        for i in 5000..7000 {
-            vec.push(i);
-        }
-
-        let mut iter = vec.dirty_iter().unwrap();
-        assert_eq!(iter.nth(4990), Some(4990)); // In stored
-        assert_eq!(iter.next(), Some(4991)); // In stored
-        assert_eq!(iter.nth(7), Some(4999)); // In stored
-        assert_eq!(iter.next(), Some(5000)); // In pushed
-        assert_eq!(iter.next(), Some(5001)); // In pushed
-    }
-
-    #[test]
-    fn test_compressed_dirty_iter_set_position_toto_pushed() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..5000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        for i in 5000..10000 {
-            vec.push(i);
-        }
-
-        let mut iter = vec.dirty_iter().unwrap();
-        iter.set_position_to(7500); // Into pushed region
-        assert_eq!(iter.next(), Some(7500));
-        assert_eq!(iter.next(), Some(7501));
-    }
-
-    #[test]
-    fn test_compressed_dirty_iter_last_in_pushed() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..5000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        for i in 5000..10000 {
-            vec.push(i);
-        }
-
-        let iter = vec.dirty_iter().unwrap();
-        assert_eq!(iter.last(), Some(9999));
-    }
-
-    #[test]
-    fn test_compressed_dirty_iter_last_in_stored() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..5000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let iter = vec.dirty_iter().unwrap();
-        assert_eq!(iter.last(), Some(4999));
-    }
-
-    #[test]
-    fn test_compressed_dirty_iter_exact_size_with_pushed() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..5000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        for i in 5000..7500 {
-            vec.push(i);
-        }
-
-        let mut iter = vec.dirty_iter().unwrap();
-        assert_eq!(iter.len(), 7500);
-
-        iter.next();
-        assert_eq!(iter.len(), 7499);
-
-        iter.nth(4999); // Cross boundary
-        assert_eq!(iter.len(), 2499);
-    }
-
-    #[test]
-    fn test_compressed_dirty_iter_large_dataset_boundary() {
-        let (_temp, _db, mut vec) = setup();
-
-        // Large stored portion
-        for i in 0..10000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        // Small pushed portion
-        for i in 10000..10100 {
-            vec.push(i);
-        }
-
-        let collected: Vec<i32> = vec.dirty_iter().unwrap().collect();
-        assert_eq!(collected.len(), 10100);
-
-        for (i, &val) in collected.iter().enumerate() {
-            assert_eq!(val, i as i32);
-        }
-    }
-
-    #[test]
-    fn test_compressed_dirty_iter_skip_take_complex() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..8000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        for i in 8000..12000 {
-            vec.push(i);
-        }
-
-        // Complex skip/take across boundary
-        let collected: Vec<i32> = vec
-            .dirty_iter()
-            .unwrap()
-            .skip(7000)
-            .take(3000)
-            .skip(500)
-            .take(1000)
-            .collect();
-
-        assert_eq!(collected.len(), 1000);
-        assert_eq!(collected[0], 7500);
-        assert_eq!(collected[999], 8499);
-    }
 }

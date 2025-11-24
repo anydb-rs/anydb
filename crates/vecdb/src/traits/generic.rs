@@ -71,6 +71,22 @@ where
     #[doc(hidden)]
     fn unchecked_read_at(&self, index: usize, reader: &Reader) -> Result<T>;
 
+    // ============================================================================
+    // Serialization Methods (abstract - implementors must provide)
+    // ============================================================================
+
+    /// Deserializes a value from bytes. Implementors use their strategy.
+    fn read_value_from_bytes(&self, bytes: &[u8]) -> Result<T>;
+
+    /// Serializes a value to bytes. Implementors use their strategy.
+    fn value_to_bytes(&self, value: &T) -> Vec<u8>;
+
+    /// Serializes multiple values to bytes. Default uses value_to_bytes.
+    #[inline(always)]
+    fn values_to_bytes(&self, values: &[T]) -> Vec<u8> {
+        values.iter().flat_map(|v| self.value_to_bytes(v)).collect()
+    }
+
     /// Reads value at usize index, creating a temporary reader.
     /// For multiple reads, prefer `read_at()` with a reused reader.
     #[inline]
@@ -283,7 +299,7 @@ where
 
     /// Default truncate implementation handling pushed layer only.
     /// Returns true if stored_len needs to be updated to `index`.
-    /// RawVec overrides truncate_if_needed_at to also handle holes/updated.
+    /// ZeroCopyVec overrides truncate_if_needed_at to also handle holes/updated.
     #[doc(hidden)]
     fn default_truncate_if_needed_at(&mut self, index: usize) -> Result<bool> {
         let stored_len = self.stored_len();
@@ -332,7 +348,7 @@ where
     }
 
     /// Default reset_unsaved implementation - clears pushed layer only.
-    /// RawVec overrides to also clear holes/updated.
+    /// ZeroCopyVec overrides to also clear holes/updated.
     #[doc(hidden)]
     fn default_reset_unsaved(&mut self) {
         self.mut_pushed().clear();
@@ -393,7 +409,7 @@ where
 
     /// Default implementation of stamped_flush_with_changes.
     /// Handles file management, serialization, flush, and base prev_ field updates.
-    /// RawVec overrides stamped_flush_with_changes to also update prev_holes/prev_updated.
+    /// ZeroCopyVec overrides stamped_flush_with_changes to also update prev_holes/prev_updated.
     #[doc(hidden)]
     fn default_stamped_flush_with_changes(&mut self, stamp: Stamp) -> Result<()> {
         let saved_stamped_changes = self.saved_stamped_changes();
@@ -452,7 +468,7 @@ where
 
     /// Default implementation of rollback_before.
     /// Handles the rollback loop and base prev_ field updates.
-    /// RawVec overrides rollback_before to also update prev_holes/prev_updated.
+    /// ZeroCopyVec overrides rollback_before to also update prev_holes/prev_updated.
     #[doc(hidden)]
     fn default_rollback_before(&mut self, stamp: Stamp) -> Result<Stamp> {
         if self.stamp() < stamp {
@@ -507,14 +523,14 @@ where
     }
 
     /// Restores a truncated value during deserialization.
-    /// Default implementation pushes it back. RawVec overrides to insert into updated map.
+    /// Default implementation pushes it back. ZeroCopyVec overrides to insert into updated map.
     #[doc(hidden)]
     fn restore_truncated_value(&mut self, _index: usize, value: T) {
         self.push(value);
     }
 
     /// Default implementation of deserialize_then_undo_changes.
-    /// Returns the position after parsing the base data so RawVec can continue.
+    /// Returns the position after parsing the base data so ZeroCopyVec can continue.
     #[doc(hidden)]
     fn default_deserialize_then_undo_changes(&mut self, bytes: &[u8]) -> Result<usize> {
         let mut pos = 0;
@@ -550,7 +566,7 @@ where
             len = Self::SIZE_OF_T * truncated_count;
             let truncated_values = bytes[pos..pos + len]
                 .chunks(Self::SIZE_OF_T)
-                .map(|b| T::read_from_bytes(b).map_err(|_| Error::ZeroCopyError))
+                .map(|b| self.read_value_from_bytes(b))
                 .collect::<Result<Vec<_>>>()?;
             pos += len;
 
@@ -566,7 +582,7 @@ where
         len = Self::SIZE_OF_T * prev_pushed_len;
         let mut prev_pushed = bytes[pos..pos + len]
             .chunks(Self::SIZE_OF_T)
-            .map(|s| T::read_from_bytes(s).map_err(|_| Error::ZeroCopyError))
+            .map(|s| self.read_value_from_bytes(s))
             .collect::<Result<Vec<_>>>()?;
         pos += len;
         self.mut_pushed().append(&mut prev_pushed);
@@ -584,7 +600,7 @@ where
     }
 
     /// Deserializes change data and undoes those changes.
-    /// Base implementation handles pushed and truncated data. RawVec overrides for holes/updated.
+    /// Base implementation handles pushed and truncated data. ZeroCopyVec overrides for holes/updated.
     fn deserialize_then_undo_changes(&mut self, bytes: &[u8]) -> Result<()> {
         self.default_deserialize_then_undo_changes(bytes)?;
         Ok(())
@@ -596,7 +612,7 @@ where
 
     /// Gets a stored value for serialization purposes.
     /// Default implementation reads directly from disk.
-    /// RawVec overrides to check prev_updated first.
+    /// ZeroCopyVec overrides to check prev_updated first.
     #[doc(hidden)]
     fn get_stored_value_for_serialization(&self, index: usize, reader: &Reader) -> Result<T> {
         self.unchecked_read_at(index, reader)
@@ -605,7 +621,7 @@ where
     /// Default implementation of serialize_changes.
     /// Serializes: stamp, prev_stored_len, stored_len, truncated_count, truncated_values,
     /// prev_pushed, pushed.
-    /// RawVec calls this and appends holes/updated data.
+    /// ZeroCopyVec calls this and appends holes/updated data.
     #[doc(hidden)]
     fn default_serialize_changes(&self) -> Result<Vec<u8>> {
         let mut bytes = vec![];
@@ -626,14 +642,14 @@ where
             let truncated_vals = (stored_len..prev_stored_len)
                 .map(|i| self.get_stored_value_for_serialization(i, &reader))
                 .collect::<Result<Vec<_>>>()?;
-            bytes.extend(truncated_vals.as_bytes());
+            bytes.extend(self.values_to_bytes(&truncated_vals));
         }
 
         bytes.extend(self.prev_pushed().len().as_bytes());
-        bytes.extend(self.prev_pushed().iter().flat_map(|v| v.as_bytes()));
+        bytes.extend(self.values_to_bytes(self.prev_pushed()));
 
         bytes.extend(self.pushed().len().as_bytes());
-        bytes.extend(self.pushed().iter().flat_map(|v| v.as_bytes()));
+        bytes.extend(self.values_to_bytes(self.pushed()));
 
         Ok(bytes)
     }

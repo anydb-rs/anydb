@@ -1,24 +1,28 @@
-use std::{fs, path::Path};
-
+use rawdb::Database;
+use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, AnyVec, CollectableVec, CompressedVec, Database, GenericStoredVec, Stamp,
+    AnyStoredVec, AnyVec, CollectableVec,nericStoredVec, Re PcodecVec,sult, Stamp,
     TypedVecIterator, Version,
 };
 
 #[allow(clippy::upper_case_acronyms)]
-type VEC = CompressedVec<usize, u32>;
+type VEC = PcoVec<usize, u32>;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let _ = fs::remove_dir_all("compressed");
+/// Helper to create a temporary test database
+pub fn setup_test_db() -> Result<(Database, TempDir)> {
+    let temp_dir = TempDir::new()?;
+    let db = Database::open(temp_dir.path())?;
+    Ok((db, temp_dir))
+}
 
+#[test]
+fn test_compressed_vec_operations() -> Result<(), Box<dyn std::error::Error>> {
     let version = Version::TWO;
-
-    let database = Database::open(Path::new("compressed"))?;
-
+    let (database, _temp) = setup_test_db()?;
     let options = (&database, "vec", version).into();
 
     {
-        let mut vec: VEC = CompressedVec::forced_import_with(options)?;
+        let mut vec: VEC = PcoVec::forced_import_with(options)?;
 
         (0..21_u32).for_each(|v| {
             vec.push(v);
@@ -38,7 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     {
-        let mut vec: VEC = CompressedVec::forced_import_with(options)?;
+        let mut vec: VEC = PcoVec::forced_import_with(options)?;
 
         vec.mut_header().update_stamp(Stamp::new(100));
 
@@ -74,7 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     {
-        let mut vec: VEC = CompressedVec::forced_import_with(options)?;
+        let mut vec: VEC = PcoVec::forced_import_with(options)?;
 
         assert_eq!(vec.header().stamp(), Stamp::new(100));
 
@@ -118,7 +122,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     {
-        let mut vec: VEC = CompressedVec::forced_import_with(options)?;
+        let mut vec: VEC = PcoVec::forced_import_with(options)?;
 
         assert_eq!(
             vec.into_iter().collect::<Vec<_>>(),
@@ -160,7 +164,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     {
-        let mut vec: VEC = CompressedVec::forced_import_with(options)?;
+        let mut vec: VEC = PcoVec::forced_import_with(options)?;
 
         assert_eq!(vec.pushed_len(), 0);
         assert_eq!(vec.stored_len(), 21);
@@ -175,7 +179,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     {
-        let vec: VEC = CompressedVec::forced_import_with(options)?;
+        let vec: VEC = PcoVec::forced_import_with(options)?;
 
         assert_eq!(
             vec.collect(),
@@ -187,5 +191,3 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-
-// fn main() {}

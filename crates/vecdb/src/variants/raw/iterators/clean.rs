@@ -2,18 +2,21 @@ use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
     iter::FusedIterator,
+    marker::PhantomData,
 };
 
 use parking_lot::RwLockReadGuard;
 use rawdb::RegionMetadata;
 
 use crate::{
-    AnyStoredVec, GenericStoredVec, RawVec, Result, TypedVecIterator, VecIndex, VecIterator,
-    VecValue, likely, unlikely, variants::HEADER_OFFSET,
+    AnyStoredVec, Result, TypedVecIterator, VecIndex, VecIterator, VecValue, likely, unlikely,
+    variants::HEADER_OFFSET,
 };
 
+use super::{RawVecInner, SerializeStrategy};
+
 /// Clean raw vec iterator, to read on disk data
-pub struct CleanRawVecIterator<'a, I, T> {
+pub struct CleanRawVecIterator<'a, I, T, S> {
     pub(crate) file: File,
     buffer: Vec<u8>,
     pub(crate) buffer_pos: usize,
@@ -21,20 +24,22 @@ pub struct CleanRawVecIterator<'a, I, T> {
     file_offset: usize,
     end_offset: usize,
     start_offset: usize,
-    pub(crate) _vec: &'a RawVec<I, T>,
+    pub(crate) _vec: &'a RawVecInner<I, T, S>,
     _lock: RwLockReadGuard<'a, RegionMetadata>,
+    _marker: PhantomData<S>,
 }
 
-impl<'a, I, T> CleanRawVecIterator<'a, I, T>
+impl<'a, I, T, S> CleanRawVecIterator<'a, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
+    S: SerializeStrategy<T>,
 {
-    const SIZE_OF_T: usize = size_of::<T>();
-    const NORMAL_BUFFER_SIZE: usize = RawVec::<I, T>::aligned_buffer_size();
+    const SIZE_OF_T: usize = S::SIZE;
+    const NORMAL_BUFFER_SIZE: usize = RawVecInner::<I, T, S>::aligned_buffer_size();
     const _CHECK_T: () = assert!(Self::SIZE_OF_T > 0, "Can't have T with size_of() == 0");
 
-    pub fn new(vec: &'a RawVec<I, T>) -> Result<Self> {
+    pub fn new(vec: &'a RawVecInner<I, T, S>) -> Result<Self> {
         let file = vec.region().open_db_read_only_file()?;
 
         let region_meta = vec.region().meta();
@@ -56,6 +61,7 @@ where
             start_offset,
             _vec: vec,
             _lock: region_meta,
+            _marker: PhantomData,
         };
 
         this.seek(start_offset);
@@ -158,19 +164,19 @@ where
     }
 }
 
-impl<I, T> Iterator for CleanRawVecIterator<'_, I, T>
+impl<I, T, S> Iterator for CleanRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
+    S: SerializeStrategy<T>,
 {
     type Item = T;
 
     #[inline(always)]
     fn next(&mut self) -> Option<T> {
         if likely(self.can_read_buffer()) {
-            let value = unsafe {
-                std::ptr::read_unaligned(self.buffer.as_ptr().add(self.buffer_pos) as *const T)
-            };
+            let bytes = &self.buffer[self.buffer_pos..self.buffer_pos + Self::SIZE_OF_T];
+            let value = S::read(bytes).expect("Failed to deserialize value");
             self.buffer_pos += Self::SIZE_OF_T;
             return Some(value);
         }
@@ -181,8 +187,10 @@ where
 
         self.refill_buffer();
 
+        let bytes = &self.buffer[..Self::SIZE_OF_T];
+        let value = S::read(bytes).expect("Failed to deserialize value");
         self.buffer_pos = Self::SIZE_OF_T;
-        Some(unsafe { std::ptr::read_unaligned(self.buffer.as_ptr() as *const T) })
+        Some(value)
     }
 
     #[inline]
@@ -222,10 +230,11 @@ where
     }
 }
 
-impl<I, T> VecIterator for CleanRawVecIterator<'_, I, T>
+impl<I, T, S> VecIterator for CleanRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
+    S: SerializeStrategy<T>,
 {
     #[inline]
     fn set_position_to(&mut self, i: usize) {
@@ -259,19 +268,21 @@ where
     }
 }
 
-impl<I, T> TypedVecIterator for CleanRawVecIterator<'_, I, T>
+impl<I, T, S> TypedVecIterator for CleanRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
+    S: SerializeStrategy<T>,
 {
     type I = I;
     type T = T;
 }
 
-impl<I, T> ExactSizeIterator for CleanRawVecIterator<'_, I, T>
+impl<I, T, S> ExactSizeIterator for CleanRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
+    S: SerializeStrategy<T>,
 {
     #[inline(always)]
     fn len(&self) -> usize {
@@ -279,277 +290,10 @@ where
     }
 }
 
-impl<I, T> FusedIterator for CleanRawVecIterator<'_, I, T>
+impl<I, T, S> FusedIterator for CleanRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
+    S: SerializeStrategy<T>,
 {
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{GenericStoredVec, RawVec, Version};
-    use rawdb::Database;
-    use tempfile::TempDir;
-
-    fn setup() -> (TempDir, Database, RawVec<usize, i32>) {
-        let temp = TempDir::new().unwrap();
-        let db = Database::open(&temp.path().join("test.db")).unwrap();
-        let vec = RawVec::import(&db, "test", Version::ONE).unwrap();
-        (temp, db, vec)
-    }
-
-    #[test]
-    fn test_clean_iter_basic() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..100 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let collected: Vec<i32> = vec.clean_iter().unwrap().collect();
-        assert_eq!(collected.len(), 100);
-        assert_eq!(collected[0], 0);
-        assert_eq!(collected[99], 99);
-    }
-
-    #[test]
-    fn test_clean_iter_nth() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..100 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let mut iter = vec.clean_iter().unwrap();
-        assert_eq!(iter.next(), Some(0));
-        assert_eq!(iter.nth(9), Some(10));
-        assert_eq!(iter.next(), Some(11));
-    }
-
-    #[test]
-    fn test_clean_iter_skip() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..100 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let iter = vec.clean_iter().unwrap().skip(50);
-        let collected: Vec<i32> = iter.collect();
-
-        assert_eq!(collected.len(), 50);
-        assert_eq!(collected[0], 50);
-    }
-
-    #[test]
-    fn test_clean_iter_take() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..100 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let iter = vec.clean_iter().unwrap().take(25);
-        let collected: Vec<i32> = iter.collect();
-
-        assert_eq!(collected.len(), 25);
-        assert_eq!(collected[24], 24);
-    }
-
-    #[test]
-    fn test_clean_iter_set_position() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..100 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let mut iter = vec.clean_iter().unwrap();
-        iter.set_position_to(50);
-        assert_eq!(iter.next(), Some(50));
-        assert_eq!(iter.next(), Some(51));
-    }
-
-    #[test]
-    fn test_clean_iter_set_end() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..100 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let mut iter = vec.clean_iter().unwrap();
-        iter.set_end_to(50);
-        let collected: Vec<i32> = iter.collect();
-
-        assert_eq!(collected.len(), 50);
-    }
-
-    #[test]
-    fn test_clean_iter_last() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..100 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let iter = vec.clean_iter().unwrap();
-        assert_eq!(iter.last(), Some(99));
-    }
-
-    #[test]
-    fn test_clean_iter_last_empty() {
-        let (_temp, _db, vec) = setup();
-
-        let iter = vec.clean_iter().unwrap();
-        assert_eq!(iter.last(), None);
-    }
-
-    #[test]
-    fn test_clean_iter_exact_size() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..100 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let mut iter = vec.clean_iter().unwrap();
-        assert_eq!(iter.len(), 100);
-
-        iter.next();
-        assert_eq!(iter.len(), 99);
-    }
-
-    #[test]
-    fn test_clean_iter_buffer_crossing() {
-        let (_temp, _db, mut vec) = setup();
-
-        // Push enough to cross buffer boundaries
-        for i in 0..10000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let collected: Vec<i32> = vec.clean_iter().unwrap().collect();
-        assert_eq!(collected.len(), 10000);
-
-        for (i, &val) in collected.iter().enumerate() {
-            assert_eq!(val, i as i32);
-        }
-    }
-
-    #[test]
-    fn test_clean_iter_multiple_skip_take() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..1000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        // Skip 100, take 200, skip 50 more, take 100 more
-        let collected: Vec<i32> = vec
-            .clean_iter()
-            .unwrap()
-            .skip(100)
-            .take(200)
-            .skip(50)
-            .take(100)
-            .collect();
-
-        assert_eq!(collected.len(), 100);
-        assert_eq!(collected[0], 150);
-        assert_eq!(collected[99], 249);
-    }
-
-    #[test]
-    fn test_clean_iter_set_position_multiple_times() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..1000 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let mut iter = vec.clean_iter().unwrap();
-
-        iter.set_position_to(100);
-        assert_eq!(iter.next(), Some(100));
-
-        iter.set_position_to(500);
-        assert_eq!(iter.next(), Some(500));
-
-        iter.set_position_to(50);
-        assert_eq!(iter.next(), Some(50));
-    }
-
-    #[test]
-    fn test_clean_iter_skip_all() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..100 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let mut iter = vec.clean_iter().unwrap().skip(100);
-        assert_eq!(iter.next(), None);
-    }
-
-    #[test]
-    fn test_clean_iter_take_zero() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..100 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let collected: Vec<i32> = vec.clean_iter().unwrap().take(0).collect();
-        assert_eq!(collected.len(), 0);
-    }
-
-    #[test]
-    fn test_clean_iter_nth_beyond_end() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..10 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let mut iter = vec.clean_iter().unwrap();
-        assert_eq!(iter.nth(20), None);
-        assert_eq!(iter.next(), None);
-    }
-
-    #[test]
-    fn test_clean_iter_size_hint_consistency() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..100 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let mut iter = vec.clean_iter().unwrap();
-
-        for i in 0..100 {
-            let (lower, upper) = iter.size_hint();
-            assert_eq!(lower, 100 - i);
-            assert_eq!(upper, Some(100 - i));
-            assert_eq!(iter.len(), 100 - i);
-            iter.next();
-        }
-    }
 }

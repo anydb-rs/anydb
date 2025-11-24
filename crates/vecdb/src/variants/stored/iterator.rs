@@ -1,33 +1,19 @@
 use std::iter::FusedIterator;
 
 use crate::{
-    Compressable, Result, StoredVec, TypedVecIterator, VecIndex, VecIterator,
-    variants::{CompressedVecIterator, RawVecIterator},
+    Result, TypedVecIterator, VecIndex, VecIterator, VecValue,
+    variants::{PcodecVecIterator, ZeroCopyVecIterator},
 };
 
 pub enum StoredVecIterator<'a, I, T> {
-    Raw(RawVecIterator<'a, I, T>),
-    Compressed(CompressedVecIterator<'a, I, T>),
-}
-
-impl<'a, I, T> StoredVecIterator<'a, I, T>
-where
-    I: VecIndex,
-    T: Compressable,
-{
-    #[inline]
-    pub fn new(vec: &'a StoredVec<I, T>) -> Result<Self> {
-        Ok(match vec {
-            StoredVec::Raw(v) => Self::Raw(v.iter()?),
-            StoredVec::Compressed(v) => Self::Compressed(v.iter()?),
-        })
-    }
+    Raw(ZeroCopyVecIterator<'a, I, T>),
+    Compressed(PcodecVecIterator<'a, I, T>),
 }
 
 impl<I, T> Iterator for StoredVecIterator<'_, I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
 {
     type Item = T;
 
@@ -75,7 +61,7 @@ where
 impl<I, T> VecIterator for StoredVecIterator<'_, I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
 {
     #[inline]
     fn set_position_to(&mut self, i: usize) {
@@ -105,7 +91,7 @@ where
 impl<I, T> TypedVecIterator for StoredVecIterator<'_, I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
 {
     type I = I;
     type T = T;
@@ -114,7 +100,7 @@ where
 impl<I, T> ExactSizeIterator for StoredVecIterator<'_, I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
 {
     #[inline(always)]
     fn len(&self) -> usize {
@@ -128,6 +114,6 @@ where
 impl<I, T> FusedIterator for StoredVecIterator<'_, I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: VecValue,
 {
 }

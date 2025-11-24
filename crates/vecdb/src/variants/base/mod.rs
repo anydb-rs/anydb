@@ -19,7 +19,7 @@ pub use format::*;
 pub use header::*;
 pub use options::*;
 
-/// Base storage vector with fields common to both RawVec and CompressedVec.
+/// Base storage vector with fields common to both ZeroCopyVec and PcodecVec.
 ///
 /// This struct holds the core state that all stored vector implementations share:
 /// region storage, header metadata, pushed values, and length tracking.
@@ -43,7 +43,7 @@ where
     T: VecValue,
 {
     /// Import or create a BaseVec from the database.
-    pub fn import(options: ImportOptions, format: Format) -> Result<Self> {
+    pub fn import(options: ImportOptions) -> Result<Self> {
         let region = options
             .db
             .create_region_if_needed(&vec_region_name_with::<I>(options.name))?;
@@ -54,9 +54,9 @@ where
         }
 
         let header = if region_len == 0 {
-            Header::create_and_write(&region, options.version, format)?
+            Header::create_and_write(&region, options.version, options.format)?
         } else {
-            Header::import_and_verify(&region, options.version, format)?
+            Header::import_and_verify(&region, options.version, options.format)?
         };
 
         let mut base = Self {
@@ -126,12 +126,12 @@ where
         self.prev_stored_len
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn mut_prev_stored_len(&mut self) -> &mut usize {
         &mut self.prev_stored_len
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn saved_stamped_changes(&self) -> u16 {
         self.saved_stamped_changes
     }
@@ -141,7 +141,7 @@ where
         self.saved_stamped_changes = val;
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn version(&self) -> Version {
         self.header.vec_version()
     }

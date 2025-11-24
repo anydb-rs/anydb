@@ -17,9 +17,9 @@ pub use checked_sub::*;
 pub use saturating_add::*;
 
 use crate::{
-    AnyStoredVec, AnyVec, BoxedVecIterator, CollectableVec, Compressable, Exit, Format,
-    GenericStoredVec, IterableVec, Result, StoredVec, StoredVecIterator, TypedVec,
-    TypedVecIterator, VecIndex, VecValue, Version,
+    AnyStoredVec, AnyVec, BoxedVecIterator, CollectableVec, Exit, Format, GenericStoredVec,
+    IterableVec, PcodecVecValue, Result, StoredVec, StoredVecIterator, TypedVec, TypedVecIterator,
+    VecIndex, VecValue, Version,
     variants::{Header, ImportOptions},
 };
 
@@ -35,7 +35,7 @@ pub struct EagerVec<I, T>(StoredVec<I, T>);
 impl<I, T> EagerVec<I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
 {
     pub fn forced_import_compressed(db: &Database, name: &str, version: Version) -> Result<Self> {
         Self::forced_import_compressed_with((db, name, version).into())
@@ -873,12 +873,9 @@ where
                     let prev_sum = prev.unwrap();
                     // Pop the oldest value from our window buffer
                     let value_to_subtract = window_values.pop_front().unwrap();
-                    prev_sum
-                        .checked_sub(value_to_subtract)
-                        .unwrap_or_else(|| {
-                            panic!("Underflow: prev_sum={prev_sum:?}, sub={value_to_subtract:?}")
-                        })
-                        + value
+                    prev_sum.checked_sub(value_to_subtract).unwrap_or_else(|| {
+                        panic!("Underflow: prev_sum={prev_sum:?}, sub={value_to_subtract:?}")
+                    }) + value
                 } else {
                     prev.unwrap() + value
                 };
@@ -1247,7 +1244,7 @@ where
     ) -> Result<()>
     where
         I: CheckedSub,
-        A: Compressable + Default,
+        A: PcodecVecValue + Default,
         F: Fn(usize, A, A) -> T,
     {
         self.validate_computed_version_or_reset(
@@ -1281,7 +1278,7 @@ where
     ) -> Result<()>
     where
         I: CheckedSub,
-        A: Compressable + Default,
+        A: PcodecVecValue + Default,
         f32: From<A>,
         T: From<f32>,
     {
@@ -1304,7 +1301,7 @@ where
     ) -> Result<()>
     where
         I: CheckedSub,
-        T: CheckedSub + Default + Compressable,
+        T: CheckedSub + Default + PcodecVecValue,
     {
         self.compute_with_lookback(max_from, source, len, exit, |i, current, previous| {
             // If there's no previous value (i < len), return 0 (no change)
@@ -1325,7 +1322,7 @@ where
     ) -> Result<()>
     where
         I: CheckedSub,
-        A: Compressable + Default,
+        A: PcodecVecValue + Default,
         f32: From<A>,
         T: From<f32>,
     {
@@ -1406,7 +1403,7 @@ where
 impl<I, T> AnyVec for EagerVec<I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
 {
     #[inline]
     fn version(&self) -> Version {
@@ -1442,7 +1439,7 @@ where
 impl<I, T> AnyStoredVec for EagerVec<I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
 {
     #[inline]
     fn db_path(&self) -> PathBuf {
@@ -1498,11 +1495,21 @@ where
 impl<I, T> GenericStoredVec<I, T> for EagerVec<I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
 {
     #[inline]
     fn unchecked_read_at(&self, index: usize, reader: &Reader) -> Result<T> {
         self.0.unchecked_read_at(index, reader)
+    }
+
+    #[inline]
+    fn read_value_from_bytes(&self, bytes: &[u8]) -> Result<T> {
+        self.0.read_value_from_bytes(bytes)
+    }
+
+    #[inline]
+    fn value_to_bytes(&self, value: &T) -> Vec<u8> {
+        self.0.value_to_bytes(value)
     }
 
     #[inline]
@@ -1550,7 +1557,7 @@ where
 impl<'a, I, T> IntoIterator for &'a EagerVec<I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
 {
     type Item = T;
     type IntoIter = StoredVecIterator<'a, I, T>;
@@ -1563,7 +1570,7 @@ where
 impl<I, T> IterableVec<I, T> for EagerVec<I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
 {
     fn iter(&self) -> BoxedVecIterator<'_, I, T>
     where
@@ -1577,7 +1584,7 @@ where
 impl<I, T> TypedVec for EagerVec<I, T>
 where
     I: VecIndex,
-    T: Compressable,
+    T: PcodecVecValue,
 {
     type I = I;
     type T = T;

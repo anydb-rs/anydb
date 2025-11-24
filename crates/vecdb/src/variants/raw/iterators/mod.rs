@@ -1,6 +1,8 @@
 use std::iter::FusedIterator;
 
-use crate::{GenericStoredVec, RawVec, Result, TypedVecIterator, VecIndex, VecIterator, VecValue};
+use crate::{GenericStoredVec, Result, TypedVecIterator, VecIndex, VecIterator, VecValue};
+
+use super::{RawVecInner, SerializeStrategy};
 
 mod clean;
 mod dirty;
@@ -8,18 +10,19 @@ mod dirty;
 pub use clean::*;
 pub use dirty::*;
 
-pub enum RawVecIterator<'a, I, T> {
-    Clean(CleanRawVecIterator<'a, I, T>),
-    Dirty(DirtyRawVecIterator<'a, I, T>),
+pub enum RawVecIterator<'a, I, T, S> {
+    Clean(CleanRawVecIterator<'a, I, T, S>),
+    Dirty(DirtyRawVecIterator<'a, I, T, S>),
 }
 
-impl<'a, I, T> RawVecIterator<'a, I, T>
+impl<'a, I, T, S> RawVecIterator<'a, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
+    S: SerializeStrategy<T>,
 {
     #[inline]
-    pub fn new(vec: &'a RawVec<I, T>) -> Result<Self> {
+    pub fn new(vec: &'a RawVecInner<I, T, S>) -> Result<Self> {
         Ok(if vec.is_dirty() {
             Self::Dirty(DirtyRawVecIterator::new(vec)?)
         } else {
@@ -36,10 +39,11 @@ where
     }
 }
 
-impl<I, T> Iterator for RawVecIterator<'_, I, T>
+impl<I, T, S> Iterator for RawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
+    S: SerializeStrategy<T>,
 {
     type Item = T;
 
@@ -84,10 +88,11 @@ where
     }
 }
 
-impl<I, T> VecIterator for RawVecIterator<'_, I, T>
+impl<I, T, S> VecIterator for RawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
+    S: SerializeStrategy<T>,
 {
     #[inline]
     fn set_position_to(&mut self, i: usize) {
@@ -113,19 +118,21 @@ where
     }
 }
 
-impl<I, T> TypedVecIterator for RawVecIterator<'_, I, T>
+impl<I, T, S> TypedVecIterator for RawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
+    S: SerializeStrategy<T>,
 {
     type I = I;
     type T = T;
 }
 
-impl<I, T> ExactSizeIterator for RawVecIterator<'_, I, T>
+impl<I, T, S> ExactSizeIterator for RawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
+    S: SerializeStrategy<T>,
 {
     #[inline(always)]
     fn len(&self) -> usize {
@@ -136,9 +143,10 @@ where
     }
 }
 
-impl<I, T> FusedIterator for RawVecIterator<'_, I, T>
+impl<I, T, S> FusedIterator for RawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
+    S: SerializeStrategy<T>,
 {
 }

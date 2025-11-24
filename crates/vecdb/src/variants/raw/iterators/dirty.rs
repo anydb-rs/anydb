@@ -1,15 +1,15 @@
 use std::iter::FusedIterator;
 
 use crate::{
-    AnyStoredVec, GenericStoredVec, RawVec, Result, TypedVecIterator, VecIndex, VecIterator,
-    VecValue, likely, unlikely,
+    AnyStoredVec, GenericStoredVec, Result, TypedVecIterator, VecIndex, VecIterator, VecValue,
+    likely, unlikely,
 };
 
-use super::CleanRawVecIterator;
+use super::{CleanRawVecIterator, RawVecInner, SerializeStrategy};
 
 /// Dirty raw vec iterator, full-featured with holes/updates/pushed support
-pub struct DirtyRawVecIterator<'a, I, T> {
-    inner: CleanRawVecIterator<'a, I, T>,
+pub struct DirtyRawVecIterator<'a, I, T, S> {
+    inner: CleanRawVecIterator<'a, I, T, S>,
     index: usize,
     stored_len: usize,
     pushed_len: usize,
@@ -17,19 +17,20 @@ pub struct DirtyRawVecIterator<'a, I, T> {
     updated: bool,
 }
 
-impl<'a, I, T> DirtyRawVecIterator<'a, I, T>
+impl<'a, I, T, S> DirtyRawVecIterator<'a, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
+    S: SerializeStrategy<T>,
 {
-    const SIZE_OF_T: usize = size_of::<T>();
+    const SIZE_OF_T: usize = S::SIZE;
 
-    pub fn new(vec: &'a RawVec<I, T>) -> Result<Self> {
-        let holes = !vec.holes.is_empty();
-        let updated = !vec.updated.is_empty();
+    pub fn new(vec: &'a RawVecInner<I, T, S>) -> Result<Self> {
+        let holes = !vec.holes().is_empty();
+        let updated = !vec.updated().is_empty();
 
         let stored_len = vec.stored_len();
-        let pushed_len = vec.pushed_len();
+        let pushed_len = vec.pushed().len();
 
         Ok(Self {
             inner: CleanRawVecIterator::new(vec)?,
@@ -76,10 +77,11 @@ where
     }
 }
 
-impl<I, T> Iterator for DirtyRawVecIterator<'_, I, T>
+impl<I, T, S> Iterator for DirtyRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
+    S: SerializeStrategy<T>,
 {
     type Item = T;
 
@@ -179,10 +181,11 @@ where
     }
 }
 
-impl<I, T> VecIterator for DirtyRawVecIterator<'_, I, T>
+impl<I, T, S> VecIterator for DirtyRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
+    S: SerializeStrategy<T>,
 {
     #[inline]
     fn set_position_to(&mut self, i: usize) {
@@ -205,19 +208,21 @@ where
     }
 }
 
-impl<I, T> TypedVecIterator for DirtyRawVecIterator<'_, I, T>
+impl<I, T, S> TypedVecIterator for DirtyRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
+    S: SerializeStrategy<T>,
 {
     type I = I;
     type T = T;
 }
 
-impl<I, T> ExactSizeIterator for DirtyRawVecIterator<'_, I, T>
+impl<I, T, S> ExactSizeIterator for DirtyRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
+    S: SerializeStrategy<T>,
 {
     #[inline(always)]
     fn len(&self) -> usize {
@@ -225,225 +230,10 @@ where
     }
 }
 
-impl<I, T> FusedIterator for DirtyRawVecIterator<'_, I, T>
+impl<I, T, S> FusedIterator for DirtyRawVecIterator<'_, I, T, S>
 where
     I: VecIndex,
     T: VecValue,
+    S: SerializeStrategy<T>,
 {
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{GenericStoredVec, RawVec, Version};
-    use rawdb::Database;
-    use tempfile::TempDir;
-
-    fn setup() -> (TempDir, Database, RawVec<usize, i32>) {
-        let temp = TempDir::new().unwrap();
-        let db = Database::open(&temp.path().join("test.db")).unwrap();
-        let vec = RawVec::import(&db, "test", Version::ONE).unwrap();
-        (temp, db, vec)
-    }
-
-    #[test]
-    fn test_dirty_iter_only_stored() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..100 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let collected: Vec<i32> = vec.dirty_iter().unwrap().collect();
-        assert_eq!(collected.len(), 100);
-        assert_eq!(collected[0], 0);
-        assert_eq!(collected[99], 99);
-    }
-
-    #[test]
-    fn test_dirty_iter_only_pushed() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..50 {
-            vec.push(i);
-        }
-        // Don't flush
-
-        let collected: Vec<i32> = vec.dirty_iter().unwrap().collect();
-        assert_eq!(collected.len(), 50);
-        assert_eq!(collected[0], 0);
-        assert_eq!(collected[49], 49);
-    }
-
-    #[test]
-    fn test_dirty_iter_stored_and_pushed() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..50 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        for i in 50..100 {
-            vec.push(i);
-        }
-
-        let collected: Vec<i32> = vec.dirty_iter().unwrap().collect();
-        assert_eq!(collected.len(), 100);
-
-        for (i, &val) in collected.iter().enumerate() {
-            assert_eq!(val, i as i32);
-        }
-    }
-
-    #[test]
-    fn test_dirty_iter_skip_across_boundary() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..50 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        for i in 50..100 {
-            vec.push(i);
-        }
-
-        // Skip from stored into pushed
-        let collected: Vec<i32> = vec.dirty_iter().unwrap().skip(40).collect();
-        assert_eq!(collected.len(), 60);
-        assert_eq!(collected[0], 40);
-        assert_eq!(collected[59], 99);
-    }
-
-    #[test]
-    fn test_dirty_iter_take_across_boundary() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..50 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        for i in 50..100 {
-            vec.push(i);
-        }
-
-        // Take from stored through pushed
-        let collected: Vec<i32> = vec.dirty_iter().unwrap().skip(40).take(20).collect();
-        assert_eq!(collected.len(), 20);
-        assert_eq!(collected[0], 40);
-        assert_eq!(collected[19], 59);
-    }
-
-    #[test]
-    fn test_dirty_iter_nth_across_boundary() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..50 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        for i in 50..100 {
-            vec.push(i);
-        }
-
-        let mut iter = vec.dirty_iter().unwrap();
-        assert_eq!(iter.nth(45), Some(45)); // In stored
-        assert_eq!(iter.next(), Some(46)); // In stored
-        assert_eq!(iter.nth(2), Some(49)); // In stored
-        assert_eq!(iter.next(), Some(50)); // In pushed
-        assert_eq!(iter.next(), Some(51)); // In pushed
-    }
-
-    #[test]
-    fn test_dirty_iter_set_position_to_pushed() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..50 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        for i in 50..100 {
-            vec.push(i);
-        }
-
-        let mut iter = vec.dirty_iter().unwrap();
-        iter.set_position_to(75); // Into pushed region
-        assert_eq!(iter.next(), Some(75));
-        assert_eq!(iter.next(), Some(76));
-    }
-
-    #[test]
-    fn test_dirty_iter_last_in_pushed() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..50 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        for i in 50..100 {
-            vec.push(i);
-        }
-
-        let iter = vec.dirty_iter().unwrap();
-        assert_eq!(iter.last(), Some(99));
-    }
-
-    #[test]
-    fn test_dirty_iter_last_in_stored() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..100 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        let iter = vec.dirty_iter().unwrap();
-        assert_eq!(iter.last(), Some(99));
-    }
-
-    #[test]
-    fn test_dirty_iter_exact_size_with_pushed() {
-        let (_temp, _db, mut vec) = setup();
-
-        for i in 0..50 {
-            vec.push(i);
-        }
-        vec.write().unwrap();
-
-        for i in 50..75 {
-            vec.push(i);
-        }
-
-        let mut iter = vec.dirty_iter().unwrap();
-        assert_eq!(iter.len(), 75);
-
-        iter.next();
-        assert_eq!(iter.len(), 74);
-
-        iter.nth(49); // Cross boundary
-        assert_eq!(iter.len(), 24);
-    }
-
-    #[test]
-    fn test_dirty_iter_empty_stored_with_pushed() {
-        let (_temp, _db, mut vec) = setup();
-
-        // No flush, only pushed
-        for i in 0..50 {
-            vec.push(i);
-        }
-
-        let collected: Vec<i32> = vec.dirty_iter().unwrap().collect();
-        assert_eq!(collected.len(), 50);
-
-        for (i, &val) in collected.iter().enumerate() {
-            assert_eq!(val, i as i32);
-        }
-    }
 }

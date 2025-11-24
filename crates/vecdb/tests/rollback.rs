@@ -1,12 +1,12 @@
 use rawdb::Database;
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, AnyVec, CollectableVec, GenericStoredVec, ImportOptions, RawVec, Result, Stamp,
+    AnyStoredVec, AnyVec, CollectableVec, GenericStoredVec, ImportOptions, ZeroCopyVec, Result, Stamp,
     Version,
 };
 
 #[allow(clippy::upper_case_acronyms)]
-type VEC = RawVec<usize, u32>;
+type VEC = ZeroCopyVec<usize, u32>;
 
 /// Helper to create a temporary test database
 pub fn setup_test_db() -> Result<(Database, TempDir)> {
@@ -26,7 +26,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("\n=== TEST 1: Basic single rollback ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Initial state: [0, 1, 2, 3, 4]
         for i in 0..5 {
@@ -58,7 +58,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 2: Rollback with truncation ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Start from [0, 1, 2, 3, 4]
         vec.stamped_flush_with_changes(Stamp::new(1))?;
@@ -88,7 +88,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 3: Multiple sequential rollbacks ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Stamp 1: [0, 1, 2, 3, 4]
         vec.stamped_flush_with_changes(Stamp::new(1))?;
@@ -125,7 +125,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 4: Rollback then save new state ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Stamp 1: [0, 1, 2, 3, 4]
         vec.stamped_flush_with_changes(Stamp::new(1))?;
@@ -152,7 +152,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 5: Complex blockchain reorg scenario ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Reset to clean state
         vec.reset()?;
@@ -352,7 +352,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 6: Rollback with updates ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Reset to clean state
         vec.reset()?;
@@ -382,7 +382,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 7: Rollback with holes ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Reset to clean state
         vec.reset()?;
@@ -414,7 +414,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 8: Rollback with truncation + updates ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Reset to clean state
         vec.reset()?;
@@ -446,7 +446,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 9: Rollback with holes + updates ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Reset to clean state
         vec.reset()?;
@@ -479,7 +479,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 10: Multiple updates to same index ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Reset to clean state
         vec.reset()?;
@@ -527,7 +527,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 11: Complex mixed operations in one stamp ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Reset to clean state
         vec.reset()?;
@@ -567,7 +567,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 12: Rollback to empty state ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Reset to empty state
         vec.reset()?;
@@ -595,7 +595,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 13: Deep rollback chain ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Reset to clean state
         vec.reset()?;
@@ -669,7 +669,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 14: Rollback with all elements updated ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Reset to clean state
         vec.reset()?;
@@ -699,7 +699,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 15: Multiple holes then rollback ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Reset to clean state
         vec.reset()?;
@@ -731,7 +731,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 16: Update same index multiple times before flush ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Reset to clean state
         vec.reset()?;
@@ -761,7 +761,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 17: Complex blockchain fork scenario ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Reset to clean state
         vec.reset()?;
@@ -822,7 +822,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 18: Large-scale rollback ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Reset to clean state
         vec.reset()?;
@@ -862,7 +862,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 19: Holes + truncation combination ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Reset to clean state
         vec.reset()?;
@@ -897,7 +897,7 @@ fn test_rollback_comprehensive() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== TEST 20: Rollback after reads via iterator ===");
     {
-        let mut vec: VEC = RawVec::forced_import_with(options)?;
+        let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         // Reset to clean state
         vec.reset()?;
