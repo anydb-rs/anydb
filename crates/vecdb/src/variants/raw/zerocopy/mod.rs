@@ -2,9 +2,13 @@ use std::ops::{Deref, DerefMut};
 
 use rawdb::Reader;
 
+use std::path::PathBuf;
+
+use rawdb::{Database, Region};
+
 use crate::{
-    AnyStoredVec, AnyVec, BoxedVecIterator, HEADER_OFFSET, IterableVec, Result, TypedVec, VecIndex,
-    Version,
+    AnyStoredVec, AnyVec, BoxedVecIterator, Format, GenericStoredVec, HEADER_OFFSET, Header,
+    Importable, ImportOptions, IterableVec, Result, Stamp, TypedVec, VecIndex, Version,
 };
 
 use super::{CleanRawVecIterator, DirtyRawVecIterator, RawVecInner, RawVecIterator};
@@ -25,6 +29,31 @@ pub use value::*;
 #[derive(Debug, Clone)]
 #[must_use = "Vector should be stored to keep data accessible"]
 pub struct ZeroCopyVec<I, T>(pub(crate) RawVecInner<I, T, ZeroCopyStrategy<T>>);
+
+impl<I, T> Importable for ZeroCopyVec<I, T>
+where
+    I: VecIndex,
+    T: ZeroCopyVecValue,
+{
+    fn import(db: &Database, name: &str, version: Version) -> Result<Self> {
+        Self::import_with((db, name, version).into())
+    }
+
+    fn import_with(options: ImportOptions) -> Result<Self> {
+        Ok(Self(RawVecInner::import_with(options, Format::ZeroCopy)?))
+    }
+
+    fn forced_import(db: &Database, name: &str, version: Version) -> Result<Self> {
+        Self::forced_import_with((db, name, version).into())
+    }
+
+    fn forced_import_with(options: ImportOptions) -> Result<Self> {
+        Ok(Self(RawVecInner::forced_import_with(
+            options,
+            Format::ZeroCopy,
+        )?))
+    }
+}
 
 impl<I, T> ZeroCopyVec<I, T>
 where
@@ -183,4 +212,171 @@ where
 {
     type I = I;
     type T = T;
+}
+
+impl<I, T> AnyStoredVec for ZeroCopyVec<I, T>
+where
+    I: VecIndex,
+    T: ZeroCopyVecValue,
+{
+    #[inline]
+    fn db_path(&self) -> PathBuf {
+        self.0.db_path()
+    }
+
+    #[inline]
+    fn region(&self) -> &Region {
+        self.0.region()
+    }
+
+    #[inline]
+    fn header(&self) -> &Header {
+        self.0.header()
+    }
+
+    #[inline]
+    fn mut_header(&mut self) -> &mut Header {
+        self.0.mut_header()
+    }
+
+    #[inline]
+    fn saved_stamped_changes(&self) -> u16 {
+        self.0.saved_stamped_changes()
+    }
+
+    #[inline]
+    fn db(&self) -> Database {
+        self.0.db()
+    }
+
+    #[inline]
+    fn real_stored_len(&self) -> usize {
+        self.0.real_stored_len()
+    }
+
+    #[inline]
+    fn stored_len(&self) -> usize {
+        self.0.stored_len()
+    }
+
+    #[inline]
+    fn write(&mut self) -> Result<()> {
+        self.0.write()
+    }
+
+    #[inline]
+    fn serialize_changes(&self) -> Result<Vec<u8>> {
+        self.0.serialize_changes()
+    }
+
+    fn remove(self) -> Result<()> {
+        self.0.remove()
+    }
+}
+
+impl<I, T> GenericStoredVec<I, T> for ZeroCopyVec<I, T>
+where
+    I: VecIndex,
+    T: ZeroCopyVecValue,
+{
+    #[inline]
+    fn unchecked_read_at(&self, index: usize, reader: &Reader) -> Result<T> {
+        self.0.unchecked_read_at(index, reader)
+    }
+
+    #[inline]
+    fn read_value_from_bytes(&self, bytes: &[u8]) -> Result<T> {
+        self.0.read_value_from_bytes(bytes)
+    }
+
+    #[inline]
+    fn value_to_bytes(&self, value: &T) -> Vec<u8> {
+        self.0.value_to_bytes(value)
+    }
+
+    #[inline]
+    fn pushed(&self) -> &[T] {
+        self.0.pushed()
+    }
+
+    #[inline]
+    fn mut_pushed(&mut self) -> &mut Vec<T> {
+        self.0.mut_pushed()
+    }
+
+    #[inline]
+    fn prev_pushed(&self) -> &[T] {
+        self.0.prev_pushed()
+    }
+
+    #[inline]
+    fn mut_prev_pushed(&mut self) -> &mut Vec<T> {
+        self.0.mut_prev_pushed()
+    }
+
+    #[inline]
+    fn update_stored_len(&self, val: usize) {
+        self.0.update_stored_len(val)
+    }
+
+    #[inline]
+    fn prev_stored_len(&self) -> usize {
+        self.0.prev_stored_len()
+    }
+
+    #[inline]
+    fn mut_prev_stored_len(&mut self) -> &mut usize {
+        self.0.mut_prev_stored_len()
+    }
+
+    #[inline]
+    fn reset(&mut self) -> Result<()> {
+        self.0.reset()
+    }
+
+    // Override methods that handle holes/updated
+    #[inline]
+    fn get_stored_value_for_serialization(&self, index: usize, reader: &Reader) -> Result<T> {
+        self.0.get_stored_value_for_serialization(index, reader)
+    }
+
+    #[inline]
+    fn restore_truncated_value(&mut self, index: usize, value: T) {
+        self.0.restore_truncated_value(index, value)
+    }
+
+    #[inline]
+    fn truncate_if_needed_at(&mut self, index: usize) -> Result<()> {
+        self.0.truncate_if_needed_at(index)
+    }
+
+    #[inline]
+    fn reset_unsaved(&mut self) {
+        self.0.reset_unsaved()
+    }
+
+    #[inline]
+    fn is_dirty(&self) -> bool {
+        self.0.is_dirty()
+    }
+
+    #[inline]
+    fn stamped_flush_with_changes(&mut self, stamp: Stamp) -> Result<()> {
+        self.0.stamped_flush_with_changes(stamp)
+    }
+
+    #[inline]
+    fn rollback_before(&mut self, stamp: Stamp) -> Result<Stamp> {
+        self.0.rollback_before(stamp)
+    }
+
+    #[inline]
+    fn rollback(&mut self) -> Result<()> {
+        self.0.rollback()
+    }
+
+    #[inline]
+    fn deserialize_then_undo_changes(&mut self, bytes: &[u8]) -> Result<()> {
+        self.0.deserialize_then_undo_changes(bytes)
+    }
 }

@@ -8,8 +8,8 @@ use parking_lot::RwLockReadGuard;
 use rawdb::RegionMetadata;
 
 use crate::{
-    AnyStoredVec, BUFFER_SIZE, GenericStoredVec, Result, TypedVecIterator, VecIndex, VecIterator,
-    VecValue, likely, unlikely, variants::compressed::inner::Pages,
+    AnyStoredVec, BUFFER_SIZE, GenericStoredVec, Pages, Result, TypedVecIterator, VecIndex,
+    VecIterator, VecValue, likely, unlikely,
 };
 
 use super::super::inner::{CompressedVecInner, CompressionStrategy, MAX_UNCOMPRESSED_PAGE_SIZE};

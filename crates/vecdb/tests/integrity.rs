@@ -4,8 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, AnyVec, CollectableVec, GenericStoredVec, ImportOptions, ZeroCopyVec, Result, Stamp,
-    Version,
+    AnyStoredVec, AnyVec, CollectableVec, GenericStoredVec, ImportOptions, Importable, Result,
+    Stamp, Version, ZeroCopyVec,
 };
 
 /// Helper to create a temporary test database

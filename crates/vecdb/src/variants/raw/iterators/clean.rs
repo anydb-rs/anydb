@@ -9,8 +9,8 @@ use parking_lot::RwLockReadGuard;
 use rawdb::RegionMetadata;
 
 use crate::{
-    AnyStoredVec, Result, TypedVecIterator, VecIndex, VecIterator, VecValue, likely, unlikely,
-    variants::HEADER_OFFSET,
+    AnyStoredVec, HEADER_OFFSET, Result, TypedVecIterator, VecIndex, VecIterator, VecValue, likely,
+    unlikely,
 };
 
 use super::{RawVecInner, SerializeStrategy};
@@ -35,7 +35,7 @@ where
     T: VecValue,
     S: SerializeStrategy<T>,
 {
-    const SIZE_OF_T: usize = S::SIZE;
+    const SIZE_OF_T: usize = size_of::<T>();
     const NORMAL_BUFFER_SIZE: usize = RawVecInner::<I, T, S>::aligned_buffer_size();
     const _CHECK_T: () = assert!(Self::SIZE_OF_T > 0, "Can't have T with size_of() == 0");
 

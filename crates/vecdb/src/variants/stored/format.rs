@@ -1,26 +1,27 @@
+use crate::{Bytes, Error, Result};
+
 /// Storage format selection for stored vectors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(u8)]
 pub enum Format {
     // ============================================================================
     // Raw formats (uncompressed)
     // ============================================================================
-    /// ZeroCopy raw storage using zerocopy for direct memory mapping.
-    /// Best for random access and types that implement zerocopy traits.
-    ZeroCopy,
     /// Bytes raw storage using custom Bytes trait serialization.
     /// Best for types that need custom serialization but still want raw storage.
     Bytes,
+    /// ZeroCopy raw storage using zerocopy for direct memory mapping.
+    /// Best for random access and types that implement zerocopy traits.
+    ZeroCopy,
 
     // ============================================================================
     // Compressed formats
     // ============================================================================
     /// Pcodec compressed storage (best for numerical data with sequential access).
-    Pcodec,
+    Pco = 64,
     /// LZ4 compressed storage (fast compression/decompression).
-    LZ4,
+    LZ4 = 65,
     /// Zstd compressed storage (high compression ratio).
-    Zstd,
+    Zstd = 66,
 }
 
 impl Format {
@@ -31,7 +32,7 @@ impl Format {
 
     #[inline]
     pub fn is_compressed(&self) -> bool {
-        matches!(self, Self::Pcodec | Self::LZ4 | Self::Zstd)
+        matches!(self, Self::Pco | Self::LZ4 | Self::Zstd)
     }
 
     #[inline]
@@ -46,7 +47,7 @@ impl Format {
 
     #[inline]
     pub fn is_pcodec(&self) -> bool {
-        *self == Self::Pcodec
+        *self == Self::Pco
     }
 
     #[inline]
@@ -57,5 +58,27 @@ impl Format {
     #[inline]
     pub fn is_zstd(&self) -> bool {
         *self == Self::Zstd
+    }
+}
+
+impl Bytes for Format {
+    #[inline]
+    fn to_bytes(&self) -> Vec<u8> {
+        vec![*self as u8]
+    }
+
+    #[inline]
+    fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        if bytes.is_empty() {
+            return Err(Error::WrongLength);
+        }
+        match bytes[0] {
+            0 => Ok(Self::Bytes),
+            1 => Ok(Self::ZeroCopy),
+            64 => Ok(Self::Pco),
+            65 => Ok(Self::LZ4),
+            66 => Ok(Self::Zstd),
+            b => Err(Error::InvalidFormat(b)),
+        }
     }
 }

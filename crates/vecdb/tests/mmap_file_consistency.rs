@@ -1,5 +1,7 @@
 use tempfile::TempDir;
-use vecdb::{AnyStoredVec, Database, EagerVec, Exit, GenericStoredVec, IterableVec};
+use vecdb::{
+    AnyStoredVec, Database, EagerVec, Exit, GenericStoredVec, Importable, IterableVec, PcoVec,
+};
 
 #[test]
 fn test_mmap_write_file_read_consistency() {
@@ -8,8 +10,8 @@ fn test_mmap_write_file_read_consistency() {
     let exit = Exit::new();
 
     // Create a compressed vec (which uses mmap for writes)
-    let mut vec: EagerVec<usize, u64> =
-        EagerVec::forced_import_compressed(&db, "test_vec", vecdb::Version::ONE).unwrap();
+    let mut vec: EagerVec<PcoVec<usize, u64>> =
+        EagerVec::forced_import(&db, "test_vec", vecdb::Version::ONE).unwrap();
 
     // Write some data
     for i in 0..1000usize {
@@ -46,8 +48,8 @@ fn test_immediate_read_after_write() {
     let db = Database::open(&temp_dir.path().join("test2.db")).unwrap();
     let exit = Exit::new();
 
-    let mut vec: EagerVec<usize, u64> =
-        EagerVec::forced_import_compressed(&db, "test_vec", vecdb::Version::ONE).unwrap();
+    let mut vec: EagerVec<PcoVec<usize, u64>> =
+        EagerVec::forced_import(&db, "test_vec", vecdb::Version::ONE).unwrap();
 
     // Write, flush, read immediately (mimics the txinindex -> txindex pattern)
     for batch in 0..10 {

@@ -2,7 +2,7 @@ use std::{fmt, fs, io, result, time};
 
 use thiserror::Error;
 
-use crate::{Stamp, Version};
+use crate::{Format, Stamp, Version};
 
 pub type Result<T, E = Error> = result::Result<T, E>;
 
@@ -46,10 +46,8 @@ pub enum Error {
     ExpectVecToHaveIndex,
     #[error("Failed to convert key to usize")]
     FailedKeyTryIntoUsize,
-    #[error("Different compression mode chosen")]
-    DifferentCompressionMode,
-    #[error("Corrupted format file")]
-    CorruptedFormatFile,
+    #[error("Different format found: {found:?}, expected: {expected:?}")]
+    DifferentFormat { found: Format, expected: Format },
     #[error("Version cannot be zero, can't verify endianness otherwise")]
     VersionCannotBeZero,
     #[error("Stamp mismatch: file stamp {file:?} != vec stamp {vec:?}")]
@@ -63,6 +61,8 @@ pub enum Error {
     },
     #[error("Cannot remove PcodecVec: pages still referenced")]
     PagesStillReferenced,
+    #[error("Invalid format byte: {0}")]
+    InvalidFormat(u8),
 }
 
 impl<A, B, C> From<zerocopy::error::ConvertError<A, B, C>> for Error {

@@ -1,8 +1,8 @@
 use rawdb::Database;
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, AnyVec, CollectableVec, GenericStoredVec, ImportOptions, ZeroCopyVec, Result, Stamp,
-    Version,
+    AnyStoredVec, AnyVec, CollectableVec, GenericStoredVec, ImportOptions, Importable, Result,
+    Stamp, Version, ZeroCopyVec,
 };
 
 #[allow(clippy::upper_case_acronyms)]

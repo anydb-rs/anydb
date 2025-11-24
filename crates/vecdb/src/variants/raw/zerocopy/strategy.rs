@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::{Error, Result, ZeroCopyVecValue, variants::raw::inner::SerializeStrategy};
+use crate::{Error, Result, ZeroCopyVecValue, variants::raw::SerializeStrategy};
 
 /// Zerocopy-based serialization strategy.
 /// Uses zerocopy traits for direct memory mapping without copying.
@@ -8,8 +8,6 @@ use crate::{Error, Result, ZeroCopyVecValue, variants::raw::inner::SerializeStra
 pub struct ZeroCopyStrategy<T>(PhantomData<T>);
 
 impl<T: ZeroCopyVecValue> SerializeStrategy<T> for ZeroCopyStrategy<T> {
-    const SIZE: usize = size_of::<T>();
-
     #[inline]
     fn read(bytes: &[u8]) -> Result<T> {
         T::read_from_prefix(bytes)

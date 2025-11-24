@@ -2,9 +2,8 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use rawdb::Region;
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
-use crate::{Error, Result, Stamp, Version};
+use crate::{Bytes, Error, Result, Stamp, Version};
 
 use super::Format;
 
@@ -43,11 +42,6 @@ impl Header {
         self.inner.write().stamp = stamp;
     }
 
-    pub fn update_format(&mut self, format: Format) {
-        self.modified = true;
-        self.inner.write().compressed = ZeroCopyBool::from(format);
-    }
-
     pub fn update_computed_version(&mut self, computed_version: Version) {
         self.modified = true;
         self.inner.write().computed_version = computed_version;
@@ -80,14 +74,14 @@ impl Header {
     }
 }
 
-#[derive(Debug, Clone, FromBytes, IntoBytes, Immutable, KnownLayout)]
+#[derive(Debug, Clone)]
 #[repr(C)]
 struct HeaderInner {
     pub header_version: Version,
     pub vec_version: Version,
     pub computed_version: Version,
     pub stamp: Stamp,
-    pub compressed: ZeroCopyBool,
+    pub format: Format,
     pub padding: [u8; 31],
 }
 
@@ -98,7 +92,7 @@ impl HeaderInner {
             vec_version,
             computed_version: Version::default(),
             stamp: Stamp::default(),
-            compressed: ZeroCopyBool::from(format),
+            format,
             padding: Default::default(),
         };
         header.write(region)?;
@@ -106,7 +100,7 @@ impl HeaderInner {
     }
 
     pub fn write(&self, region: &Region) -> Result<()> {
-        region.write_at(self.as_bytes(), 0)?;
+        region.write_at(&self.to_bytes(), 0)?;
         Ok(())
     }
 
@@ -123,7 +117,7 @@ impl HeaderInner {
 
         let reader = region.create_reader();
         let vec = reader.unchecked_read(0, HEADER_OFFSET);
-        let header = HeaderInner::read_from_bytes(vec)?;
+        let header = HeaderInner::from_bytes(vec)?;
 
         if header.header_version != HEADER_VERSION {
             return Err(Error::DifferentVersion {
@@ -137,58 +131,45 @@ impl HeaderInner {
                 expected: vec_version,
             });
         }
-        if header.compressed.is_broken() {
-            return Err(Error::WrongEndian);
-        }
-        if (header.compressed.is_true() && format.is_raw())
-            || (header.compressed.is_false() && format.is_compressed())
-        {
-            return Err(Error::DifferentCompressionMode);
+
+        if header.format != format {
+            return Err(Error::DifferentFormat {
+                found: header.format,
+                expected: format,
+            });
         }
 
         Ok(header)
     }
-}
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    FromBytes,
-    IntoBytes,
-    Immutable,
-    KnownLayout,
-)]
-pub struct ZeroCopyBool(u8);
-
-impl ZeroCopyBool {
-    pub const TRUE: Self = Self(1);
-    pub const FALSE: Self = Self(0);
-
-    pub fn is_true(&self) -> bool {
-        *self == Self::TRUE
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(HEADER_OFFSET);
+        bytes.extend(self.header_version.to_bytes());
+        bytes.extend(self.vec_version.to_bytes());
+        bytes.extend(self.computed_version.to_bytes());
+        bytes.extend(self.stamp.to_bytes());
+        bytes.extend(self.format.to_bytes());
+        bytes.extend_from_slice(&self.padding);
+        bytes
     }
 
-    pub fn is_false(&self) -> bool {
-        *self == Self::FALSE
-    }
-
-    pub fn is_broken(&self) -> bool {
-        *self > Self::TRUE
-    }
-}
-
-impl From<Format> for ZeroCopyBool {
-    fn from(value: Format) -> Self {
-        if value.is_raw() {
-            Self::FALSE
-        } else {
-            Self::TRUE
+    fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() < HEADER_OFFSET {
+            return Err(Error::WrongLength);
         }
+        let header_version = Version::from_bytes(&bytes[0..8])?;
+        let vec_version = Version::from_bytes(&bytes[8..16])?;
+        let computed_version = Version::from_bytes(&bytes[16..24])?;
+        let stamp = Stamp::from_bytes(&bytes[24..32])?;
+        let format = Format::from_bytes(&bytes[32..33])?;
+        let padding = [0u8; 31];
+        Ok(Self {
+            header_version,
+            vec_version,
+            computed_version,
+            stamp,
+            format,
+            padding,
+        })
     }
 }

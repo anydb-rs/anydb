@@ -7,12 +7,13 @@ use std::{
     path::PathBuf,
 };
 
+use log::info;
 use rawdb::{Database, Reader, Region};
 use zerocopy::{FromBytes, IntoBytes};
 
 use crate::{
-    AnyStoredVec, AnyVec, BUFFER_SIZE, BaseVec, Error, GenericStoredVec, HEADER_OFFSET, Header,
-    ImportOptions, Result, SIZE_OF_U64, Stamp, TypedVec, VecIndex, VecValue, Version,
+    AnyStoredVec, AnyVec, BUFFER_SIZE, Error, Format, GenericStoredVec, HEADER_OFFSET, Header,
+    ImportOptions, Result, SIZE_OF_U64, Stamp, StoredVec, TypedVec, VecIndex, VecValue, Version,
     vec_region_name_with,
 };
 
@@ -27,7 +28,7 @@ const VERSION: Version = Version::ONE;
 #[derive(Debug, Clone)]
 #[must_use = "Vector should be stored to keep data accessible"]
 pub struct RawVecInner<I, T, S> {
-    pub(crate) base: BaseVec<I, T>,
+    pub(crate) base: StoredVec<I, T>,
     has_stored_holes: bool,
     holes: BTreeSet<usize>,
     prev_holes: BTreeSet<usize>,
@@ -43,15 +44,34 @@ where
     S: SerializeStrategy<T>,
 {
     /// The size of T in bytes as determined by the strategy.
-    pub const SIZE_OF_T: usize = S::SIZE;
+    pub const SIZE_OF_T: usize = size_of::<T>();
 
-    pub fn import_with(mut options: ImportOptions) -> Result<Self> {
+    /// Same as import but will reset the vec under certain errors, so be careful !
+    pub fn forced_import_with(mut options: ImportOptions, format: Format) -> Result<Self> {
+        options.version = options.version + VERSION;
+        let res = Self::import_with(options, format);
+        match res {
+            Err(Error::WrongEndian)
+            | Err(Error::WrongLength)
+            | Err(Error::DifferentFormat { .. })
+            | Err(Error::DifferentVersion { .. }) => {
+                info!("Resetting {}...", options.name);
+                options
+                    .db
+                    .remove_region_if_exists(&vec_region_name_with::<I>(options.name))?;
+                Self::import_with(options, format)
+            }
+            _ => res,
+        }
+    }
+
+    pub fn import_with(mut options: ImportOptions, format: Format) -> Result<Self> {
         options.version = options.version + VERSION;
 
         let db = options.db;
         let name = options.name;
 
-        let base = BaseVec::import(options)?;
+        let base = StoredVec::import(options, format)?;
 
         // Raw format requires data to be aligned to SIZE_OF_T
         let region_len = base.region().meta().len();
@@ -615,6 +635,10 @@ where
         bytes.extend(holes.as_bytes());
 
         Ok(bytes)
+    }
+
+    fn remove(self) -> Result<()> {
+        Self::remove(self)
     }
 }
 

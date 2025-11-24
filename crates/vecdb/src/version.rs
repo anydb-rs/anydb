@@ -6,29 +6,14 @@ use std::{
     path::Path,
 };
 
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
-
-use crate::{Error, Result, SIZE_OF_U64};
+use crate::{Bytes, Error, Result, SIZE_OF_U64};
 
 /// Version tracking for data schema and computed values.
 ///
 /// Used to detect when stored data needs to be recomputed due to changes
 /// in computation logic or source data versions. Supports validation
 /// against persisted versions to ensure compatibility.
-#[derive(
-    Default,
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    FromBytes,
-    IntoBytes,
-    Immutable,
-    KnownLayout,
-)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Version(u64);
 
 impl Version {
@@ -41,11 +26,24 @@ impl Version {
     }
 
     pub fn write(&self, path: &Path) -> Result<(), io::Error> {
-        fs::write(path, self.as_bytes())
+        fs::write(path, self.to_bytes())
     }
 
     pub fn swap_bytes(self) -> Self {
         Self(self.0.swap_bytes())
+    }
+}
+
+impl Bytes for Version {
+    #[inline]
+    fn to_bytes(&self) -> Vec<u8> {
+        self.0.to_le_bytes().to_vec()
+    }
+
+    #[inline]
+    fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let arr: [u8; SIZE_OF_U64] = bytes.try_into().map_err(|_| Error::WrongLength)?;
+        Ok(Self(u64::from_le_bytes(arr)))
     }
 }
 
@@ -66,7 +64,7 @@ impl TryFrom<&Path> for Version {
     fn try_from(value: &Path) -> Result<Self, Self::Error> {
         let mut buf = [0; SIZE_OF_U64];
         fs::read(value)?.as_slice().read_exact(&mut buf)?;
-        Ok(*(Self::ref_from_bytes(&buf)?))
+        Self::from_bytes(&buf)
     }
 }
 

@@ -23,7 +23,7 @@ where
     T: VecValue,
     S: SerializeStrategy<T>,
 {
-    const SIZE_OF_T: usize = S::SIZE;
+    const SIZE_OF_T: usize = size_of::<T>();
 
     pub fn new(vec: &'a RawVecInner<I, T, S>) -> Result<Self> {
         let holes = !vec.holes().is_empty();

@@ -2,8 +2,8 @@ use std::marker::PhantomData;
 
 use crate::{Error, Result, likely};
 
-use super::value::{AsInnerSlice, FromInnerSlice, PcodecVecValue};
 use super::super::inner::CompressionStrategy;
+use super::value::{AsInnerSlice, FromInnerSlice, PcoVecValue};
 
 const PCO_COMPRESSION_LEVEL: usize = 4;
 
@@ -13,10 +13,13 @@ pub struct PcodecStrategy<T>(PhantomData<T>);
 
 impl<T> CompressionStrategy<T> for PcodecStrategy<T>
 where
-    T: PcodecVecValue,
+    T: PcoVecValue,
 {
     fn compress(values: &[T]) -> Result<Vec<u8>> {
-        Ok(pco::standalone::simpler_compress(values.as_inner_slice(), PCO_COMPRESSION_LEVEL).unwrap())
+        Ok(
+            pco::standalone::simpler_compress(values.as_inner_slice(), PCO_COMPRESSION_LEVEL)
+                .unwrap(),
+        )
     }
 
     fn decompress(bytes: &[u8], expected_len: usize) -> Result<Vec<T>> {

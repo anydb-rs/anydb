@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use rawdb::{Database, Region};
 
-use crate::{AnyVec, Exit, Result, Stamp, variants::Header};
+use crate::{AnyVec, Exit, Header, Result, Stamp};
 
 /// Trait for stored vectors that persist data to disk (as opposed to lazy computed vectors).
 pub trait AnyStoredVec: AnyVec {
@@ -59,4 +59,7 @@ pub trait AnyStoredVec: AnyVec {
     }
 
     fn serialize_changes(&self) -> Result<Vec<u8>>;
+
+    /// Removes this vector's region from the database.
+    fn remove(self) -> Result<()>;
 }

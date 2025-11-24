@@ -2,8 +2,8 @@ use rawdb::Database;
 use std::collections::BTreeSet;
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, AnyVec, CollectableVec, GenericStoredVec, ZeroCopyVec, Result, Stamp,
-    TypedVecIterator, Version,
+    AnyStoredVec, AnyVec, CollectableVec, GenericStoredVec, Importable, Result, Stamp,
+    TypedVecIterator, Version, ZeroCopyVec,
 };
 
 #[allow(clippy::upper_case_acronyms)]

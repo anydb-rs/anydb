@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::{BytesVecValue, Result, variants::raw::inner::SerializeStrategy};
+use crate::{BytesVecValue, Result, variants::raw::SerializeStrategy};
 
 /// Bytes trait-based serialization strategy.
 /// Uses the Bytes trait for custom serialization.
@@ -8,8 +8,6 @@ use crate::{BytesVecValue, Result, variants::raw::inner::SerializeStrategy};
 pub struct BytesStrategy<T>(PhantomData<T>);
 
 impl<T: BytesVecValue> SerializeStrategy<T> for BytesStrategy<T> {
-    const SIZE: usize = T::SIZE;
-
     #[inline]
     fn read(bytes: &[u8]) -> Result<T> {
         T::from_bytes(bytes)

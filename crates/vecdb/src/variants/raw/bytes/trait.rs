@@ -1,12 +1,12 @@
 use std::fmt::Debug;
 
-use crate::Result;
+use crate::{Error, Result};
 
 /// Trait for types that can be serialized to/from bytes.
 /// This is an alternative to zerocopy for types that need custom serialization.
 pub trait Bytes: Sized + Debug + Clone + Send + Sync + 'static {
     /// The fixed size in bytes of this type when serialized.
-    const SIZE: usize;
+    const SIZE: usize = size_of::<Self>();
 
     /// Serialize this value to bytes.
     /// The returned slice must be exactly `SIZE` bytes.
@@ -22,8 +22,6 @@ macro_rules! impl_bytes_for_numeric {
     ($($t:ty),*) => {
         $(
             impl Bytes for $t {
-                const SIZE: usize = std::mem::size_of::<$t>();
-
                 #[inline]
                 fn to_bytes(&self) -> Vec<u8> {
                     self.to_le_bytes().to_vec()
@@ -33,7 +31,7 @@ macro_rules! impl_bytes_for_numeric {
                 fn from_bytes(bytes: &[u8]) -> Result<Self> {
                     let arr: [u8; std::mem::size_of::<$t>()] = bytes
                         .try_into()
-                        .map_err(|_| crate::Error::ZeroCopyError)?;
+                        .map_err(|_| Error::ZeroCopyError)?;
                     Ok(<$t>::from_ne_bytes(arr))
                 }
             }

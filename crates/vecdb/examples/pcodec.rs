@@ -1,7 +1,7 @@
 use std::{fs, path::Path};
 
 use vecdb::{
-    AnyStoredVec, AnyVec, CollectableVec, Database, GenericStoredVec, PcoVec, Stamp,
+    AnyStoredVec, AnyVec, CollectableVec, Database, GenericStoredVec, Importable, PcoVec, Stamp,
     TypedVecIterator, Version,
 };
 

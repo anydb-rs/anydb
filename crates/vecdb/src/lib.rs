@@ -9,7 +9,7 @@
 
 pub use rawdb::{Database, Error as RawDBError, PAGE_SIZE, Reader, likely, unlikely};
 #[cfg(feature = "derive")]
-// pub use vecdb_derive::PcodecVecValue;
+// pub use vecdb_derive::PcoVecValue;
 //
 mod error;
 mod exit;

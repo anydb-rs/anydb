@@ -1,10 +1,13 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    ops::{Deref, DerefMut},
+    path::PathBuf,
+};
 
-use rawdb::Database;
+use rawdb::{Database, Region};
 
 use crate::{
-    AnyVec, BoxedVecIterator, Format, IterableVec, Result, TypedVec, VecIndex, Version,
-    variants::ImportOptions,
+    AnyStoredVec, AnyVec, BoxedVecIterator, Format, GenericStoredVec, Header, Importable,
+    ImportOptions, IterableVec, Result, TypedVec, VecIndex, Version,
 };
 
 use super::CompressedVecInner;
@@ -40,32 +43,36 @@ impl<I, T> DerefMut for PcoVec<I, T> {
     }
 }
 
+impl<I, T> Importable for PcoVec<I, T>
+where
+    I: VecIndex,
+    T: PcoVecValue,
+{
+    fn import(db: &Database, name: &str, version: Version) -> Result<Self> {
+        Self::import_with((db, name, version).into())
+    }
+
+    fn import_with(options: ImportOptions) -> Result<Self> {
+        Ok(Self(CompressedVecInner::import_with(options, Format::Pco)?))
+    }
+
+    fn forced_import(db: &Database, name: &str, version: Version) -> Result<Self> {
+        Self::forced_import_with((db, name, version).into())
+    }
+
+    fn forced_import_with(options: ImportOptions) -> Result<Self> {
+        Ok(Self(CompressedVecInner::forced_import_with(
+            options,
+            Format::Pco,
+        )?))
+    }
+}
+
 impl<I, T> PcoVec<I, T>
 where
     I: VecIndex,
-    T: PcodecVecValue,
+    T: PcoVecValue,
 {
-    /// Same as import but will reset the vec under certain errors, so be careful !
-    pub fn forced_import(db: &Database, name: &str, version: Version) -> Result<Self> {
-        Self::forced_import_with((db, name, version, Format::Pcodec).into())
-    }
-
-    /// Same as import but will reset the vec under certain errors, so be careful !
-    pub fn forced_import_with(mut options: ImportOptions) -> Result<Self> {
-        options.format = Format::Pcodec;
-        Ok(Self(CompressedVecInner::forced_import_with(options)?))
-    }
-
-    pub fn import(db: &Database, name: &str, version: Version) -> Result<Self> {
-        Self::import_with((db, name, version, Format::Pcodec).into())
-    }
-
-    #[inline]
-    pub fn import_with(mut options: ImportOptions) -> Result<Self> {
-        options.format = Format::Pcodec;
-        Ok(Self(CompressedVecInner::import_with(options)?))
-    }
-
     #[inline]
     pub fn iter(&self) -> Result<PcodecVecIterator<'_, I, T>> {
         PcodecVecIterator::new(&self.0)
@@ -95,7 +102,7 @@ where
 impl<'a, I, T> IntoIterator for &'a PcoVec<I, T>
 where
     I: VecIndex,
-    T: PcodecVecValue,
+    T: PcoVecValue,
 {
     type Item = T;
     type IntoIter = PcodecVecIterator<'a, I, T>;
@@ -108,7 +115,7 @@ where
 impl<I, T> AnyVec for PcoVec<I, T>
 where
     I: VecIndex,
-    T: PcodecVecValue,
+    T: PcoVecValue,
 {
     #[inline]
     fn version(&self) -> Version {
@@ -144,7 +151,7 @@ where
 impl<I, T> TypedVec for PcoVec<I, T>
 where
     I: VecIndex,
-    T: PcodecVecValue,
+    T: PcoVecValue,
 {
     type I = I;
     type T = T;
@@ -153,9 +160,130 @@ where
 impl<I, T> IterableVec<I, T> for PcoVec<I, T>
 where
     I: VecIndex,
-    T: PcodecVecValue,
+    T: PcoVecValue,
 {
     fn iter(&self) -> BoxedVecIterator<'_, I, T> {
         Box::new(self.into_iter())
+    }
+}
+
+impl<I, T> AnyStoredVec for PcoVec<I, T>
+where
+    I: VecIndex,
+    T: PcoVecValue,
+{
+    #[inline]
+    fn db_path(&self) -> PathBuf {
+        self.0.db_path()
+    }
+
+    #[inline]
+    fn region(&self) -> &Region {
+        self.0.region()
+    }
+
+    #[inline]
+    fn header(&self) -> &Header {
+        self.0.header()
+    }
+
+    #[inline]
+    fn mut_header(&mut self) -> &mut Header {
+        self.0.mut_header()
+    }
+
+    #[inline]
+    fn saved_stamped_changes(&self) -> u16 {
+        self.0.saved_stamped_changes()
+    }
+
+    #[inline]
+    fn db(&self) -> Database {
+        self.0.db()
+    }
+
+    #[inline]
+    fn real_stored_len(&self) -> usize {
+        self.0.real_stored_len()
+    }
+
+    #[inline]
+    fn stored_len(&self) -> usize {
+        self.0.stored_len()
+    }
+
+    #[inline]
+    fn write(&mut self) -> Result<()> {
+        self.0.write()
+    }
+
+    #[inline]
+    fn serialize_changes(&self) -> Result<Vec<u8>> {
+        self.0.serialize_changes()
+    }
+
+    fn remove(self) -> Result<()> {
+        self.0.remove()
+    }
+}
+
+impl<I, T> GenericStoredVec<I, T> for PcoVec<I, T>
+where
+    I: VecIndex,
+    T: PcoVecValue,
+{
+    #[inline]
+    fn unchecked_read_at(&self, index: usize, reader: &rawdb::Reader) -> Result<T> {
+        self.0.unchecked_read_at(index, reader)
+    }
+
+    #[inline]
+    fn read_value_from_bytes(&self, bytes: &[u8]) -> Result<T> {
+        self.0.read_value_from_bytes(bytes)
+    }
+
+    #[inline]
+    fn value_to_bytes(&self, value: &T) -> Vec<u8> {
+        self.0.value_to_bytes(value)
+    }
+
+    #[inline]
+    fn pushed(&self) -> &[T] {
+        self.0.pushed()
+    }
+
+    #[inline]
+    fn mut_pushed(&mut self) -> &mut Vec<T> {
+        self.0.mut_pushed()
+    }
+
+    #[inline]
+    fn prev_pushed(&self) -> &[T] {
+        self.0.prev_pushed()
+    }
+
+    #[inline]
+    fn mut_prev_pushed(&mut self) -> &mut Vec<T> {
+        self.0.mut_prev_pushed()
+    }
+
+    #[inline]
+    fn update_stored_len(&self, val: usize) {
+        self.0.update_stored_len(val)
+    }
+
+    #[inline]
+    fn prev_stored_len(&self) -> usize {
+        self.0.prev_stored_len()
+    }
+
+    #[inline]
+    fn mut_prev_stored_len(&mut self) -> &mut usize {
+        self.0.mut_prev_stored_len()
+    }
+
+    #[inline]
+    fn reset(&mut self) -> Result<()> {
+        self.0.reset()
     }
 }

@@ -5,7 +5,7 @@ High-performance mutable persistent vectors built on [`rawdb`](../rawdb/README.m
 It features:
 
 - `Vec` based API: push, update, truncate, delete by index
-- Multiple variants: `raw`, `compressed`, `computed`
+- Multiple variants: `BytesVec`, `ZeroCopyVec`, `PcoVec`, `LZ4Vec`, `ZstdVec`, `EagerVec`, `LazyVec`, ...
 - Rollback via stamped change deltas
 - Sparse deletions with holes
 - Thread-safe with concurrent reads
@@ -26,13 +26,13 @@ cargo add vecdb
 ## Usage
 
 ```rust
-use vecdb::{AnyStoredVec, Database, GenericStoredVec, RawVec, Result, Version};
+use vecdb::{AnyStoredVec, Importable, Database, GenericStoredVec, BytesVec, Result, Version};
 
 fn main() -> Result<()> {
     // create
     let temp_dir = tempfile::TempDir::new()?;
     let db = Database::open(temp_dir.path())?;
-    let mut vec: RawVec<usize, u64> = RawVec::import(&db, "vec", Version::ONE)?;
+    let mut vec: BytesVec<usize, u64> = BytesVec::import(&db, "vec", Version::ONE)?;
 
     // push
     for i in 0..1_000_000 {

@@ -1,329 +1,187 @@
-use std::path::PathBuf;
-
-use rawdb::{Database, Reader, Region};
-
-use crate::{
-    AnyStoredVec, AnyVec, BoxedVecIterator, Format, GenericStoredVec, Header, IterableVec,
-    PcodecVecValue, Result, TypedVec, VecIndex, Version, variants::ImportOptions,
+use std::{
+    marker::PhantomData,
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
-use super::{BytesVec, CompressedVec, PcoVec, RawVec, ZeroCopyVec};
+use rawdb::{Database, Region};
 
-mod iterator;
+use crate::{Error, Result, VecIndex, VecValue, Version};
 
-pub use iterator::*;
+mod format;
+mod header;
+mod options;
 
-/// Enum wrapper for stored vectors, supporting both raw and compressed formats.
+pub use format::*;
+pub use header::*;
+pub use options::*;
+
+/// Base storage vector with fields common to both ZeroCopyVec and PcodecVec.
 ///
-/// This allows runtime selection between raw formats (ZeroCopy, Bytes) and
-/// compressed formats (Pcodec, LZ4, Zstd) based on data characteristics.
+/// This struct holds the core state that all stored vector implementations share:
+/// region storage, header metadata, pushed values, and length tracking.
 #[derive(Debug, Clone)]
-#[must_use = "Vector should be stored to keep data accessible"]
-pub enum StoredVec<I, T> {
-    Raw(RawVec<I, T>),
-    Compressed(CompressedVec<I, T>),
+pub(crate) struct StoredVec<I, T> {
+    region: Region,
+    header: Header,
+    name: Arc<str>,
+    prev_pushed: Vec<T>,
+    pushed: Vec<T>,
+    prev_stored_len: usize,
+    stored_len: Arc<AtomicUsize>,
+    /// Default is 0
+    saved_stamped_changes: u16,
+    phantom: PhantomData<I>,
 }
 
 impl<I, T> StoredVec<I, T>
 where
     I: VecIndex,
-    T: PcodecVecValue,
+    T: VecValue,
 {
-    pub fn forced_import(
-        db: &Database,
-        name: &str,
-        version: Version,
-        format: Format,
-    ) -> Result<Self> {
-        Self::forced_import_with((db, name, version).into(), format)
-    }
+    /// Import or create a BaseVec from the database.
+    pub fn import(options: ImportOptions, format: Format) -> Result<Self> {
+        let region = options
+            .db
+            .create_region_if_needed(&vec_region_name_with::<I>(options.name))?;
 
-    pub fn forced_import_with(options: ImportOptions, format: Format) -> Result<Self> {
-        if options.version == Version::ZERO {
-            return Err(crate::Error::VersionCannotBeZero);
+        let region_len = region.meta().len();
+        if region_len > 0 && region_len < HEADER_OFFSET {
+            return Err(Error::CorruptedRegion { region_len });
         }
 
-        match format {
-            // Raw formats
-            Format::ZeroCopy => Ok(Self::Raw(RawVec::ZeroCopy(
-                ZeroCopyVec::forced_import_with(options)?,
-            ))),
-            Format::Bytes => Ok(Self::Raw(RawVec::Bytes(BytesVec::forced_import_with(
-                options,
-            )?))),
-            // Compressed formats
-            Format::Pcodec => Ok(Self::Compressed(CompressedVec::Pco(
-                PcoVec::forced_import_with(options)?,
-            ))),
-            Format::LZ4 => todo!("LZ4 compression not yet implemented"),
-            Format::Zstd => todo!("Zstd compression not yet implemented"),
-        }
+        let header = if region_len == 0 {
+            Header::create_and_write(&region, options.version, format)?
+        } else {
+            Header::import_and_verify(&region, options.version, format)?
+        };
+
+        let mut base = Self {
+            region,
+            header,
+            name: Arc::from(options.name),
+            prev_pushed: vec![],
+            pushed: vec![],
+            prev_stored_len: 0,
+            stored_len: Arc::new(AtomicUsize::new(0)),
+            saved_stamped_changes: 0,
+            phantom: PhantomData,
+        };
+
+        base.saved_stamped_changes = options.saved_stamped_changes;
+
+        Ok(base)
     }
 
-    /// Removes this vector and all its associated regions from the database
+    #[inline]
+    pub fn region(&self) -> &Region {
+        &self.region
+    }
+
+    #[inline]
+    pub fn header(&self) -> &Header {
+        &self.header
+    }
+
+    #[inline]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    #[inline]
+    pub fn pushed(&self) -> &[T] {
+        &self.pushed
+    }
+
+    #[inline]
+    pub fn mut_pushed(&mut self) -> &mut Vec<T> {
+        &mut self.pushed
+    }
+
+    #[inline]
+    pub fn prev_pushed(&self) -> &[T] {
+        &self.prev_pushed
+    }
+
+    #[inline]
+    pub fn mut_prev_pushed(&mut self) -> &mut Vec<T> {
+        &mut self.prev_pushed
+    }
+
+    #[inline]
+    pub fn stored_len(&self) -> usize {
+        self.stored_len.load(Ordering::SeqCst)
+    }
+
+    #[inline]
+    pub fn update_stored_len(&self, val: usize) {
+        self.stored_len.store(val, Ordering::SeqCst);
+    }
+
+    #[inline]
+    pub fn prev_stored_len(&self) -> usize {
+        self.prev_stored_len
+    }
+
+    #[inline(always)]
+    pub fn mut_prev_stored_len(&mut self) -> &mut usize {
+        &mut self.prev_stored_len
+    }
+
+    #[inline(always)]
+    pub fn saved_stamped_changes(&self) -> u16 {
+        self.saved_stamped_changes
+    }
+
+    #[inline(always)]
+    pub fn version(&self) -> Version {
+        self.header.vec_version()
+    }
+
+    #[inline]
+    pub fn db(&self) -> Database {
+        self.region.db()
+    }
+
+    #[inline]
+    pub fn db_path(&self) -> PathBuf {
+        self.region.db().path().to_path_buf()
+    }
+
+    #[inline]
+    pub fn mut_header(&mut self) -> &mut Header {
+        &mut self.header
+    }
+
+    pub fn write_header_if_needed(&mut self) -> Result<()> {
+        if self.header.modified() {
+            let r = self.region.clone();
+            self.header.write(&r)?;
+        }
+        Ok(())
+    }
+
+    /// Removes this vector's region from the database
     pub fn remove(self) -> Result<()> {
-        match self {
-            StoredVec::Raw(v) => v.remove(),
-            StoredVec::Compressed(v) => v.remove(),
-        }
+        self.region.remove()?;
+        Ok(())
+    }
+
+    /// Returns the region name for this vector (same as AnyVec::index_to_name)
+    pub fn index_to_name(&self) -> String {
+        vec_region_name(&self.name, I::to_string())
     }
 }
 
-impl<I, T> AnyVec for StoredVec<I, T>
-where
-    I: VecIndex,
-    T: PcodecVecValue,
-{
-    #[inline]
-    fn version(&self) -> Version {
-        match self {
-            StoredVec::Raw(v) => v.version(),
-            StoredVec::Compressed(v) => v.version(),
-        }
-    }
-
-    #[inline]
-    fn index_type_to_string(&self) -> &'static str {
-        I::to_string()
-    }
-
-    #[inline]
-    fn len(&self) -> usize {
-        self.pushed_len() + self.stored_len()
-    }
-
-    fn name(&self) -> &str {
-        match self {
-            StoredVec::Raw(v) => v.name(),
-            StoredVec::Compressed(v) => v.name(),
-        }
-    }
-
-    #[inline]
-    fn value_type_to_size_of(&self) -> usize {
-        size_of::<T>()
-    }
-
-    #[inline]
-    fn region_names(&self) -> Vec<String> {
-        match self {
-            StoredVec::Raw(v) => v.region_names(),
-            StoredVec::Compressed(v) => v.region_names(),
-        }
-    }
+/// Returns the region name for the given vector name.
+pub fn vec_region_name_with<I: VecIndex>(name: &str) -> String {
+    vec_region_name(name, I::to_string())
 }
 
-impl<I, T> AnyStoredVec for StoredVec<I, T>
-where
-    I: VecIndex,
-    T: PcodecVecValue,
-{
-    #[inline]
-    fn db_path(&self) -> PathBuf {
-        match self {
-            StoredVec::Raw(v) => v.db_path(),
-            StoredVec::Compressed(v) => v.db_path(),
-        }
-    }
-
-    #[inline]
-    fn region(&self) -> &Region {
-        match self {
-            StoredVec::Raw(v) => v.region(),
-            StoredVec::Compressed(v) => v.region(),
-        }
-    }
-
-    #[inline]
-    fn db(&self) -> Database {
-        match self {
-            StoredVec::Raw(v) => v.db(),
-            StoredVec::Compressed(v) => v.db(),
-        }
-    }
-
-    #[inline]
-    fn header(&self) -> &Header {
-        match self {
-            StoredVec::Raw(v) => v.header(),
-            StoredVec::Compressed(v) => v.header(),
-        }
-    }
-
-    #[inline]
-    fn mut_header(&mut self) -> &mut Header {
-        match self {
-            StoredVec::Raw(v) => v.mut_header(),
-            StoredVec::Compressed(v) => v.mut_header(),
-        }
-    }
-
-    #[inline]
-    fn saved_stamped_changes(&self) -> u16 {
-        match self {
-            StoredVec::Raw(v) => v.saved_stamped_changes(),
-            StoredVec::Compressed(v) => v.saved_stamped_changes(),
-        }
-    }
-
-    #[inline]
-    fn stored_len(&self) -> usize {
-        match self {
-            StoredVec::Raw(v) => v.stored_len(),
-            StoredVec::Compressed(v) => v.stored_len(),
-        }
-    }
-
-    #[inline]
-    fn real_stored_len(&self) -> usize {
-        match self {
-            StoredVec::Raw(v) => v.real_stored_len(),
-            StoredVec::Compressed(v) => v.real_stored_len(),
-        }
-    }
-
-    fn write(&mut self) -> Result<()> {
-        match self {
-            StoredVec::Raw(v) => v.write(),
-            StoredVec::Compressed(v) => v.write(),
-        }
-    }
-
-    fn serialize_changes(&self) -> Result<Vec<u8>> {
-        match self {
-            StoredVec::Raw(v) => v.serialize_changes(),
-            StoredVec::Compressed(v) => v.serialize_changes(),
-        }
-    }
-}
-
-impl<I, T> GenericStoredVec<I, T> for StoredVec<I, T>
-where
-    I: VecIndex,
-    T: PcodecVecValue,
-{
-    #[inline]
-    fn unchecked_read_at(&self, index: usize, reader: &Reader) -> Result<T> {
-        match self {
-            StoredVec::Raw(v) => v.unchecked_read_at(index, reader),
-            StoredVec::Compressed(v) => v.unchecked_read_at(index, reader),
-        }
-    }
-
-    #[inline]
-    fn read_value_from_bytes(&self, bytes: &[u8]) -> Result<T> {
-        match self {
-            StoredVec::Raw(v) => v.read_value_from_bytes(bytes),
-            StoredVec::Compressed(v) => v.read_value_from_bytes(bytes),
-        }
-    }
-
-    #[inline]
-    fn value_to_bytes(&self, value: &T) -> Vec<u8> {
-        match self {
-            StoredVec::Raw(v) => v.value_to_bytes(value),
-            StoredVec::Compressed(v) => v.value_to_bytes(value),
-        }
-    }
-
-    #[inline]
-    fn pushed(&self) -> &[T] {
-        match self {
-            StoredVec::Raw(v) => v.pushed(),
-            StoredVec::Compressed(v) => v.pushed(),
-        }
-    }
-    #[inline]
-    fn mut_pushed(&mut self) -> &mut Vec<T> {
-        match self {
-            StoredVec::Raw(v) => v.mut_pushed(),
-            StoredVec::Compressed(v) => v.mut_pushed(),
-        }
-    }
-    #[inline]
-    fn prev_pushed(&self) -> &[T] {
-        match self {
-            StoredVec::Raw(v) => v.prev_pushed(),
-            StoredVec::Compressed(v) => v.prev_pushed(),
-        }
-    }
-    #[inline]
-    fn mut_prev_pushed(&mut self) -> &mut Vec<T> {
-        match self {
-            StoredVec::Raw(v) => v.mut_prev_pushed(),
-            StoredVec::Compressed(v) => v.mut_prev_pushed(),
-        }
-    }
-
-    #[inline]
-    #[doc(hidden)]
-    fn update_stored_len(&self, val: usize) {
-        match self {
-            StoredVec::Raw(v) => v.update_stored_len(val),
-            StoredVec::Compressed(v) => v.update_stored_len(val),
-        }
-    }
-    fn prev_stored_len(&self) -> usize {
-        match self {
-            StoredVec::Raw(v) => v.prev_stored_len(),
-            StoredVec::Compressed(v) => v.prev_stored_len(),
-        }
-    }
-    fn mut_prev_stored_len(&mut self) -> &mut usize {
-        match self {
-            StoredVec::Raw(v) => v.mut_prev_stored_len(),
-            StoredVec::Compressed(v) => v.mut_prev_stored_len(),
-        }
-    }
-
-    #[inline]
-    fn truncate_if_needed(&mut self, index: I) -> Result<()> {
-        match self {
-            StoredVec::Raw(v) => v.truncate_if_needed(index),
-            StoredVec::Compressed(v) => v.truncate_if_needed(index),
-        }
-    }
-
-    #[inline]
-    fn reset(&mut self) -> Result<()> {
-        match self {
-            StoredVec::Raw(v) => v.reset(),
-            StoredVec::Compressed(v) => v.reset(),
-        }
-    }
-}
-
-impl<'a, I, T> IntoIterator for &'a StoredVec<I, T>
-where
-    I: VecIndex,
-    T: PcodecVecValue,
-{
-    type Item = T;
-    type IntoIter = StoredVecIterator<'a, I, T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        match self {
-            StoredVec::Compressed(v) => StoredVecIterator::Compressed(v.into_iter()),
-            StoredVec::Raw(v) => StoredVecIterator::Raw(v.into_iter()),
-        }
-    }
-}
-
-impl<I, T> IterableVec<I, T> for StoredVec<I, T>
-where
-    I: VecIndex,
-    T: PcodecVecValue,
-{
-    fn iter(&self) -> BoxedVecIterator<'_, I, T> {
-        Box::new(self.into_iter())
-    }
-}
-
-impl<I, T> TypedVec for StoredVec<I, T>
-where
-    I: VecIndex,
-    T: PcodecVecValue,
-{
-    type I = I;
-    type T = T;
+/// Returns the region name for the given vector name.
+pub fn vec_region_name(name: &str, index: &str) -> String {
+    format!("{name}/{index}")
 }

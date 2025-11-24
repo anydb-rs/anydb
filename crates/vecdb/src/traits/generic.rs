@@ -5,7 +5,7 @@ use rawdb::Reader;
 use zerocopy::{FromBytes, IntoBytes};
 
 use crate::{
-    AnyStoredVec, Error, Result, SIZE_OF_U64, Stamp, Version, likely, vec_region_name_with,
+    AnyStoredVec, Bytes, Error, Result, SIZE_OF_U64, Stamp, Version, likely, vec_region_name_with,
 };
 
 const ONE_KIB: usize = 1024;
@@ -15,7 +15,7 @@ const MAX_CACHE_SIZE: usize = ONE_GIB;
 
 use super::{VecIndex, VecValue};
 
-pub trait GenericStoredVec<I, T>: AnyStoredVec + Send + Sync
+pub trait GenericStoredVec<I, T>: AnyStoredVec
 where
     I: VecIndex,
     T: VecValue,
@@ -627,7 +627,7 @@ where
         let mut bytes = vec![];
         let reader = self.create_reader();
 
-        bytes.extend(self.stamp().as_bytes());
+        bytes.extend(self.stamp().to_bytes());
 
         let prev_stored_len = self.prev_stored_len();
         let stored_len = self.stored_len();

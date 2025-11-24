@@ -5,8 +5,8 @@ use parking_lot::RwLock;
 use rawdb::{Database, Reader, Region};
 
 use crate::{
-    AnyStoredVec, AnyVec, BaseVec, Error, GenericStoredVec, HEADER_OFFSET, Header, Result,
-    TypedVec, VecIndex, VecValue, Version, likely, unlikely, variants::ImportOptions,
+    AnyStoredVec, AnyVec, Error, Format, GenericStoredVec, HEADER_OFFSET, Header, ImportOptions,
+    Result, StoredVec, TypedVec, VecIndex, VecValue, Version, likely, unlikely,
     vec_region_name_with,
 };
 
@@ -28,7 +28,7 @@ const VERSION: Version = Version::TWO;
 #[derive(Debug, Clone)]
 #[must_use = "Vector should be stored to keep data accessible"]
 pub struct CompressedVecInner<I, T, S> {
-    base: BaseVec<I, T>,
+    base: StoredVec<I, T>,
     pages: Arc<RwLock<Pages>>,
     _strategy: PhantomData<S>,
 }
@@ -42,13 +42,13 @@ where
     const PER_PAGE: usize = MAX_UNCOMPRESSED_PAGE_SIZE / Self::SIZE_OF_T;
 
     /// Same as import but will reset the vec under certain errors, so be careful !
-    pub fn forced_import_with(mut options: ImportOptions) -> Result<Self> {
+    pub fn forced_import_with(mut options: ImportOptions, format: Format) -> Result<Self> {
         options.version = options.version + VERSION;
-        let res = Self::import_with(options);
+        let res = Self::import_with(options, format);
         match res {
-            Err(Error::DifferentCompressionMode)
-            | Err(Error::WrongEndian)
+            Err(Error::WrongEndian)
             | Err(Error::WrongLength)
+            | Err(Error::DifferentFormat { .. })
             | Err(Error::DifferentVersion { .. }) => {
                 info!("Resetting {}...", options.name);
                 options
@@ -57,19 +57,19 @@ where
                 options
                     .db
                     .remove_region_if_exists(&Self::pages_region_name_(options.name))?;
-                Self::import_with(options)
+                Self::import_with(options, format)
             }
             _ => res,
         }
     }
 
     #[inline]
-    pub fn import_with(mut options: ImportOptions) -> Result<Self> {
+    pub fn import_with(mut options: ImportOptions, format: Format) -> Result<Self> {
         options.version = options.version + VERSION;
         let db = options.db;
         let name = options.name;
 
-        let base = BaseVec::import(options)?;
+        let base = StoredVec::import(options, format)?;
 
         let pages = Pages::import(db, &Self::pages_region_name_(name))?;
 
@@ -182,11 +182,6 @@ where
     #[inline]
     pub(crate) fn pages(&self) -> &Arc<RwLock<Pages>> {
         &self.pages
-    }
-
-    #[inline]
-    pub(crate) fn per_page() -> usize {
-        Self::PER_PAGE
     }
 }
 
@@ -356,6 +351,10 @@ where
     #[inline]
     fn db(&self) -> Database {
         self.base.db()
+    }
+
+    fn remove(self) -> Result<()> {
+        Self::remove(self)
     }
 }
 
