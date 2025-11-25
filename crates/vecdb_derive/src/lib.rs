@@ -24,14 +24,37 @@ pub fn derive_bytes(input: TokenStream) -> TokenStream {
         }
     };
 
-    let expanded = quote! {
-        impl #impl_generics ::vecdb::Bytes for #struct_name #ty_generics #where_clause {
-            fn to_bytes(&self) -> Vec<u8> {
-                self.0.to_bytes()
-            }
+    // Check if we have generic parameters
+    let has_generics = !generics.params.is_empty();
 
-            fn from_bytes(bytes: &[u8]) -> ::vecdb::Result<Self> {
-                Ok(Self(#inner_type::from_bytes(bytes)?))
+    let expanded = if has_generics {
+        let where_clause = if where_clause.is_some() {
+            quote! { #where_clause #inner_type: ::vecdb::Bytes, }
+        } else {
+            quote! { where #inner_type: ::vecdb::Bytes, }
+        };
+
+        quote! {
+            impl #impl_generics ::vecdb::Bytes for #struct_name #ty_generics #where_clause {
+                fn to_bytes(&self) -> Vec<u8> {
+                    self.0.to_bytes()
+                }
+
+                fn from_bytes(bytes: &[u8]) -> ::vecdb::Result<Self> {
+                    Ok(Self(<#inner_type>::from_bytes(bytes)?))
+                }
+            }
+        }
+    } else {
+        quote! {
+            impl ::vecdb::Bytes for #struct_name {
+                fn to_bytes(&self) -> Vec<u8> {
+                    self.0.to_bytes()
+                }
+
+                fn from_bytes(bytes: &[u8]) -> ::vecdb::Result<Self> {
+                    Ok(Self(<#inner_type>::from_bytes(bytes)?))
+                }
             }
         }
     };
@@ -66,9 +89,9 @@ pub fn derive_pco(input: TokenStream) -> TokenStream {
 
     let expanded = if has_generics {
         let where_clause = if where_clause.is_some() {
-            quote! { #where_clause #inner_type: ::vecdb::Pco, }
+            quote! { #where_clause #inner_type: ::vecdb::Pco + ::vecdb::Bytes, }
         } else {
-            quote! { where #inner_type: ::vecdb::Pco, }
+            quote! { where #inner_type: ::vecdb::Pco + ::vecdb::Bytes, }
         };
 
         quote! {
@@ -78,7 +101,7 @@ pub fn derive_pco(input: TokenStream) -> TokenStream {
                 }
 
                 fn from_bytes(bytes: &[u8]) -> ::vecdb::Result<Self> {
-                    Ok(Self(#inner_type::from_bytes(bytes)?))
+                    Ok(Self(<#inner_type>::from_bytes(bytes)?))
                 }
             }
 
@@ -96,7 +119,7 @@ pub fn derive_pco(input: TokenStream) -> TokenStream {
                 }
 
                 fn from_bytes(bytes: &[u8]) -> ::vecdb::Result<Self> {
-                    Ok(Self(#inner_type::from_bytes(bytes)?))
+                    Ok(Self(<#inner_type>::from_bytes(bytes)?))
                 }
             }
 
