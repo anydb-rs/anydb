@@ -1,4 +1,4 @@
-use crate::{IterableVec, Result, TypedVec, i64_to_usize};
+use crate::{IterableVec, TypedVec, i64_to_usize};
 
 use super::{AnyVec, VecIndex, VecValue};
 
@@ -47,7 +47,11 @@ where
     #[inline]
     #[allow(unused)]
     #[cfg(feature = "serde")]
-    fn collect_range_json_bytes(&self, from: Option<usize>, to: Option<usize>) -> Result<Vec<u8>>
+    fn collect_range_json_bytes(
+        &self,
+        from: Option<usize>,
+        to: Option<usize>,
+    ) -> crate::Result<Vec<u8>>
     where
         T: serde::Serialize,
     {

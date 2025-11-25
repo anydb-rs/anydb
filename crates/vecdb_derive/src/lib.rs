@@ -2,6 +2,43 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{Data, DataStruct, DeriveInput, Fields, parse_macro_input};
 
+/// Derives the `Bytes` trait for single-field tuple structs.
+///
+/// This macro enables custom wrapper types to work with `BytesVec`, `LZ4Vec`, `ZstdVec`,
+/// and other vecdb vector types that require the `Bytes` trait.
+///
+/// # Requirements
+///
+/// - Must be a tuple struct with exactly one field
+/// - The inner type must implement `Bytes`
+/// - Supports generic type parameters
+///
+/// # Generated Implementation
+///
+/// The derive generates a `Bytes` implementation that delegates to the inner type:
+///
+/// ```rust,ignore
+/// impl Bytes for Wrapper<T> where T: Bytes {
+///     fn to_bytes(&self) -> Vec<u8> {
+///         self.0.to_bytes()
+///     }
+///     fn from_bytes(bytes: &[u8]) -> Result<Self> {
+///         Ok(Self(<T>::from_bytes(bytes)?))
+///     }
+/// }
+/// ```
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use vecdb::{Bytes, BytesVec};
+///
+/// #[derive(Bytes)]
+/// struct UserId(u64);
+///
+/// #[derive(Bytes)]
+/// struct Timestamp<T>(T); // Generic types supported
+/// ```
 #[proc_macro_derive(Bytes)]
 pub fn derive_bytes(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -62,6 +99,56 @@ pub fn derive_bytes(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// Derives the `Pco` trait for single-field tuple structs containing numeric types.
+///
+/// This macro enables custom wrapper types to work with `PcoVec` for compressed storage
+/// of numeric data using Pcodec compression.
+///
+/// # Requirements
+///
+/// - Must be a tuple struct with exactly one field
+/// - The inner type must implement `Pco` (numeric types: u16-u64, i16-i64, f32, f64)
+/// - Supports generic type parameters
+///
+/// # Generated Implementation
+///
+/// The derive generates three trait implementations:
+///
+/// 1. `Bytes` - For serialization (same as `#[derive(Bytes)]`)
+/// 2. `Pco` - Specifies the numeric type for compression
+/// 3. `TransparentPco` - Marker trait for transparent wrappers
+///
+/// ```rust,ignore
+/// impl Pco for Wrapper<T> where T: Pco + Bytes {
+///     type NumberType = <T as Pco>::NumberType;
+/// }
+///
+/// impl TransparentPco<<T as Pco>::NumberType> for Wrapper<T>
+/// where T: Pco + Bytes {}
+///
+/// impl Bytes for Wrapper<T> where T: Pco + Bytes {
+///     // ... same as Bytes derive
+/// }
+/// ```
+///
+/// The `NumberType` is automatically propagated from the inner type, ensuring the
+/// wrapper has the same compression characteristics.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use vecdb::{Pco, PcoVec};
+///
+/// #[derive(Pco)]
+/// struct Price(f64);
+///
+/// #[derive(Pco)]
+/// struct NumericWrapper<T>(T); // Generic types supported
+///
+/// // Nested generics work too
+/// #[derive(Pco)]
+/// struct Container<T>(NumericWrapper<T>);
+/// ```
 #[proc_macro_derive(Pco)]
 pub fn derive_pco(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -77,7 +164,7 @@ pub fn derive_pco(input: TokenStream) -> TokenStream {
         _ => {
             return syn::Error::new_spanned(
                 &input.ident,
-                "PcoVecValue can only be derived for single-field tuple structs",
+                "Pco can only be derived for single-field tuple structs",
             )
             .to_compile_error()
             .into();
@@ -88,6 +175,9 @@ pub fn derive_pco(input: TokenStream) -> TokenStream {
     let has_generics = !generics.params.is_empty();
 
     let expanded = if has_generics {
+        // For generic types, we need both Pco and Bytes bounds because:
+        // - Pco trait requires the NumberType
+        // - We call to_bytes/from_bytes methods which require Bytes
         let where_clause = if where_clause.is_some() {
             quote! { #where_clause #inner_type: ::vecdb::Pco + ::vecdb::Bytes, }
         } else {

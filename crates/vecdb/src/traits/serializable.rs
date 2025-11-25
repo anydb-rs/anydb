@@ -1,4 +1,4 @@
-use crate::{CollectableVec, Result, TypedVec};
+use crate::Result;
 
 use super::AnyCollectableVec;
 
@@ -10,11 +10,11 @@ pub trait AnySerializableVec: AnyCollectableVec {
 #[cfg(feature = "serde")]
 impl<V> AnySerializableVec for V
 where
-    V: TypedVec,
-    V: CollectableVec<V::I, V::T>,
+    V: crate::TypedVec,
+    V: crate::CollectableVec<V::I, V::T>,
     V::T: serde::Serialize,
 {
     fn collect_range_json_bytes(&self, from: Option<usize>, to: Option<usize>) -> Result<Vec<u8>> {
-        <Self as CollectableVec<V::I, V::T>>::collect_range_json_bytes(self, from, to)
+        <Self as crate::CollectableVec<V::I, V::T>>::collect_range_json_bytes(self, from, to)
     }
 }
