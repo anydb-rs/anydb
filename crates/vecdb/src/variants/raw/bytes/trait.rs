@@ -38,6 +38,30 @@ impl_bytes_for_numeric!(
     u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize, f32, f64
 );
 
+// Implement Bytes for fixed-size byte arrays
+macro_rules! impl_bytes_for_array {
+    ($($n:expr),*) => {
+        $(
+            impl Bytes for [u8; $n] {
+                #[inline]
+                fn to_bytes(&self) -> Vec<u8> {
+                    self.to_vec()
+                }
+
+                #[inline]
+                fn from_bytes(bytes: &[u8]) -> Result<Self> {
+                    bytes.try_into().map_err(|_| Error::WrongLength)
+                }
+            }
+        )*
+    };
+}
+
+impl_bytes_for_array!(
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
+    27, 28, 29, 30, 31, 32, 33, 64, 65
+);
+
 // Extension trait to add to_bytes() method for slices and Vec
 pub trait BytesExt {
     fn to_bytes(&self) -> Vec<u8>;

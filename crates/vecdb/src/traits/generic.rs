@@ -154,6 +154,16 @@ where
         self.get_pushed_or_read_at(index, &self.create_reader())
     }
 
+    /// Gets value from pushed layer or storage at usize index, unwrapping the result.
+    /// Panics if the read fails or if the value doesn't exist.
+    /// For multiple reads, prefer `get_pushed_or_read_at()` with a reused reader.
+    #[inline]
+    fn get_pushed_or_read_at_unwrap_once(&self, index: usize) -> T {
+        self.get_pushed_or_read_at_once(index)
+            .expect("Failed to read value")
+            .expect("Value doesn't exist")
+    }
+
     /// Gets value from pushed layer only (no disk reads).
     #[inline(always)]
     fn get_pushed_at(&self, index: usize, stored_len: usize) -> Option<&T> {
