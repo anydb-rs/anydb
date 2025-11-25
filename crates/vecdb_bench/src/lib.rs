@@ -8,9 +8,9 @@ mod fjall3_impl;
 mod lmdb_impl;
 mod redb_impl;
 // mod rocksdb_impl;
+mod bytesvec_impl;
+mod pcovec_impl;
 mod runner;
-mod vecdb_compressed_impl;
-mod vecdb_raw_impl;
 // mod vecdb_raw_old_impl;
 
 use database::DatabaseBenchmark;
@@ -19,10 +19,10 @@ use fjall3_impl::*;
 use lmdb_impl::*;
 use redb_impl::*;
 // use rocksdb_impl::*;
+use bytesvec_impl::*;
+use pcovec_impl::*;
 use runner::*;
 pub use runner::{BenchConfig, Database};
-use vecdb_compressed_impl::*;
-use vecdb_raw_impl::*;
 // use vecdb_raw_old_impl::*;
 
 struct AccumulatedTimes {
@@ -227,7 +227,7 @@ pub fn run(configs: &[BenchConfig]) -> Result<()> {
                 Database::PcoVec => {
                     db_benchmarks.push(Box::new(DbBenchmark::<PcoVecBench>::new(&runner)?));
                 }
-                Database::ZeroCopyVec => {
+                Database::BytesVec => {
                     db_benchmarks.push(Box::new(DbBenchmark::<BytesVecBench>::new(&runner)?));
                 }
                 // Database::ZeroCopyVecOld => {

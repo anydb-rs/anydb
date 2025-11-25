@@ -7,7 +7,7 @@ fn main() {
             write_count: 100_000_000,
             databases: vec![
                 Database::PcoVec,
-                Database::ZeroCopyVec,
+                Database::BytesVec,
                 Database::Fjall3,
                 Database::Fjall2,
                 Database::Redb,
@@ -19,7 +19,7 @@ fn main() {
             write_count: 1_000_000_000,
             databases: vec![
                 // Database::ZeroCopyVecOld,
-                Database::ZeroCopyVec,
+                Database::BytesVec,
                 Database::PcoVec,
             ],
             ..Default::default()
