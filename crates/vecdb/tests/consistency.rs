@@ -1,8 +1,12 @@
+//! Generic consistency tests for all vec types.
+
+use rawdb::Database;
 use tempfile::TempDir;
-use vecdb::{
-    AnyStoredVec, BytesVec, Database, EagerVec, Exit, GenericStoredVec, Importable, IterableVec,
-    LZ4Vec, PcoVec, StoredVec, ZeroCopyVec, ZstdVec,
-};
+use vecdb::{EagerVec, Exit, Importable, IterableVec, Result, StoredVec, Version};
+
+// ============================================================================
+// Generic Test Functions
+// ============================================================================
 
 /// Generic test function for mmap write/file read consistency
 fn run_mmap_write_file_read_consistency<V>()
@@ -14,8 +18,7 @@ where
     let exit = Exit::new();
 
     // Create a vec (which uses mmap for writes)
-    let mut vec: EagerVec<V> =
-        EagerVec::forced_import(&db, "test_vec", vecdb::Version::ONE).unwrap();
+    let mut vec: EagerVec<V> = EagerVec::forced_import(&db, "test_vec", Version::ONE).unwrap();
 
     // Write some data
     for i in 0..1000usize {
@@ -55,8 +58,7 @@ where
     let db = Database::open(&temp_dir.path().join("test2.db")).unwrap();
     let exit = Exit::new();
 
-    let mut vec: EagerVec<V> =
-        EagerVec::forced_import(&db, "test_vec", vecdb::Version::ONE).unwrap();
+    let mut vec: EagerVec<V> = EagerVec::forced_import(&db, "test_vec", Version::ONE).unwrap();
 
     // Write, flush, read immediately (mimics the txinindex -> txindex pattern)
     for batch in 0..10 {
@@ -90,55 +92,93 @@ where
 }
 
 // ============================================================================
-// Concrete Test Instances
+// Test instantiation for BytesVec (no feature flag needed)
 // ============================================================================
 
-#[test]
-fn test_bytes_mmap_write_file_read_consistency() {
-    run_mmap_write_file_read_consistency::<BytesVec<usize, u64>>();
+mod bytes {
+    use super::*;
+    use vecdb::BytesVec;
+    type V = BytesVec<usize, u64>;
+
+    #[test]
+    fn mmap_write_file_read_consistency() {
+        run_mmap_write_file_read_consistency::<V>();
+    }
+
+    #[test]
+    fn immediate_read_after_write() {
+        run_immediate_read_after_write::<V>();
+    }
 }
 
-#[test]
-fn test_zerocopy_mmap_write_file_read_consistency() {
-    run_mmap_write_file_read_consistency::<ZeroCopyVec<usize, u64>>();
+// ============================================================================
+// Test instantiation for feature-gated vec types
+// ============================================================================
+
+#[cfg(feature = "zerocopy")]
+mod zerocopy {
+    use super::*;
+    use vecdb::ZeroCopyVec;
+    type V = ZeroCopyVec<usize, u64>;
+
+    #[test]
+    fn mmap_write_file_read_consistency() {
+        run_mmap_write_file_read_consistency::<V>();
+    }
+
+    #[test]
+    fn immediate_read_after_write() {
+        run_immediate_read_after_write::<V>();
+    }
 }
 
-#[test]
-fn test_pco_mmap_write_file_read_consistency() {
-    run_mmap_write_file_read_consistency::<PcoVec<usize, u64>>();
+#[cfg(feature = "pco")]
+mod pco {
+    use super::*;
+    use vecdb::PcoVec;
+    type V = PcoVec<usize, u64>;
+
+    #[test]
+    fn mmap_write_file_read_consistency() {
+        run_mmap_write_file_read_consistency::<V>();
+    }
+
+    #[test]
+    fn immediate_read_after_write() {
+        run_immediate_read_after_write::<V>();
+    }
 }
 
-#[test]
-fn test_lz4_mmap_write_file_read_consistency() {
-    run_mmap_write_file_read_consistency::<LZ4Vec<usize, u64>>();
+#[cfg(feature = "lz4")]
+mod lz4 {
+    use super::*;
+    use vecdb::LZ4Vec;
+    type V = LZ4Vec<usize, u64>;
+
+    #[test]
+    fn mmap_write_file_read_consistency() {
+        run_mmap_write_file_read_consistency::<V>();
+    }
+
+    #[test]
+    fn immediate_read_after_write() {
+        run_immediate_read_after_write::<V>();
+    }
 }
 
-#[test]
-fn test_zstd_mmap_write_file_read_consistency() {
-    run_mmap_write_file_read_consistency::<ZstdVec<usize, u64>>();
-}
+#[cfg(feature = "zstd")]
+mod zstd {
+    use super::*;
+    use vecdb::ZstdVec;
+    type V = ZstdVec<usize, u64>;
 
-#[test]
-fn test_bytes_immediate_read_after_write() {
-    run_immediate_read_after_write::<BytesVec<usize, u64>>();
-}
+    #[test]
+    fn mmap_write_file_read_consistency() {
+        run_mmap_write_file_read_consistency::<V>();
+    }
 
-#[test]
-fn test_zerocopy_immediate_read_after_write() {
-    run_immediate_read_after_write::<ZeroCopyVec<usize, u64>>();
-}
-
-#[test]
-fn test_pco_immediate_read_after_write() {
-    run_immediate_read_after_write::<PcoVec<usize, u64>>();
-}
-
-#[test]
-fn test_lz4_immediate_read_after_write() {
-    run_immediate_read_after_write::<LZ4Vec<usize, u64>>();
-}
-
-#[test]
-fn test_zstd_immediate_read_after_write() {
-    run_immediate_read_after_write::<ZstdVec<usize, u64>>();
+    #[test]
+    fn immediate_read_after_write() {
+        run_immediate_read_after_write::<V>();
+    }
 }
