@@ -20,10 +20,19 @@ pub use iterators::*;
 pub use strategy::*;
 pub use value::*;
 
-/// Compressed storage vector using Zstd for high compression ratios.
+/// Compressed storage using Zstd for maximum general-purpose compression.
 ///
-/// Zstd offers excellent compression ratios with good decompression speed.
-/// Best for scenarios where storage space is more important than compression speed.
+/// Zstd (Zstandard) provides the best compression ratios among general-purpose
+/// algorithms, with good decompression speed. Ideal when storage is expensive.
+///
+/// # Performance Characteristics
+/// - Highest compression ratios (typically 3-5x, better than LZ4)
+/// - Fast decompression (slower compression than LZ4)
+/// - Works well with any data type
+///
+/// # When to Use
+/// - Storage space is expensive
+/// - Can tolerate slower compression (decompression is fast)
 #[derive(Debug, Clone)]
 #[must_use = "Vector should be stored to keep data accessible"]
 pub struct ZstdVec<I, T>(CompressedVecInner<I, T, ZstdStrategy<T>>);

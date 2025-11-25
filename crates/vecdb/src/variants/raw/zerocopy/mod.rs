@@ -21,11 +21,33 @@ pub use iterators::*;
 pub use strategy::*;
 pub use value::*;
 
-/// Raw storage vector that stores values as-is without compression using zerocopy.
+/// Raw storage vector using zerocopy for direct memory mapping in native byte order.
 ///
-/// This is the most basic storage format, writing values directly to disk
-/// with minimal overhead. Uses zerocopy for direct memory mapping without copying.
-/// Ideal for random access patterns and data that doesn't compress well.
+/// Uses the `zerocopy` crate for direct memory-mapped access without copying, providing
+/// the fastest possible performance. Values are stored in **NATIVE byte order**.
+///
+/// Like `BytesVec`, this wraps `RawVecInner` and supports:
+/// - Holes (deleted indices)
+/// - Updated values (modifications to stored data)
+/// - Push/rollback operations
+///
+/// The only difference from `BytesVec` is the serialization strategy:
+/// - `ZeroCopyVec`: Native byte order, faster but not portable
+/// - `BytesVec`: Explicit little-endian, portable across architectures
+///
+/// # Portability Warning
+///
+/// **NOT portable across systems with different endianness.** Data written on a
+/// little-endian system (x86) cannot be read correctly on a big-endian system.
+/// For portable storage, use `BytesVec` instead.
+///
+/// Use `ZeroCopyVec` when:
+/// - Maximum performance is critical
+/// - Data stays on the same architecture
+///
+/// Use `BytesVec` when:
+/// - Cross-platform compatibility is needed
+/// - Sharing data between different architectures
 #[derive(Debug, Clone)]
 #[must_use = "Vector should be stored to keep data accessible"]
 pub struct ZeroCopyVec<I, T>(pub(crate) RawVecInner<I, T, ZeroCopyStrategy<T>>);
@@ -87,11 +109,13 @@ where
     // Zerocopy-specific read methods (return references directly from mmap)
     // ============================================================================
 
-    /// Returns a reference to the value at the given index directly from the memory-mapped file.
-    /// This avoids copying the value and is very efficient for large types.
+    /// Returns a reference to the value directly from the memory-mapped file without copying.
+    /// Very efficient for large types or frequent reads.
     ///
-    /// Note: This only works for stored (not pushed/updated) values.
-    /// Returns None if the index is in holes, beyond stored length, or in updated layer.
+    /// Returns `None` if:
+    /// - Index is marked as a hole (deleted)
+    /// - Index is beyond stored length (might be in pushed layer)
+    /// - Index has an updated value (in the updated map, not on disk)
     #[inline]
     pub fn read_ref<'a>(&self, index: I, reader: &'a Reader) -> Option<&'a T> {
         self.read_ref_at(index.to_usize(), reader)
@@ -120,8 +144,10 @@ where
         self.unchecked_read_ref_at(index, reader)
     }
 
-    /// Returns a reference without bounds checking.
-    /// Safety: Caller must ensure index is within stored bounds and not a hole or updated.
+    /// Returns a reference without bounds or hole checking.
+    ///
+    /// # Safety
+    /// Caller must ensure index is within stored bounds and not in holes or updated map.
     #[inline]
     pub fn unchecked_read_ref_at<'a>(&self, index: usize, reader: &'a Reader) -> Option<&'a T> {
         let offset = (index * Self::SIZE_OF_T) + HEADER_OFFSET;

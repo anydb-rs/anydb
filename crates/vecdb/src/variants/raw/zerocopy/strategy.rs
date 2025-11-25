@@ -2,8 +2,9 @@ use std::marker::PhantomData;
 
 use crate::{Error, Result, ZeroCopyVecValue, variants::raw::RawStrategy};
 
-/// Zerocopy-based serialization strategy.
-/// Uses zerocopy traits for direct memory mapping without copying.
+/// Serialization strategy using zerocopy for native byte order access.
+///
+/// Uses direct memory mapping in native byte order - not portable across endianness.
 #[derive(Debug, Clone, Copy)]
 pub struct ZeroCopyStrategy<T>(PhantomData<T>);
 

@@ -22,11 +22,28 @@ use crate::{
 
 use super::RawVecInner;
 
-/// Raw storage vector that stores values using custom Bytes serialization.
+/// Raw storage vector using explicit byte serialization in little-endian format.
 ///
-/// This is similar to ZeroCopyVec but uses the Bytes trait for serialization
-/// instead of zerocopy. Useful for types that need custom serialization logic
-/// but still want efficient raw storage.
+/// Uses the `Bytes` trait to serialize values with `to_bytes()/from_bytes()` in
+/// **LITTLE-ENDIAN** format, ensuring **portability across different endianness systems**.
+///
+/// Like `ZeroCopyVec`, this wraps `RawVecInner` and supports:
+/// - Holes (deleted indices)
+/// - Updated values (modifications to stored data)
+/// - Push/rollback operations
+///
+/// The only difference from `ZeroCopyVec` is the serialization strategy:
+/// - `BytesVec`: Explicit little-endian, portable across architectures
+/// - `ZeroCopyVec`: Native byte order, faster but not portable
+///
+/// Use `BytesVec` when:
+/// - Sharing data between systems with different endianness
+/// - Cross-platform compatibility is required
+/// - Custom serialization logic is needed
+///
+/// Use `ZeroCopyVec` when:
+/// - Maximum performance is critical
+/// - Data stays on the same architecture
 #[derive(Debug, Clone)]
 #[must_use = "Vector should be stored to keep data accessible"]
 pub struct BytesVec<I, T>(pub(crate) RawVecInner<I, T, BytesStrategy<T>>);

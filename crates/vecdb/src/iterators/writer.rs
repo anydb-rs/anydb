@@ -2,12 +2,19 @@ use std::marker::PhantomData;
 
 use crate::{Error, Formattable, Result, VecValue};
 
-/// A stateful writer that can write one value at a time to a buffer
+/// Stateful writer for streaming values one at a time to a string buffer.
+///
+/// Useful for incremental serialization when memory constraints prevent
+/// materializing entire collections.
 pub trait ValueWriter {
-    /// Write the next value to the buffer, returns false if no more values
+    /// Writes the next value to the buffer in CSV format.
+    ///
+    /// # Errors
+    /// Returns `Error::WrongLength` when no more values are available.
     fn write_next(&mut self, buf: &mut String) -> Result<()>;
 }
 
+/// Iterator-backed writer that formats values as CSV.
 pub struct VecIteratorWriter<'a, I, T> {
     pub iter: Box<dyn Iterator<Item = T> + 'a>,
     pub _phantom: PhantomData<I>,

@@ -1,10 +1,13 @@
 use crate::Result;
 
-/// Trait for serialization strategies used by RawVecInner.
+/// Serialization strategy for raw storage vectors.
+///
+/// Abstracts the serialization mechanism to support both zerocopy-based
+/// memory mapping and custom Bytes trait serialization.
 pub trait RawStrategy<T>: Send + Sync + Clone {
-    /// Deserialize a value from bytes.
+    /// Deserializes a value from its byte representation.
     fn read(bytes: &[u8]) -> Result<T>;
 
-    /// Serialize a value to bytes.
+    /// Serializes a value to its byte representation.
     fn write(value: &T) -> Vec<u8>;
 }

@@ -10,10 +10,15 @@ pub use iterator::*;
 pub type ComputeFrom1<I, T, S1I, S1T> =
     for<'a> fn(I, &mut dyn TypedVecIterator<I = S1I, T = S1T, Item = S1T>) -> Option<T>;
 
-/// Lazily computed vector deriving values from one source vector.
+/// Lazily computed vector deriving values on-the-fly from one source vector.
 ///
-/// Values are computed on-the-fly during iteration using a provided function.
-/// Nothing is stored on disk - all values are recomputed each time they're accessed.
+/// Unlike `EagerVec`, no data is stored on disk. Values are computed during
+/// iteration by applying a function to the source vector's elements. Use when:
+/// - Storage space is limited
+/// - Computation is cheap relative to disk I/O
+/// - Values are only accessed once or infrequently
+///
+/// For frequently accessed derived data, prefer `EagerVec` for better performance.
 #[derive(Clone)]
 pub struct LazyVecFrom1<I, T, S1I, S1T>
 where

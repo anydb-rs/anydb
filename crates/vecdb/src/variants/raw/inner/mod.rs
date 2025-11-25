@@ -23,8 +23,13 @@ pub use strategy::*;
 
 const VERSION: Version = Version::ONE;
 
-/// Inner implementation for raw storage vectors.
-/// Parameterized by serialization strategy to support both zerocopy and custom bytes serialization.
+/// Core implementation for raw storage vectors shared by BytesVec and ZeroCopyVec.
+///
+/// Parameterized by serialization strategy `S` to support different serialization approaches:
+/// - `BytesStrategy`: Explicit little-endian serialization (portable)
+/// - `ZeroCopyStrategy`: Native byte order via zerocopy (fast but not portable)
+///
+/// Provides holes (deleted indices) and updated values tracking for both vec types.
 #[derive(Debug, Clone)]
 #[must_use = "Vector should be stored to keep data accessible"]
 pub struct RawVecInner<I, T, S> {
@@ -46,7 +51,11 @@ where
     /// The size of T in bytes as determined by the strategy.
     pub const SIZE_OF_T: usize = size_of::<T>();
 
-    /// Same as import but will reset the vec under certain errors, so be careful !
+    /// Imports the vector, automatically resetting it if format/version mismatches occur.
+    ///
+    /// # Warning
+    ///
+    /// This will DELETE all existing data on format/version errors. Use with caution.
     pub fn forced_import_with(mut options: ImportOptions, format: Format) -> Result<Self> {
         options.version = options.version + VERSION;
         let res = Self::import_with(options, format);
@@ -124,13 +133,13 @@ where
         &self.prev_holes
     }
 
-    /// Calculate optimal buffer size aligned to SIZE_OF_T
+    /// Returns optimal buffer size for I/O operations, aligned to SIZE_OF_T boundary.
     #[inline]
     pub const fn aligned_buffer_size() -> usize {
         (BUFFER_SIZE / Self::SIZE_OF_T) * Self::SIZE_OF_T
     }
 
-    /// Removes this vector and all its associated regions from the database
+    /// Removes this vector and all associated regions (main region and holes) from the database.
     pub fn remove(self) -> Result<()> {
         let db = self.base.db();
         let holes_region_name = self.holes_region_name();
@@ -147,11 +156,9 @@ where
         Ok(())
     }
 
-    /// Returns the region name for the holes of this vector.
     fn holes_region_name(&self) -> String {
         Self::holes_region_name_with(self.name())
     }
-    /// Returns the region name for the holes of the given vector name.
     fn holes_region_name_with(name: &str) -> String {
         format!("{}_holes", vec_region_name_with::<I>(name))
     }
@@ -203,8 +210,9 @@ where
     // Get or Read Operations (checks all layers including holes/updated)
     // ============================================================================
 
-    /// Gets value from any layer (updated, pushed, or storage) using provided reader.
-    /// Returns None if index is in holes or beyond available data.
+    /// Gets value checking all layers: updated, pushed, and storage.
+    ///
+    /// Returns `None` if index is in holes or beyond length.
     #[inline]
     pub fn get_any_or_read(&self, index: I, reader: &Reader) -> Result<Option<T>> {
         self.get_any_or_read_at(index.to_usize(), reader)

@@ -42,7 +42,11 @@ where
 {
     const PER_PAGE: usize = MAX_UNCOMPRESSED_PAGE_SIZE / Self::SIZE_OF_T;
 
-    /// Same as import but will reset the vec under certain errors, so be careful !
+    /// Imports the vector, automatically resetting it if format/version mismatches occur.
+    ///
+    /// # Warning
+    ///
+    /// This will DELETE all existing data on format/version errors. Use with caution.
     pub fn forced_import_with(mut options: ImportOptions, format: Format) -> Result<Self> {
         options.version = options.version + VERSION;
         let res = Self::import_with(options, format);

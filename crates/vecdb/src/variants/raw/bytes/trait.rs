@@ -1,14 +1,26 @@
 use crate::{Error, Result};
 
-/// Trait for types that can be serialized to/from bytes.
-/// This is an alternative to zerocopy for types that need custom serialization.
+/// Trait for types that can be serialized to/from bytes with explicit byte order.
+///
+/// This trait uses **LITTLE-ENDIAN** byte order for all numeric types, making the data
+/// **portable across different endianness systems** (x86, ARM, etc.). This is the key
+/// difference from `ZeroCopyVec`, which uses native byte order and is not portable.
+///
+/// Use this trait when:
+/// - You need cross-platform compatibility
+/// - You're sharing data between systems with different endianness
+/// - You need custom serialization logic
+///
+/// For maximum performance on a single system, use `ZeroCopyVec` instead.
 pub trait Bytes: Sized {
-    /// Serialize this value to bytes.
-    /// The returned slice must be exactly `SIZE` bytes.
+    /// Serializes this value to bytes.
+    ///
+    /// For numeric types, this uses little-endian byte order (via `to_le_bytes`).
     fn to_bytes(&self) -> Vec<u8>;
 
-    /// Deserialize a value from bytes.
-    /// The input slice must be exactly `SIZE` bytes.
+    /// Deserializes a value from bytes.
+    ///
+    /// For numeric types, this uses little-endian byte order (via `from_le_bytes`).
     fn from_bytes(bytes: &[u8]) -> Result<Self>;
 }
 
@@ -27,7 +39,7 @@ macro_rules! impl_bytes_for_numeric {
                     let arr: [u8; std::mem::size_of::<$t>()] = bytes
                         .try_into()
                         .map_err(|_| Error::WrongLength)?;
-                    Ok(<$t>::from_ne_bytes(arr))
+                    Ok(<$t>::from_le_bytes(arr))
                 }
             }
         )*

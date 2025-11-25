@@ -22,11 +22,23 @@ use crate::{
     VecValue, Version,
 };
 
-/// Stored vector with eager computation methods for deriving values from other vectors.
+/// Wrapper for computing and storing derived values from source vectors.
 ///
-/// Wraps any stored vec type and provides various computation methods (transform, arithmetic operations,
-/// moving averages, etc.) to eagerly compute and persist derived data. Results are stored on disk
-/// and incrementally updated when source data changes.
+/// `EagerVec` wraps any `StoredVec` and provides computation methods to derive and persist
+/// calculated values. Results are stored on disk and automatically recomputed when:
+/// - Source data versions change
+/// - The vector's computation logic version changes
+///
+/// # Key Features
+/// - **Incremental Updates**: Only computes missing values, not the entire dataset
+/// - **Automatic Versioning**: Detects stale data and recomputes automatically
+/// - **Batched Writes**: Flushes periodically to prevent excessive memory usage
+///
+/// # Common Operations
+/// - Transformations: `compute_transform()`, `compute_range()`
+/// - Arithmetic: `compute_add()`, `compute_subtract()`, `compute_multiply()`, `compute_divide()`
+/// - Moving statistics: `compute_sma()`, `compute_ema()`, `compute_sum()`, `compute_max()`, `compute_min()`
+/// - Lookback calculations: `compute_change()`, `compute_percentage_change()`
 #[derive(Debug, Clone)]
 #[must_use = "Vector should be stored to keep data accessible"]
 pub struct EagerVec<V>(V);

@@ -2,12 +2,19 @@ use std::collections::VecDeque;
 
 use crate::{BoxedVecIterator, VecIndex, VecValue};
 
-/// Windowed lookback access - either using a ring buffer or direct access
+/// Strategy for accessing historical values within a sliding window.
+///
+/// Automatically selects between buffered (ring buffer) or direct access
+/// based on the number of items to process relative to the window size.
 pub enum Lookback<'a, I: VecIndex, T: VecValue> {
+    /// Ring buffer strategy for many items (when items_to_process > window).
+    /// Maintains a fixed-size buffer for efficient sequential access.
     Buffer {
         window: usize,
         buf: VecDeque<T>,
     },
+    /// Direct iterator access for few items (when items_to_process <= window).
+    /// More efficient when random access to recent history is sufficient.
     DirectAccess {
         window: usize,
         iter: BoxedVecIterator<'a, I, T>,
@@ -15,9 +22,9 @@ pub enum Lookback<'a, I: VecIndex, T: VecValue> {
 }
 
 impl<'a, I: VecIndex, T: VecValue> Lookback<'a, I, T> {
-    /// Get the value at lookback position, returning default if not enough history.
-    /// For Buffer: returns front of buffer if full (keeps window), otherwise returns default.
-    /// For DirectAccess: uses get_at_unwrap at index-window.
+    /// Retrieves the value at the lookback position (index - window).
+    ///
+    /// Returns `default` if insufficient history exists (index < window).
     pub fn get_at_lookback(&mut self, index: usize, default: T) -> T
     where
         T: Default + Clone,
@@ -37,9 +44,10 @@ impl<'a, I: VecIndex, T: VecValue> Lookback<'a, I, T> {
         }
     }
 
-    /// Get the value at lookback position and add current value to buffer.
-    /// For Buffer: pops front if at capacity, then pushes current value.
-    /// Returns the lookback value or default if not enough history.
+    /// Retrieves the lookback value and advances the window with the current value.
+    ///
+    /// For Buffer strategy: maintains a sliding window by popping old values when full.
+    /// For DirectAccess: directly accesses the historical position.
     pub fn get_and_push(&mut self, index: usize, current: T, default: T) -> T
     where
         T: Clone,
@@ -61,8 +69,9 @@ impl<'a, I: VecIndex, T: VecValue> Lookback<'a, I, T> {
         }
     }
 
-    /// Push current value and maintain window size for Buffer strategy.
-    /// For DirectAccess: no-op.
+    /// Advances the window with the current value, maintaining the configured window size.
+    ///
+    /// Only affects Buffer strategy; DirectAccess is unmodified.
     pub fn push_and_maintain(&mut self, current: T)
     where
         T: Clone,

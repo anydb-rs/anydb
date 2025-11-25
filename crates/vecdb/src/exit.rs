@@ -24,6 +24,8 @@ impl Exit {
         }
     }
 
+    /// Registers a callback to be executed during shutdown.
+    /// Callbacks are executed in registration order before the program exits.
     pub fn register_cleanup<F>(&self, callback: F)
     where
         F: Fn() + Send + Sync + 'static,
@@ -31,11 +33,12 @@ impl Exit {
         self.cleanup_callbacks.lock().push(Box::new(callback));
     }
 
+    /// Sets the Ctrl-C signal handler for graceful shutdown.
     ///
-    /// Only one handler throughout the program (and among all crates) can be set at once
-    ///
-    /// Make sure that no other crate sets one
-    ///
+    /// # Panics
+    /// Only one Ctrl-C handler can be registered per process. This will panic if:
+    /// - Called multiple times
+    /// - Another crate has already registered a Ctrl-C handler
     pub fn set_ctrlc_handler(&self) {
         let lock_copy = self.lock.clone();
         let callbacks = self.cleanup_callbacks.clone();
@@ -59,6 +62,8 @@ impl Exit {
         .expect("Error setting Ctrl-C handler");
     }
 
+    /// Acquires a read lock to protect a critical section from shutdown.
+    /// The shutdown handler will wait for all locks to be released.
     pub fn lock(&self) -> RwLockReadGuard<'_, ()> {
         self.lock.read()
     }

@@ -19,9 +19,9 @@ pub use format::*;
 pub use header::*;
 pub use options::*;
 
-/// Base storage vector with fields common to both ZeroCopyVec and PcodecVec.
+/// Base storage vector with fields common to all stored vector implementations.
 ///
-/// This struct holds the core state that all stored vector implementations share:
+/// Holds the core state shared across BytesVec, ZeroCopyVec, and compressed variants:
 /// region storage, header metadata, pushed values, and length tracking.
 #[derive(Debug, Clone)]
 pub(crate) struct BaseVec<I, T> {

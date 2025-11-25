@@ -6,21 +6,21 @@ pub enum Format {
     // ============================================================================
     // Raw formats (uncompressed)
     // ============================================================================
-    /// Bytes raw storage using custom Bytes trait serialization.
-    /// Best for types that need custom serialization but still want raw storage.
+    /// Explicit byte serialization with little-endian byte order.
+    /// **PORTABLE** across different endianness systems. Uses custom Bytes trait.
     Bytes,
-    /// ZeroCopy raw storage using zerocopy for direct memory mapping.
-    /// Best for random access and types that implement zerocopy traits.
+    /// Direct memory mapping with native byte order via zerocopy.
+    /// **NOT PORTABLE** - fastest but endianness-dependent. Best for random access.
     ZeroCopy,
 
     // ============================================================================
     // Compressed formats
     // ============================================================================
-    /// Pcodec compressed storage (best for numerical data with sequential access).
+    /// Pcodec compression optimized for numeric sequences (best compression for numbers).
     Pco = 64,
-    /// LZ4 compressed storage (fast compression/decompression).
+    /// LZ4 compression (fastest compression/decompression, moderate ratio).
     LZ4 = 65,
-    /// Zstd compressed storage (high compression ratio).
+    /// Zstd compression (highest compression ratio, slower).
     Zstd = 66,
 }
 

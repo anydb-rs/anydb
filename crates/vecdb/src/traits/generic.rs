@@ -136,6 +136,25 @@ where
         self.get_pushed_or_read(index, &self.create_reader())
     }
 
+    /// Gets value from pushed layer or storage using provided reader, unwrapping the result.
+    /// Panics if the read fails or if the value doesn't exist.
+    #[inline]
+    fn get_pushed_or_read_unwrap(&self, index: I, reader: &Reader) -> T {
+        self.get_pushed_or_read(index, reader)
+            .expect("Failed to read value")
+            .expect("Value doesn't exist")
+    }
+
+    /// Gets value from pushed layer or storage, unwrapping the result.
+    /// Panics if the read fails or if the value doesn't exist.
+    /// For multiple reads, prefer `get_pushed_or_read_unwrap()` with a reused reader.
+    #[inline]
+    fn get_pushed_or_read_unwrap_once(&self, index: I) -> T {
+        self.get_pushed_or_read_once(index)
+            .expect("Failed to read value")
+            .expect("Value doesn't exist")
+    }
+
     /// Gets value from pushed layer or storage at usize index using provided reader.
     /// Does not check the updated layer.
     #[inline(always)]
@@ -154,9 +173,18 @@ where
         self.get_pushed_or_read_at(index, &self.create_reader())
     }
 
+    /// Gets value from pushed layer or storage at usize index using provided reader, unwrapping the result.
+    /// Panics if the read fails or if the value doesn't exist.
+    #[inline]
+    fn get_pushed_or_read_at_unwrap(&self, index: usize, reader: &Reader) -> T {
+        self.get_pushed_or_read_at(index, reader)
+            .expect("Failed to read value")
+            .expect("Value doesn't exist")
+    }
+
     /// Gets value from pushed layer or storage at usize index, unwrapping the result.
     /// Panics if the read fails or if the value doesn't exist.
-    /// For multiple reads, prefer `get_pushed_or_read_at()` with a reused reader.
+    /// For multiple reads, prefer `get_pushed_or_read_at_unwrap()` with a reused reader.
     #[inline]
     fn get_pushed_or_read_at_unwrap_once(&self, index: usize) -> T {
         self.get_pushed_or_read_at_once(index)
@@ -175,15 +203,19 @@ where
     // ============================================================================
     // Length Operations
     // ============================================================================
+    // Vectors maintain two layers: "stored" (on disk) and "pushed" (in memory).
+    // This allows buffering writes before flushing, improving performance.
 
     /// Returns the length including both stored and pushed (uncommitted) values.
+    ///
     /// Named `len_` to avoid conflict with `AnyVec::len`.
+    /// Total length = stored_len() + pushed_len()
     #[inline]
     fn len_(&self) -> usize {
         self.stored_len() + self.pushed_len()
     }
 
-    /// Returns the number of pushed (uncommitted) values.
+    /// Returns the number of pushed (uncommitted) values in the memory buffer.
     #[inline]
     fn pushed_len(&self) -> usize {
         self.pushed().len()
@@ -281,6 +313,9 @@ where
     }
 
     /// Returns true if the pushed cache has reached the batch limit (~1GiB).
+    ///
+    /// When this limit is reached, the caller should flush to disk before continuing.
+    /// This prevents excessive memory usage during bulk operations.
     #[inline]
     fn batch_limit_reached(&self) -> bool {
         self.pushed_len() * Self::SIZE_OF_T >= MAX_CACHE_SIZE
@@ -308,7 +343,7 @@ where
 
     /// Default truncate implementation handling pushed layer only.
     /// Returns true if stored_len needs to be updated to `index`.
-    /// ZeroCopyVec overrides truncate_if_needed_at to also handle holes/updated.
+    /// RawVecInner overrides truncate_if_needed_at to also handle holes/updated.
     #[doc(hidden)]
     fn default_truncate_if_needed_at(&mut self, index: usize) -> Result<bool> {
         let stored_len = self.stored_len();
@@ -379,7 +414,7 @@ where
     }
 
     /// Default reset_unsaved implementation - clears pushed layer only.
-    /// ZeroCopyVec overrides to also clear holes/updated.
+    /// RawVecInner overrides to also clear holes/updated.
     #[doc(hidden)]
     fn default_reset_unsaved(&mut self) {
         self.mut_pushed().clear();
@@ -440,7 +475,7 @@ where
 
     /// Default implementation of stamped_flush_with_changes.
     /// Handles file management, serialization, flush, and base prev_ field updates.
-    /// ZeroCopyVec overrides stamped_flush_with_changes to also update prev_holes/prev_updated.
+    /// RawVecInner overrides stamped_flush_with_changes to also update prev_holes/prev_updated.
     #[doc(hidden)]
     fn default_stamped_flush_with_changes(&mut self, stamp: Stamp) -> Result<()> {
         let saved_stamped_changes = self.saved_stamped_changes();
@@ -499,7 +534,7 @@ where
 
     /// Default implementation of rollback_before.
     /// Handles the rollback loop and base prev_ field updates.
-    /// ZeroCopyVec overrides rollback_before to also update prev_holes/prev_updated.
+    /// RawVecInner overrides rollback_before to also update prev_holes/prev_updated.
     #[doc(hidden)]
     fn default_rollback_before(&mut self, stamp: Stamp) -> Result<Stamp> {
         if self.stamp() < stamp {
@@ -554,14 +589,14 @@ where
     }
 
     /// Restores a truncated value during deserialization.
-    /// Default implementation pushes it back. ZeroCopyVec overrides to insert into updated map.
+    /// Default implementation pushes it back. RawVecInner overrides to insert into updated map.
     #[doc(hidden)]
     fn restore_truncated_value(&mut self, _index: usize, value: T) {
         self.push(value);
     }
 
     /// Default implementation of deserialize_then_undo_changes.
-    /// Returns the position after parsing the base data so ZeroCopyVec can continue.
+    /// Returns the position after parsing the base data so RawVecInner can continue.
     #[doc(hidden)]
     fn default_deserialize_then_undo_changes(&mut self, bytes: &[u8]) -> Result<usize> {
         let mut pos = 0;
@@ -631,7 +666,7 @@ where
     }
 
     /// Deserializes change data and undoes those changes.
-    /// Base implementation handles pushed and truncated data. ZeroCopyVec overrides for holes/updated.
+    /// Base implementation handles pushed and truncated data. RawVecInner overrides for holes/updated.
     fn deserialize_then_undo_changes(&mut self, bytes: &[u8]) -> Result<()> {
         self.default_deserialize_then_undo_changes(bytes)?;
         Ok(())
@@ -643,7 +678,7 @@ where
 
     /// Gets a stored value for serialization purposes.
     /// Default implementation reads directly from disk.
-    /// ZeroCopyVec overrides to check prev_updated first.
+    /// RawVecInner overrides to check prev_updated first.
     #[doc(hidden)]
     fn get_stored_value_for_serialization(&self, index: usize, reader: &Reader) -> Result<T> {
         self.unchecked_read_at(index, reader)
@@ -652,7 +687,7 @@ where
     /// Default implementation of serialize_changes.
     /// Serializes: stamp, prev_stored_len, stored_len, truncated_count, truncated_values,
     /// prev_pushed, pushed.
-    /// ZeroCopyVec calls this and appends holes/updated data.
+    /// RawVecInner calls this and appends holes/updated data.
     #[doc(hidden)]
     fn default_serialize_changes(&self) -> Result<Vec<u8>> {
         let mut bytes = vec![];
