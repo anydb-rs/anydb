@@ -1,7 +1,7 @@
 use crate::Result;
 
 /// Trait for serialization strategies used by RawVecInner.
-pub trait RawStrategy<T>: Send + Sync {
+pub trait RawStrategy<T>: Send + Sync + Clone {
     /// Deserialize a value from bytes.
     fn read(bytes: &[u8]) -> Result<T>;
 

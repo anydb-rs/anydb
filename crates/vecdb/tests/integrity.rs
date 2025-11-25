@@ -1,3 +1,7 @@
+//! Data integrity tests for RawVec types (BytesVec and ZeroCopyVec).
+//!
+//! Tests verify that rollback + flush + reopen preserves data correctly.
+
 use rawdb::Database;
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -5,16 +9,9 @@ use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, BytesVec, CollectableVec, GenericStoredVec, ImportOptions, Importable,
-    RawVecInner, Reader, Result, Stamp, StoredVec, Version, ZeroCopyVec,
+    AnyStoredVec, CollectableVec, GenericStoredVec, ImportOptions, Importable, RawStrategy,
+    RawVecInner, Reader, Result, Stamp, StoredVec, Version,
 };
-
-/// Helper to create a temporary test database
-pub fn setup_test_db() -> Result<(Database, TempDir)> {
-    let temp_dir = TempDir::new()?;
-    let db = Database::open(temp_dir.path())?;
-    Ok((db, temp_dir))
-}
 
 // ============================================================================
 // Traits for Raw Vec Types (supporting holes/updates)
@@ -42,24 +39,11 @@ pub trait IntegrityOps {
     fn create_reader(&self) -> Reader;
 }
 
-// ============================================================================
-// Implementations for ZeroCopyVec
-// ============================================================================
-
-impl IntegrityVec for ZeroCopyVec<usize, u32> {
-    fn import_with_changes<'a>(
-        db: &'a Database,
-        name: &'a str,
-        changes: u16,
-    ) -> Result<(Self, ImportOptions<'a>)> {
-        let mut options: ImportOptions = (db, name, Version::TWO).into();
-        options = options.with_saved_stamped_changes(changes);
-        let vec = Self::forced_import_with(options)?;
-        Ok((vec, options))
-    }
-}
-
-impl IntegrityOps for RawVecInner<usize, u32, vecdb::ZeroCopyStrategy<u32>> {
+// Generic implementations for any RawVecInner strategy
+impl<S> IntegrityOps for RawVecInner<usize, u32, S>
+where
+    S: RawStrategy<u32>,
+{
     fn update(&mut self, index: usize, value: u32) -> Result<()> {
         RawVecInner::update(self, index, value)
     }
@@ -96,58 +80,11 @@ impl IntegrityOps for RawVecInner<usize, u32, vecdb::ZeroCopyStrategy<u32>> {
     }
 }
 
-// ============================================================================
-// Implementations for BytesVec
-// ============================================================================
-
-impl IntegrityVec for BytesVec<usize, u32> {
-    fn import_with_changes<'a>(
-        db: &'a Database,
-        name: &'a str,
-        changes: u16,
-    ) -> Result<(Self, ImportOptions<'a>)> {
-        let mut options: ImportOptions = (db, name, Version::TWO).into();
-        options = options.with_saved_stamped_changes(changes);
-        let vec = Self::forced_import_with(options)?;
-        Ok((vec, options))
-    }
-}
-
-impl IntegrityOps for RawVecInner<usize, u32, vecdb::BytesStrategy<u32>> {
-    fn update(&mut self, index: usize, value: u32) -> Result<()> {
-        RawVecInner::update(self, index, value)
-    }
-
-    fn take(&mut self, index: usize) -> Result<Option<u32>> {
-        let reader = self.create_reader();
-        let result = RawVecInner::take(self, index, &reader);
-        drop(reader);
-        result
-    }
-
-    fn stamped_flush_with_changes(&mut self, stamp: Stamp) -> Result<()> {
-        GenericStoredVec::stamped_flush_with_changes(self, stamp)
-    }
-
-    fn stamp(&self) -> Stamp {
-        AnyStoredVec::stamp(self)
-    }
-
-    fn collect(&self) -> Vec<u32> {
-        CollectableVec::collect(self)
-    }
-
-    fn collect_holed(&self) -> Result<Vec<Option<u32>>> {
-        RawVecInner::collect_holed(self)
-    }
-
-    fn get_any_or_read(&self, index: usize, reader: &Reader) -> Result<Option<u32>> {
-        RawVecInner::get_any_or_read(self, index, reader)
-    }
-
-    fn create_reader(&self) -> Reader {
-        RawVecInner::create_reader(self)
-    }
+/// Helper to create a temporary test database
+pub fn setup_test_db() -> Result<(Database, TempDir)> {
+    let temp_dir = TempDir::new()?;
+    let db = Database::open(temp_dir.path())?;
+    Ok((db, temp_dir))
 }
 
 /// Compute SHA-256 hash of the vecdb data file and regions directory
@@ -520,15 +457,56 @@ where
 }
 
 // ============================================================================
-// Concrete Test Instances
+// Test instantiation for BytesVec (no feature flag needed)
 // ============================================================================
 
-#[test]
-fn test_zerocopy_data_integrity_rollback_flush_reopen() -> Result<(), Box<dyn std::error::Error>> {
-    run_data_integrity_rollback_flush_reopen::<ZeroCopyVec<usize, u32>>()
+mod bytes {
+    use super::*;
+    use vecdb::BytesVec;
+
+    impl IntegrityVec for BytesVec<usize, u32> {
+        fn import_with_changes<'a>(
+            db: &'a Database,
+            name: &'a str,
+            changes: u16,
+        ) -> Result<(Self, ImportOptions<'a>)> {
+            let mut options: ImportOptions = (db, name, Version::TWO).into();
+            options = options.with_saved_stamped_changes(changes);
+            let vec = Self::forced_import_with(options)?;
+            Ok((vec, options))
+        }
+    }
+
+    #[test]
+    fn data_integrity_rollback_flush_reopen() -> Result<(), Box<dyn std::error::Error>> {
+        run_data_integrity_rollback_flush_reopen::<BytesVec<usize, u32>>()
+    }
 }
 
-#[test]
-fn test_bytes_data_integrity_rollback_flush_reopen() -> Result<(), Box<dyn std::error::Error>> {
-    run_data_integrity_rollback_flush_reopen::<BytesVec<usize, u32>>()
+// ============================================================================
+// Test instantiation for ZeroCopyVec (with zerocopy feature)
+// ============================================================================
+
+#[cfg(feature = "zerocopy")]
+mod zerocopy {
+    use super::*;
+    use vecdb::ZeroCopyVec;
+
+    impl IntegrityVec for ZeroCopyVec<usize, u32> {
+        fn import_with_changes<'a>(
+            db: &'a Database,
+            name: &'a str,
+            changes: u16,
+        ) -> Result<(Self, ImportOptions<'a>)> {
+            let mut options: ImportOptions = (db, name, Version::TWO).into();
+            options = options.with_saved_stamped_changes(changes);
+            let vec = Self::forced_import_with(options)?;
+            Ok((vec, options))
+        }
+    }
+
+    #[test]
+    fn data_integrity_rollback_flush_reopen() -> Result<(), Box<dyn std::error::Error>> {
+        run_data_integrity_rollback_flush_reopen::<ZeroCopyVec<usize, u32>>()
+    }
 }

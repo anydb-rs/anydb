@@ -9,11 +9,7 @@
 use rawdb::Database;
 use std::ops::DerefMut;
 use tempfile::TempDir;
-use vecdb::{
-    AnyStoredVec, BytesStrategy, BytesVec, CollectableVec, EagerVec, GenericStoredVec,
-    ImportOptions, Importable, LZ4Vec, PcoVec, RawVecInner, Result, Stamp, StoredVec, Version,
-    ZeroCopyStrategy, ZeroCopyVec, ZstdVec,
-};
+use vecdb::{AnyStoredVec, CollectableVec, GenericStoredVec, ImportOptions, Importable, Result, Stamp, StoredVec, Version};
 
 // ============================================================================
 // Test Setup
@@ -351,6 +347,7 @@ mod generic_rollback {
     // Test modules for each vec type
     mod bytes {
         use super::*;
+        use vecdb::BytesVec;
         type V = BytesVec<usize, u32>;
 
         #[test]
@@ -391,8 +388,10 @@ mod generic_rollback {
         }
     }
 
+    #[cfg(feature = "zerocopy")]
     mod zerocopy {
         use super::*;
+        use vecdb::ZeroCopyVec;
         type V = ZeroCopyVec<usize, u32>;
 
         #[test]
@@ -433,8 +432,10 @@ mod generic_rollback {
         }
     }
 
+    #[cfg(feature = "pco")]
     mod pco {
         use super::*;
+        use vecdb::PcoVec;
         type V = PcoVec<usize, u32>;
 
         #[test]
@@ -475,8 +476,10 @@ mod generic_rollback {
         }
     }
 
+    #[cfg(feature = "lz4")]
     mod lz4 {
         use super::*;
+        use vecdb::LZ4Vec;
         type V = LZ4Vec<usize, u32>;
 
         #[test]
@@ -517,8 +520,10 @@ mod generic_rollback {
         }
     }
 
+    #[cfg(feature = "zstd")]
     mod zstd {
         use super::*;
+        use vecdb::ZstdVec;
         type V = ZstdVec<usize, u32>;
 
         #[test]
@@ -559,8 +564,10 @@ mod generic_rollback {
         }
     }
 
+    #[cfg(feature = "zerocopy")]
     mod eager_zerocopy {
         use super::*;
+        use vecdb::{EagerVec, ZeroCopyVec};
         type V = EagerVec<ZeroCopyVec<usize, u32>>;
 
         #[test]
@@ -601,8 +608,10 @@ mod generic_rollback {
         }
     }
 
+    #[cfg(feature = "pco")]
     mod eager_pco {
         use super::*;
+        use vecdb::{EagerVec, PcoVec};
         type V = EagerVec<PcoVec<usize, u32>>;
 
         #[test]
@@ -687,6 +696,10 @@ mod raw_rollback {
     // Implementations for ZeroCopyVec
     // ============================================================================
 
+    #[cfg(feature = "zerocopy")]
+    use vecdb::{RawVecInner, ZeroCopyStrategy, ZeroCopyVec};
+
+    #[cfg(feature = "zerocopy")]
     impl RollbackVec for ZeroCopyVec<usize, u32> {
         fn import_with_changes<'a>(
             db: &'a Database,
@@ -700,6 +713,7 @@ mod raw_rollback {
         }
     }
 
+    #[cfg(feature = "zerocopy")]
     impl RollbackOps for RawVecInner<usize, u32, ZeroCopyStrategy<u32>> {
         fn update(&mut self, index: usize, value: u32) -> Result<()> {
             RawVecInner::update(self, index, value)
@@ -752,6 +766,10 @@ mod raw_rollback {
     // ============================================================================
     // Implementations for BytesVec
     // ============================================================================
+
+    use vecdb::{BytesStrategy, BytesVec};
+    #[cfg(not(feature = "zerocopy"))]
+    use vecdb::RawVecInner;
 
     impl RollbackVec for BytesVec<usize, u32> {
         fn import_with_changes<'a>(
@@ -1392,8 +1410,10 @@ mod raw_rollback {
     // Test instantiation for each raw vec type
     // ============================================================================
 
+    #[cfg(feature = "zerocopy")]
     mod zerocopy {
         use super::*;
+        use vecdb::ZeroCopyVec;
         type V = ZeroCopyVec<usize, u32>;
 
         #[test]
@@ -1464,6 +1484,7 @@ mod raw_rollback {
 
     mod bytes {
         use super::*;
+        use vecdb::BytesVec;
         type V = BytesVec<usize, u32>;
 
         #[test]
@@ -1735,8 +1756,10 @@ mod integration {
         Ok(())
     }
 
+    #[cfg(feature = "zerocopy")]
     mod zerocopy {
         use super::*;
+        use vecdb::ZeroCopyVec;
         type V = ZeroCopyVec<usize, u32>;
 
         #[test]
@@ -1747,6 +1770,7 @@ mod integration {
 
     mod bytes {
         use super::*;
+        use vecdb::BytesVec;
         type V = BytesVec<usize, u32>;
 
         #[test]

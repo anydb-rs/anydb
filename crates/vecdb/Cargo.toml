@@ -12,6 +12,16 @@ rust-version.workspace = true
 build = "build.rs"
 
 [features]
+default = [
+    "derive",
+    "lz4",
+    "pco",
+    "serde",
+    "serde_json",
+    "sonic-rs",
+    "zerocopy",
+    "zstd"
+]
 derive = ["vecdb_derive"]
 lz4 = ["dep:lz4_flex"]
 pco = ["dep:pco"]
@@ -29,6 +39,7 @@ rawdb = { workspace = true }
 serde_json = { version = "1.0.145", features = ["float_roundtrip"], optional = true }
 thiserror = "2"
 vecdb_derive = { workspace = true, optional = true }
+
 # [optional-dependencies]
 lz4_flex = { version = "0.12.0", default-features = false, optional = true }
 pco = { version = "0.4.7", optional = true }
@@ -41,6 +52,14 @@ zstd = { version = "0.13.3", optional = true }
 sha2 = "0.10"
 tempfile = { workspace = true }
 walkdir = "2.5"
+
+[[example]]
+name = "zerocopy"
+required-features = ["zerocopy"]
+
+[[example]]
+name = "pcodec"
+required-features = ["pco"]
 
 [package.metadata.docs.rs]
 all-features = true

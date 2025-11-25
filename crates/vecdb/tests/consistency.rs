@@ -2,7 +2,9 @@
 
 use rawdb::Database;
 use tempfile::TempDir;
-use vecdb::{EagerVec, Exit, Importable, IterableVec, Result, StoredVec, Version};
+use vecdb::{
+    AnyStoredVec, EagerVec, Exit, GenericStoredVec, Importable, IterableVec, StoredVec, Version,
+};
 
 // ============================================================================
 // Generic Test Functions
