@@ -401,6 +401,7 @@ mod clean_iter {
         }
     }
 
+    #[cfg(feature = "zerocopy")]
     mod zerocopy {
         use super::*;
         use vecdb::ZeroCopyVec;
@@ -472,6 +473,7 @@ mod clean_iter {
         }
     }
 
+    #[cfg(feature = "pco")]
     mod pco {
         use super::*;
         use vecdb::PcoVec;
@@ -543,6 +545,7 @@ mod clean_iter {
         }
     }
 
+    #[cfg(feature = "lz4")]
     mod lz4 {
         use super::*;
         use vecdb::LZ4Vec;
@@ -614,6 +617,7 @@ mod clean_iter {
         }
     }
 
+    #[cfg(feature = "zstd")]
     mod zstd {
         use super::*;
         use vecdb::ZstdVec;
@@ -689,6 +693,7 @@ mod clean_iter {
     // EagerVec Tests (wrapping different underlying vec types)
     // ============================================================================
 
+    #[cfg(feature = "zerocopy")]
     mod eager_zerocopy {
         use super::*;
         use vecdb::{EagerVec, ZeroCopyVec};
@@ -760,6 +765,7 @@ mod clean_iter {
         }
     }
 
+    #[cfg(feature = "pco")]
     mod eager_pco {
         use super::*;
         use vecdb::{EagerVec, PcoVec};
@@ -1178,6 +1184,7 @@ mod dirty_iter {
         }
     }
 
+    #[cfg(feature = "zerocopy")]
     mod zerocopy {
         use super::*;
         use vecdb::ZeroCopyVec;
@@ -1233,6 +1240,7 @@ mod dirty_iter {
         }
     }
 
+    #[cfg(feature = "pco")]
     mod pco {
         use super::*;
         use vecdb::PcoVec;
@@ -1288,6 +1296,7 @@ mod dirty_iter {
         }
     }
 
+    #[cfg(feature = "lz4")]
     mod lz4 {
         use super::*;
         use vecdb::LZ4Vec;
@@ -1343,6 +1352,7 @@ mod dirty_iter {
         }
     }
 
+    #[cfg(feature = "zstd")]
     mod zstd {
         use super::*;
         use vecdb::ZstdVec;
@@ -1402,6 +1412,7 @@ mod dirty_iter {
     // EagerVec Tests (wrapping different underlying vec types)
     // ============================================================================
 
+    #[cfg(feature = "zerocopy")]
     mod eager_zerocopy {
         use super::*;
         use vecdb::{EagerVec, ZeroCopyVec};
@@ -1457,6 +1468,7 @@ mod dirty_iter {
         }
     }
 
+    #[cfg(feature = "pco")]
     mod eager_pco {
         use super::*;
         use vecdb::{EagerVec, PcoVec};
@@ -1520,7 +1532,7 @@ mod dirty_iter {
 mod raw_features {
     use super::*;
     use std::ops::DerefMut;
-    use vecdb::{BytesVec, RawVecInner, ZeroCopyVec};
+    use vecdb::{BytesVec, RawVecInner};
 
     // Generic test functions for raw vecs
 
@@ -1769,8 +1781,10 @@ mod raw_features {
     // ZeroCopyVec Tests
     // ============================================================================
 
+    #[cfg(feature = "zerocopy")]
     mod zerocopy {
         use super::*;
+        use vecdb::ZeroCopyVec;
         type V = ZeroCopyVec<usize, i32>;
 
         #[test]

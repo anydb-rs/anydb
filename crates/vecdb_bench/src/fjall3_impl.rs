@@ -27,7 +27,7 @@ impl DatabaseBenchmark for Fjall3Bench {
             .cache_size(1024 * 1024 * 1024)
             .open()?;
         let options = KeyspaceCreateOptions::default();
-        let keyspace = database.keyspace("bench", options)?;
+        let keyspace = database.keyspace("bench", || options)?;
         Ok(Self { database, keyspace })
     }
 

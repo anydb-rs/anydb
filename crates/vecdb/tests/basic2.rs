@@ -334,6 +334,7 @@ mod bytes {
     }
 }
 
+#[cfg(feature = "zerocopy")]
 mod zerocopy {
     use super::*;
     use vecdb::ZeroCopyVec;
@@ -377,6 +378,7 @@ mod zerocopy {
     }
 }
 
+#[cfg(feature = "pco")]
 mod pco {
     use super::*;
     use vecdb::PcoVec;
@@ -420,6 +422,7 @@ mod pco {
     }
 }
 
+#[cfg(feature = "lz4")]
 mod lz4 {
     use super::*;
     use vecdb::LZ4Vec;
@@ -463,6 +466,7 @@ mod lz4 {
     }
 }
 
+#[cfg(feature = "zstd")]
 mod zstd {
     use super::*;
     use vecdb::ZstdVec;
@@ -506,6 +510,7 @@ mod zstd {
     }
 }
 
+#[cfg(feature = "zerocopy")]
 mod eager_zerocopy {
     use super::*;
     use vecdb::{EagerVec, ZeroCopyVec};
@@ -549,6 +554,7 @@ mod eager_zerocopy {
     }
 }
 
+#[cfg(feature = "pco")]
 mod eager_pco {
     use super::*;
     use vecdb::{EagerVec, PcoVec};

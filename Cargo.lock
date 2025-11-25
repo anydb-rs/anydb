@@ -95,15 +95,15 @@ checksum = "6236364b88b9b6d0bc181ba374cf1ab55ba3ef97a1cb6f8cddad48a273767fb5"
 
 [[package]]
 name = "byteview"
-version = "0.8.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e6b0e42e210b794e14b152c6fe1a55831e30ef4a0f5dc39d73d714fb5f1906c"
+checksum = "d6e3a2110d267b9881afe689e6eebcc7635534a827928bd69bef59a8f9db644a"
 
 [[package]]
 name = "cc"
-version = "1.2.46"
+version = "1.2.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b97463e1064cb1b1c1384ad0a0b9c8abd0988e2a91f52606c80ef14aadb63e36"
+checksum = "cd405d82c84ff7f35739f175f67d8b9fb7687a0e84ccdc78bd3568839827cf07"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -354,16 +354,16 @@ dependencies = [
 
 [[package]]
 name = "fjall"
-version = "3.0.0-pre.7"
+version = "3.0.0-rc.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38fab709044a8e2caa4544c7b352360775967a833bfe6a20d3fc6248882b55d6"
+checksum = "91e1ca518f9bb71f845bcd3d8d556c202f9f9c75195deff725cd85b2421aa84a"
 dependencies = [
  "byteorder-lite",
- "byteview 0.8.0",
+ "byteview 0.9.1",
  "dashmap",
  "flume",
  "log",
- "lsm-tree 3.0.0-pre.7",
+ "lsm-tree 3.0.0-rc.0",
  "lz4_flex 0.11.5",
  "tempfile",
  "xxhash-rust",
@@ -586,9 +586,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.12.0"
+version = "2.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6717a8d2a5a929a1a2eb43a12812498ed141a0bcfb7e8f7844fbdbe4303bba9f"
+checksum = "0ad4bb2b565bca0645f4d68c5c9af97fba094e9791da685bf83cb5f3ce74acf2"
 dependencies = [
  "equivalent",
  "hashbrown 0.16.1",
@@ -699,12 +699,12 @@ dependencies = [
 
 [[package]]
 name = "lsm-tree"
-version = "3.0.0-pre.7"
+version = "3.0.0-rc.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "16d54fa339f44103a194d3e7f208a33c666391a9d9ddb2621f956f4d223a407f"
+checksum = "f963f5e7b4f8f79fbb28d0fd49ab5f04939b31d1e65cb99577e17805fe25dde2"
 dependencies = [
  "byteorder-lite",
- "byteview 0.8.0",
+ "byteview 0.9.1",
  "crossbeam-skiplist",
  "enum_dispatch",
  "interval-heap",
@@ -1363,9 +1363,9 @@ checksum = "33ae9eec00137a8eed469fb4148acd9fc6ac8c3f9b110f52cd34698c8b5bfa0e"
 
 [[package]]
 name = "syn"
-version = "2.0.110"
+version = "2.0.111"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a99801b5bd34ede4cf3fc688c5919368fea4e4814a4664359503e6015b280aea"
+checksum = "390cc9a294ab71bdb1aa2e99d13be9c753cd2d7bd6560c77118597410c4d2e87"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1548,7 +1548,7 @@ dependencies = [
  "anyhow",
  "byteorder",
  "fjall 2.11.2",
- "fjall 3.0.0-pre.7",
+ "fjall 3.0.0-rc.0",
  "heed",
  "rand 0.9.2",
  "rayon",
@@ -1726,18 +1726,18 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.8.28"
+version = "0.8.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43fa6694ed34d6e57407afbccdeecfa268c470a7d2a5b0cf49ce9fcc345afb90"
+checksum = "4ea879c944afe8a2b25fef16bb4ba234f47c694565e97383b36f3a878219065c"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.28"
+version = "0.8.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c640b22cd9817fae95be82f0d2f90b11f7605f6c319d16705c459b27ac2cbc26"
+checksum = "cf955aa904d6040f70dc8e9384444cb1030aed272ba3cb09bbc4ab9e7c1f34f5"
 dependencies = [
  "proc-macro2",
  "quote",
