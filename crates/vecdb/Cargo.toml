@@ -12,16 +12,6 @@ rust-version.workspace = true
 build = "build.rs"
 
 [features]
-default = [
-    "derive",
-    "lz4",
-    "pco",
-    "serde",
-    "serde_json",
-    "sonic-rs",
-    "zerocopy",
-    "zstd"
-]
 derive = ["vecdb_derive"]
 lz4 = ["dep:lz4_flex"]
 pco = ["dep:pco"]

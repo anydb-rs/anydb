@@ -6,8 +6,8 @@ fn main() {
         BenchConfig {
             write_count: 100_000_000,
             databases: vec![
-                Database::VecDbCompressed,
-                Database::VecDbRaw,
+                Database::PcoVec,
+                Database::ZeroCopyVec,
                 Database::Fjall3,
                 Database::Fjall2,
                 Database::Redb,
@@ -18,9 +18,9 @@ fn main() {
         BenchConfig {
             write_count: 1_000_000_000,
             databases: vec![
-                // Database::VecDbRawOld,
-                Database::VecDbRaw,
-                Database::VecDbCompressed,
+                // Database::ZeroCopyVecOld,
+                Database::ZeroCopyVec,
+                Database::PcoVec,
             ],
             ..Default::default()
         },

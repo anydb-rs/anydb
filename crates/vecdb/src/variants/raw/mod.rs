@@ -1,6 +1,7 @@
 mod bytes;
 mod inner;
 mod iterators;
+#[cfg(feature = "zerocopy")]
 mod zerocopy;
 
 pub use bytes::*;

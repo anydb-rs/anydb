@@ -9,13 +9,12 @@ use std::{
 
 use log::info;
 use rawdb::{Database, Reader, Region};
-use zerocopy::{FromBytes, IntoBytes};
 
 use crate::{
-    AnyStoredVec, AnyVec, BUFFER_SIZE, BaseVec, BoxedVecIterator, CleanRawVecIterator,
-    DirtyRawVecIterator, Error, Format, GenericStoredVec, HEADER_OFFSET, Header, ImportOptions,
-    IterableVec, RawVecIterator, Result, SIZE_OF_U64, Stamp, TypedVec, VecIndex, VecValue, Version,
-    vec_region_name_with,
+    AnyStoredVec, AnyVec, BUFFER_SIZE, BaseVec, BoxedVecIterator, Bytes, BytesExt,
+    CleanRawVecIterator, DirtyRawVecIterator, Error, Format, GenericStoredVec, HEADER_OFFSET,
+    Header, ImportOptions, IterableVec, RawVecIterator, Result, SIZE_OF_U64, Stamp, TypedVec,
+    VecIndex, VecValue, Version, vec_region_name_with,
 };
 
 mod strategy;
@@ -88,7 +87,7 @@ where
                     .create_reader()
                     .read_all()
                     .chunks(size_of::<usize>())
-                    .map(|b| -> Result<usize> { usize::read_from_bytes(b).map_err(|e| e.into()) })
+                    .map(usize::from_bytes)
                     .collect::<Result<BTreeSet<usize>>>()?,
             )
         } else {
@@ -624,8 +623,8 @@ where
             .iter()
             .map(|(&i, v)| (i, v.clone()))
             .collect::<(Vec<_>, Vec<_>)>();
-        bytes.extend(prev_modified_indexes.len().as_bytes());
-        bytes.extend(prev_modified_indexes.as_bytes());
+        bytes.extend(prev_modified_indexes.len().to_bytes());
+        bytes.extend(prev_modified_indexes.to_bytes());
         // Serialize values using strategy
         for v in &prev_modified_values {
             bytes.extend(S::write(v));
@@ -644,20 +643,20 @@ where
                 (i, val)
             })
             .collect::<(Vec<_>, Vec<_>)>();
-        bytes.extend(modified_indexes.len().as_bytes());
-        bytes.extend(modified_indexes.as_bytes());
+        bytes.extend(modified_indexes.len().to_bytes());
+        bytes.extend(modified_indexes.to_bytes());
         // Serialize values using strategy
         for v in &modified_values {
             bytes.extend(S::write(v));
         }
 
         let prev_holes = self.prev_holes.iter().copied().collect::<Vec<_>>();
-        bytes.extend(prev_holes.len().as_bytes());
-        bytes.extend(prev_holes.as_bytes());
+        bytes.extend(prev_holes.len().to_bytes());
+        bytes.extend(prev_holes.to_bytes());
 
         let holes = self.holes.iter().copied().collect::<Vec<_>>();
-        bytes.extend(holes.len().as_bytes());
-        bytes.extend(holes.as_bytes());
+        bytes.extend(holes.len().to_bytes());
+        bytes.extend(holes.to_bytes());
 
         Ok(bytes)
     }
@@ -824,7 +823,7 @@ where
 
         // Parse RawVecInner-specific data: prev_updated, updated, prev_holes, holes
 
-        let prev_modified_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
+        let prev_modified_len = usize::from_bytes(&bytes[pos..pos + len])?;
         pos += len;
         len = SIZE_OF_U64 * prev_modified_len;
         let prev_indexes = bytes[pos..pos + len].chunks(SIZE_OF_U64);
@@ -834,7 +833,7 @@ where
         let _prev_updated: BTreeMap<usize, T> = prev_indexes
             .zip(prev_values)
             .map(|(i, v)| {
-                let idx = usize::read_from_bytes(i).map_err(|_| Error::ZeroCopyError)?;
+                let idx = usize::from_bytes(i)?;
                 let val = S::read(v)?;
                 Ok((idx, val))
             })
@@ -842,7 +841,7 @@ where
         pos += len;
 
         len = SIZE_OF_U64;
-        let modified_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
+        let modified_len = usize::from_bytes(&bytes[pos..pos + len])?;
         pos += len;
         len = SIZE_OF_U64 * modified_len;
         let indexes = bytes[pos..pos + len].chunks(SIZE_OF_U64);
@@ -852,7 +851,7 @@ where
         let old_values_to_restore: BTreeMap<usize, T> = indexes
             .zip(values)
             .map(|(i, v)| {
-                let idx = usize::read_from_bytes(i).map_err(|_| Error::ZeroCopyError)?;
+                let idx = usize::from_bytes(i)?;
                 let val = S::read(v)?;
                 Ok((idx, val))
             })
@@ -860,22 +859,22 @@ where
         pos += len;
 
         len = SIZE_OF_U64;
-        let prev_holes_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
+        let prev_holes_len = usize::from_bytes(&bytes[pos..pos + len])?;
         pos += len;
         len = SIZE_OF_U64 * prev_holes_len;
         let prev_holes = bytes[pos..pos + len]
             .chunks(SIZE_OF_U64)
-            .map(|b| usize::read_from_bytes(b).map_err(|_| Error::ZeroCopyError))
+            .map(usize::from_bytes)
             .collect::<Result<BTreeSet<_>>>()?;
         pos += len;
 
         len = SIZE_OF_U64;
-        let holes_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
+        let holes_len = usize::from_bytes(&bytes[pos..pos + len])?;
         pos += len;
         len = SIZE_OF_U64 * holes_len;
         let _holes = bytes[pos..pos + len]
             .chunks(SIZE_OF_U64)
-            .map(|b| usize::read_from_bytes(b).map_err(|_| Error::ZeroCopyError))
+            .map(usize::from_bytes)
             .collect::<Result<BTreeSet<_>>>()?;
 
         if !self.holes.is_empty() || !self.prev_holes.is_empty() || !prev_holes.is_empty() {

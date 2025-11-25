@@ -5,12 +5,12 @@ use vecdb_old::{AnyStoredVec, Database, GenericStoredVec, RawVec, Version};
 
 use crate::database::DatabaseBenchmark;
 
-pub struct VecDbRawOldBench {
+pub struct ZeroCopyVecOldBench {
     db: Database,
     vec: RawVec<usize, u64>,
 }
 
-impl DatabaseBenchmark for VecDbRawOldBench {
+impl DatabaseBenchmark for ZeroCopyVecOldBench {
     fn name() -> &'static str {
         "vecdb_raw_old"
     }

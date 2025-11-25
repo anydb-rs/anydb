@@ -41,7 +41,7 @@ where
         let decompressed = zstd::decode_all(bytes)?;
 
         let vec = decompressed
-            .chunks_exact(T::SIZE)
+            .chunks_exact(size_of::<T>())
             .map(T::from_bytes)
             .collect::<Result<Vec<T>>>()?;
 

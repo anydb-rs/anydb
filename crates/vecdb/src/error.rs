@@ -15,6 +15,7 @@ pub enum Error {
     Format(#[from] fmt::Error),
     #[error("Couldn't lock file. It must be already opened by another process.")]
     TryLockError(#[from] fs::TryLockError),
+    #[cfg(feature = "zerocopy")]
     #[error("ZeroCopy error")]
     ZeroCopyError,
     #[error(transparent)]
@@ -65,12 +66,14 @@ pub enum Error {
     InvalidFormat(u8),
 }
 
+#[cfg(feature = "zerocopy")]
 impl<A, B, C> From<zerocopy::error::ConvertError<A, B, C>> for Error {
     fn from(_: zerocopy::error::ConvertError<A, B, C>) -> Self {
         Self::ZeroCopyError
     }
 }
 
+#[cfg(feature = "zerocopy")]
 impl<A, B> From<zerocopy::error::SizeError<A, B>> for Error {
     fn from(_: zerocopy::error::SizeError<A, B>) -> Self {
         Self::ZeroCopyError

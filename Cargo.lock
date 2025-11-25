@@ -1563,6 +1563,8 @@ version = "0.3.20"
 dependencies = [
  "quote",
  "syn",
+ "tempfile",
+ "vecdb",
 ]
 
 [[package]]

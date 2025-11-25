@@ -2,7 +2,6 @@ use std::{cmp::Ordering, collections::BTreeMap, fs, path::PathBuf};
 
 use log::info;
 use rawdb::Reader;
-use zerocopy::{FromBytes, IntoBytes};
 
 use crate::{
     AnyStoredVec, Bytes, Error, Result, SIZE_OF_U64, Stamp, Version, likely, vec_region_name_with,
@@ -558,14 +557,14 @@ where
         let mut pos = 0;
         let mut len = SIZE_OF_U64;
 
-        let prev_stamp = u64::read_from_bytes(&bytes[..pos + len])?;
-        self.mut_header().update_stamp(Stamp::new(prev_stamp));
+        let prev_stamp = Stamp::from_bytes(&bytes[..pos + len])?;
+        self.mut_header().update_stamp(prev_stamp);
         pos += len;
 
-        let prev_stored_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
+        let prev_stored_len = usize::from_bytes(&bytes[pos..pos + len])?;
         pos += len;
 
-        let _stored_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
+        let _stored_len = usize::from_bytes(&bytes[pos..pos + len])?;
         pos += len;
 
         let current_stored_len = self.stored_len();
@@ -577,7 +576,7 @@ where
             self.update_stored_len(prev_stored_len);
         }
 
-        let truncated_count = usize::read_from_bytes(&bytes[pos..pos + len])?;
+        let truncated_count = usize::from_bytes(&bytes[pos..pos + len])?;
         pos += len;
 
         // Clear pushed (will be replaced with prev_pushed from change file)
@@ -599,7 +598,7 @@ where
         }
 
         len = SIZE_OF_U64;
-        let prev_pushed_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
+        let prev_pushed_len = usize::from_bytes(&bytes[pos..pos + len])?;
         pos += len;
         len = Self::SIZE_OF_T * prev_pushed_len;
         let mut prev_pushed = bytes[pos..pos + len]
@@ -610,7 +609,7 @@ where
         self.mut_pushed().append(&mut prev_pushed);
 
         len = SIZE_OF_U64;
-        let pushed_len = usize::read_from_bytes(&bytes[pos..pos + len])?;
+        let pushed_len = usize::from_bytes(&bytes[pos..pos + len])?;
         pos += len;
         // Skip current pushed values (we already restored prev_pushed)
         pos += Self::SIZE_OF_T * pushed_len;
@@ -654,11 +653,11 @@ where
         let prev_stored_len = self.prev_stored_len();
         let stored_len = self.stored_len();
 
-        bytes.extend(prev_stored_len.as_bytes());
-        bytes.extend(stored_len.as_bytes());
+        bytes.extend(prev_stored_len.to_bytes());
+        bytes.extend(stored_len.to_bytes());
 
         let truncated = prev_stored_len.checked_sub(stored_len).unwrap_or_default();
-        bytes.extend(truncated.as_bytes());
+        bytes.extend(truncated.to_bytes());
 
         if truncated > 0 {
             let truncated_vals = (stored_len..prev_stored_len)
@@ -667,10 +666,10 @@ where
             bytes.extend(self.values_to_bytes(&truncated_vals));
         }
 
-        bytes.extend(self.prev_pushed().len().as_bytes());
+        bytes.extend(self.prev_pushed().len().to_bytes());
         bytes.extend(self.values_to_bytes(self.prev_pushed()));
 
-        bytes.extend(self.pushed().len().as_bytes());
+        bytes.extend(self.pushed().len().to_bytes());
         bytes.extend(self.values_to_bytes(self.pushed()));
 
         Ok(bytes)

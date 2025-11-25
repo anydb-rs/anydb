@@ -224,15 +224,14 @@ pub fn run(configs: &[BenchConfig]) -> Result<()> {
 
         for db in &config.databases {
             match db {
-                Database::VecDbCompressed => {
-                    db_benchmarks
-                        .push(Box::new(DbBenchmark::<VecDbCompressedBench>::new(&runner)?));
+                Database::PcoVec => {
+                    db_benchmarks.push(Box::new(DbBenchmark::<PcoVecBench>::new(&runner)?));
                 }
-                Database::VecDbRaw => {
-                    db_benchmarks.push(Box::new(DbBenchmark::<VecDbRawBench>::new(&runner)?));
+                Database::ZeroCopyVec => {
+                    db_benchmarks.push(Box::new(DbBenchmark::<BytesVecBench>::new(&runner)?));
                 }
-                // Database::VecDbRawOld => {
-                //     db_benchmarks.push(Box::new(DbBenchmark::<VecDbRawOldBench>::new(&runner)?));
+                // Database::ZeroCopyVecOld => {
+                //     db_benchmarks.push(Box::new(DbBenchmark::<ZeroCopyVecOldBench>::new(&runner)?));
                 // }
                 Database::Fjall3 => {
                     db_benchmarks.push(Box::new(DbBenchmark::<Fjall3Bench>::new(&runner)?));

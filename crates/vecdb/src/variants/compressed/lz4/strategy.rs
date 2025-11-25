@@ -39,7 +39,7 @@ where
         let decompressed = lz4_flex::decompress_size_prepended(bytes)?;
 
         let vec = decompressed
-            .chunks_exact(T::SIZE)
+            .chunks_exact(size_of::<T>())
             .map(T::from_bytes)
             .collect::<Result<Vec<T>>>()?;
 

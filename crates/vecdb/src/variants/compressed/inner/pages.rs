@@ -1,7 +1,6 @@
 use rawdb::{Database, Region};
-use zerocopy::{FromBytes, IntoBytes};
 
-use crate::Result;
+use crate::{Bytes, Result};
 
 use super::Page;
 
@@ -22,7 +21,7 @@ impl Pages {
             .create_reader()
             .read_all()
             .chunks(Self::SIZE_OF_PAGE)
-            .map(|b| Page::read_from_bytes(b).map_err(|e| e.into()))
+            .map(Page::from_bytes)
             .collect::<Result<_>>()?;
 
         Ok(Self {
@@ -40,8 +39,12 @@ impl Pages {
         let change_at = self.change_at.take().unwrap();
         let at = change_at * Self::SIZE_OF_PAGE;
 
-        self.region
-            .truncate_write(at, self.vec[change_at..].as_bytes())?;
+        let bytes: Vec<u8> = self.vec[change_at..]
+            .iter()
+            .flat_map(|page| page.to_bytes())
+            .collect();
+
+        self.region.truncate_write(at, &bytes)?;
 
         Ok(())
     }

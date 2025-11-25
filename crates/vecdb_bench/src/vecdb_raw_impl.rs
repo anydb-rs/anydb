@@ -1,18 +1,18 @@
 use anyhow::Result;
 use rayon::prelude::*;
 use std::path::Path;
-use vecdb::{AnyStoredVec, Database, GenericStoredVec, RawVec, Version};
+use vecdb::{AnyStoredVec, BytesVec, Database, GenericStoredVec, Importable, Version};
 
 use crate::database::DatabaseBenchmark;
 
-pub struct VecDbRawBench {
+pub struct BytesVecBench {
     db: Database,
-    vec: RawVec<usize, u64>,
+    vec: BytesVec<usize, u64>,
 }
 
-impl DatabaseBenchmark for VecDbRawBench {
+impl DatabaseBenchmark for BytesVecBench {
     fn name() -> &'static str {
-        "vecdb_raw"
+        "bytesvec"
     }
 
     fn create(path: &Path) -> Result<Self> {
@@ -21,7 +21,7 @@ impl DatabaseBenchmark for VecDbRawBench {
 
     fn open(path: &Path) -> Result<Self> {
         let db = Database::open(path)?;
-        let vec: RawVec<usize, u64> = RawVec::import(&db, "bench", Version::TWO)?;
+        let vec: BytesVec<usize, u64> = BytesVec::import(&db, "bench", Version::TWO)?;
         Ok(Self { db, vec })
     }
 

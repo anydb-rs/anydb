@@ -22,7 +22,7 @@ parking_lot = "0.12.5"
 rawdb = { version = "0.3.20", path = "crates/rawdb" }
 rayon = "1.11.0"
 tempfile = "3.23.0"
-vecdb = { version = "0.3.20", path = "crates/vecdb", features = ["derive", "serde_json"] }
+vecdb = { version = "0.3.20", path = "crates/vecdb" }
 vecdb_derive = { version = "0.3.20", path = "crates/vecdb_derive" }
 
 [workspace.metadata.release]

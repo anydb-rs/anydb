@@ -2,16 +2,11 @@ use std::mem::{ManuallyDrop, align_of, size_of};
 
 use pco::data_types::Number;
 
-use crate::{Bytes, VecValue};
+use crate::{BytesVecValue, Pco, TransparentPco};
 
-pub trait TransparentPcoVecValue<T> {}
+pub trait PcoVecValue: Pco + BytesVecValue + Copy {}
 
-pub trait PcoVecValue
-where
-    Self: VecValue + Bytes + Copy + TransparentPcoVecValue<Self::NumberType>,
-{
-    type NumberType: Number;
-}
+impl<T> PcoVecValue for T where T: Pco + BytesVecValue + Copy {}
 
 pub trait AsInnerSlice<T>
 where
@@ -60,8 +55,8 @@ where
 macro_rules! impl_stored_compressed {
     ($($t:ty),*) => {
         $(
-            impl TransparentPcoVecValue<$t> for $t {}
-            impl PcoVecValue for $t {
+            impl TransparentPco<$t> for $t {}
+            impl Pco for $t {
                 type NumberType = $t;
             }
         )*

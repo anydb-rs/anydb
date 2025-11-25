@@ -1,31 +1,31 @@
 use anyhow::Result;
 use rayon::prelude::*;
 use std::path::Path;
-use vecdb::{AnyStoredVec, CompressedVec, Database, GenericStoredVec, Version};
+use vecdb::{AnyStoredVec, Database, GenericStoredVec, Importable, PcoVec, Version};
 
 use crate::database::DatabaseBenchmark;
 
-pub struct VecDbCompressedBench {
+pub struct PcoVecBench {
     db: Database,
-    vec: CompressedVec<usize, u64>,
+    vec: PcoVec<usize, u64>,
 }
 
-impl DatabaseBenchmark for VecDbCompressedBench {
+impl DatabaseBenchmark for PcoVecBench {
     fn name() -> &'static str {
-        "vecdb_compressed"
+        "pcovec"
     }
 
     fn create(path: &Path) -> Result<Self> {
         let db = Database::open(path)?;
         let options = (&db, "bench", Version::TWO).into();
-        let vec: CompressedVec<usize, u64> = CompressedVec::forced_import_with(options)?;
+        let vec: PcoVec<usize, u64> = PcoVec::forced_import_with(options)?;
         Ok(Self { db, vec })
     }
 
     fn open(path: &Path) -> Result<Self> {
         let db = Database::open(path)?;
         let options = (&db, "bench", Version::TWO).into();
-        let vec: CompressedVec<usize, u64> = CompressedVec::forced_import_with(options)?;
+        let vec: PcoVec<usize, u64> = PcoVec::forced_import_with(options)?;
         Ok(Self { db, vec })
     }
 

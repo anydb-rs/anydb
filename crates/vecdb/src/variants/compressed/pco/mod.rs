@@ -14,10 +14,12 @@ use super::CompressedVecInner;
 
 mod iterators;
 mod strategy;
+mod r#trait;
 mod value;
 
 pub use iterators::*;
 pub use strategy::*;
+pub use r#trait::*;
 pub use value::*;
 
 /// Compressed storage vector using Pcodec for lossless numerical compression.

@@ -62,7 +62,7 @@ where
     T: BytesVecValue,
 {
     /// The size of T in bytes.
-    pub const SIZE_OF_T: usize = T::SIZE;
+    pub const SIZE_OF_T: usize = size_of::<T>();
 
     #[inline]
     pub fn iter(&self) -> Result<BytesVecIterator<'_, I, T>> {

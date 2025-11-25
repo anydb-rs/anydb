@@ -1,4 +1,4 @@
-use crate::{Bytes, Error, Result, SIZE_OF_U64};
+use crate::{Bytes, Result};
 
 /// Marker for tracking when data was last modified.
 ///
@@ -27,12 +27,11 @@ impl From<Stamp> for u64 {
 impl Bytes for Stamp {
     #[inline]
     fn to_bytes(&self) -> Vec<u8> {
-        self.0.to_le_bytes().to_vec()
+        self.0.to_bytes()
     }
 
     #[inline]
     fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        let arr: [u8; SIZE_OF_U64] = bytes.try_into().map_err(|_| Error::WrongLength)?;
-        Ok(Self(u64::from_le_bytes(arr)))
+        Ok(Self(u64::from_bytes(bytes)?))
     }
 }
