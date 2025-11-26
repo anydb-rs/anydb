@@ -10,6 +10,10 @@ mod dirty;
 pub use clean::*;
 pub use dirty::*;
 
+/// Automatically selected iterator for compressed vectors based on their state.
+///
+/// - Clean: No pushed values - decompresses pages directly from disk
+/// - Dirty: Has pushed values - combines stored compressed data with in-memory pushes
 pub enum CompressedVecIterator<'a, I, T, S> {
     Clean(CleanCompressedVecIterator<'a, I, T, S>),
     Dirty(DirtyCompressedVecIterator<'a, I, T, S>),

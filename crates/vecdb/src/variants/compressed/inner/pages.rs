@@ -4,10 +4,18 @@ use crate::{Bytes, Result};
 
 use super::Page;
 
+/// Manages page metadata for compressed vectors.
+///
+/// Stores page metadata (offsets, sizes, value counts) separately from the
+/// compressed data itself. This allows quick random access to pages without
+/// scanning through compressed data.
+///
+/// Uses incremental flushing to minimize disk writes - only writes changed pages.
 #[derive(Debug, Clone)]
 pub struct Pages {
     region: Region,
     vec: Vec<Page>,
+    /// Index of first changed page, or None if no changes
     change_at: Option<usize>,
 }
 
@@ -61,9 +69,13 @@ impl Pages {
         self.vec.last()
     }
 
+    /// Pushes a new page, panicking if the page_index doesn't match the current length.
+    ///
+    /// # Panics
+    /// Panics if page_index != current length (pages must be added sequentially).
     pub fn checked_push(&mut self, page_index: usize, page: Page) {
         if page_index != self.vec.len() {
-            panic!();
+            panic!("Page index {} doesn't match pages length {}", page_index, self.vec.len());
         }
 
         self.set_changed_at(page_index);

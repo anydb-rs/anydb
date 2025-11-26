@@ -96,7 +96,10 @@ where
         self.end_index = absolute_end.min(self.stored_len).min(self.end_index);
     }
 
-    /// Refill buffer starting from a specific page
+    /// Refill buffer starting from a specific page.
+    ///
+    /// # Panics
+    /// Panics if file seek or read operations fail (e.g., I/O error, file corruption).
     #[inline(always)]
     fn refill_buffer(&mut self, starting_page_index: usize) -> Option<()> {
         self.buffer_page_start = starting_page_index;

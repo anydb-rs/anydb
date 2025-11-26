@@ -42,11 +42,13 @@ where
         })
     }
 
-    /// Skip one stored element without reading it (for holes/updates optimization)
+    /// Skip one stored element without reading it (for holes/updates optimization).
+    ///
+    /// # Critical Ordering
+    /// Refill buffer BEFORE advancing position. If we advance first, refill_buffer()
+    /// will reset buffer_pos to 0, losing the skip. This is a subtle but critical bug.
     #[inline(always)]
     fn skip_stored_element(&mut self) {
-        // Refill buffer BEFORE advancing position
-        // Otherwise refill_buffer() resets buffer_pos to 0, losing the skip
         if unlikely(self.inner.cant_read_buffer()) && likely(self.inner.can_read_file()) {
             self.inner.refill_buffer();
         }

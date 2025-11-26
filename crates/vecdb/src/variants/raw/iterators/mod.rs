@@ -10,6 +10,10 @@ mod dirty;
 pub use clean::*;
 pub use dirty::*;
 
+/// Automatically selected iterator for raw vectors based on their state.
+///
+/// - Clean: No holes, updates, or pushed values - faster direct file reading
+/// - Dirty: Has holes, updates, or pushed values - slower but handles all features
 pub enum RawVecIterator<'a, I, T, S> {
     Clean(CleanRawVecIterator<'a, I, T, S>),
     Dirty(DirtyRawVecIterator<'a, I, T, S>),

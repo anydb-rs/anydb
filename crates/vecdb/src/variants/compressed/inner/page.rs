@@ -1,10 +1,19 @@
 use crate::{Bytes, Error, Result};
 
+/// Metadata for a compressed page in a CompressedVec.
+///
+/// Each page stores a compressed chunk of values. The page metadata tracks:
+/// - Where the compressed data starts in the region
+/// - How many bytes of compressed data
+/// - How many values the page contains when decompressed
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub struct Page {
+    /// Absolute byte offset in the region where compressed data starts
     pub start: u64,
+    /// Number of compressed bytes
     pub bytes: u32,
+    /// Number of values in this page (when decompressed)
     pub values: u32,
 }
 

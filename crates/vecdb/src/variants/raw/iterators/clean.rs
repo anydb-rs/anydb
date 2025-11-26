@@ -15,7 +15,7 @@ use crate::{
 
 use super::{RawVecInner, RawStrategy};
 
-/// Clean raw vec iterator, to read on disk data
+/// Clean raw vec iterator for reading stored data without holes/updates
 pub struct CleanRawVecIterator<'a, I, T, S> {
     pub(crate) file: File,
     buffer: Vec<u8>,
@@ -69,6 +69,10 @@ where
         Ok(this)
     }
 
+    /// Seeks to a position in the file, clamping to valid range.
+    ///
+    /// # Panics
+    /// Panics if the underlying file seek operation fails (e.g., file was deleted).
     #[inline(always)]
     fn seek(&mut self, pos: usize) -> bool {
         self.file_offset = pos.min(self.end_offset).max(self.start_offset);
@@ -125,6 +129,10 @@ where
         self.remaining_bytes() / Self::SIZE_OF_T
     }
 
+    /// Refills the internal buffer from the file.
+    ///
+    /// # Panics
+    /// Panics if the underlying file read fails (e.g., I/O error, file corruption).
     #[inline(always)]
     pub(crate) fn refill_buffer(&mut self) {
         let buffer_len = self.remaining_file_bytes().min(Self::NORMAL_BUFFER_SIZE);
@@ -172,6 +180,8 @@ where
 {
     type Item = T;
 
+    /// # Panics
+    /// Panics if deserialization fails (corrupted data) or if file I/O fails.
     #[inline(always)]
     fn next(&mut self) -> Option<T> {
         if likely(self.can_read_buffer()) {

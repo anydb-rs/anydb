@@ -8,6 +8,11 @@ pub trait PcoVecValue: Pco + BytesVecValue + Copy {}
 
 impl<T> PcoVecValue for T where T: Pco + BytesVecValue + Copy {}
 
+/// Convert a slice of PcoVecValue to a slice of the underlying Number type.
+///
+/// # Safety
+/// This trait uses unsafe pointer casting that relies on compile-time size/alignment checks.
+/// The const assertions ensure T and T::NumberType have identical layout.
 pub trait AsInnerSlice<T>
 where
     T: Number,
@@ -30,6 +35,11 @@ where
     }
 }
 
+/// Convert a Vec of Number type to a Vec of PcoVecValue.
+///
+/// # Safety
+/// This trait uses unsafe pointer casting that relies on compile-time size/alignment checks.
+/// The const assertions ensure T and T::NumberType have identical layout.
 pub trait FromInnerSlice<T> {
     const _SIZE_CHECK: ();
     const _ALIGN_CHECK: ();
