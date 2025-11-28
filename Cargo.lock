@@ -1536,7 +1536,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "vecdb_derive",
- "vecdb_macros",
  "walkdir",
  "zerocopy",
  "zstd",
@@ -1566,15 +1565,6 @@ dependencies = [
  "syn",
  "tempfile",
  "vecdb",
-]
-
-[[package]]
-name = "vecdb_macros"
-version = "0.3.20"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

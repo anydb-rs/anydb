@@ -1,9 +1,6 @@
-use rawdb::{Database, Reader};
+use rawdb::Reader;
 
-use crate::{
-    AnyStoredVec, BoxedVecIterator, Format, HEADER_OFFSET, ImportOptions, Importable, Result,
-    VecIndex, Version,
-};
+use crate::{AnyStoredVec, Format, HEADER_OFFSET, VecIndex, impl_vec_wrapper};
 
 use super::RawVecInner;
 
@@ -46,31 +43,6 @@ pub use value::*;
 #[must_use = "Vector should be stored to keep data accessible"]
 pub struct ZeroCopyVec<I, T>(pub(crate) RawVecInner<I, T, ZeroCopyStrategy<T>>);
 
-impl<I, T> Importable for ZeroCopyVec<I, T>
-where
-    I: VecIndex,
-    T: ZeroCopyVecValue,
-{
-    fn import(db: &Database, name: &str, version: Version) -> Result<Self> {
-        Self::import_with((db, name, version).into())
-    }
-
-    fn import_with(options: ImportOptions) -> Result<Self> {
-        Ok(Self(RawVecInner::import_with(options, Format::ZeroCopy)?))
-    }
-
-    fn forced_import(db: &Database, name: &str, version: Version) -> Result<Self> {
-        Self::forced_import_with((db, name, version).into())
-    }
-
-    fn forced_import_with(options: ImportOptions) -> Result<Self> {
-        Ok(Self(RawVecInner::forced_import_with(
-            options,
-            Format::ZeroCopy,
-        )?))
-    }
-}
-
 impl<I, T> ZeroCopyVec<I, T>
 where
     I: VecIndex,
@@ -78,26 +50,6 @@ where
 {
     /// The size of T in bytes.
     pub const SIZE_OF_T: usize = size_of::<T>();
-
-    #[inline]
-    pub fn iter(&self) -> Result<ZeroCopyVecIterator<'_, I, T>> {
-        self.0.iter()
-    }
-
-    #[inline]
-    pub fn clean_iter(&self) -> Result<CleanZeroCopyVecIterator<'_, I, T>> {
-        self.0.clean_iter()
-    }
-
-    #[inline]
-    pub fn dirty_iter(&self) -> Result<DirtyZeroCopyVecIterator<'_, I, T>> {
-        self.0.dirty_iter()
-    }
-
-    #[inline]
-    pub fn boxed_iter(&self) -> Result<BoxedVecIterator<'_, I, T>> {
-        self.0.boxed_iter()
-    }
 
     // ============================================================================
     // Zerocopy-specific read methods (return references directly from mmap)
@@ -150,9 +102,12 @@ where
     }
 }
 
-vecdb_macros::vec_wrapper!(
+impl_vec_wrapper!(
     ZeroCopyVec,
     RawVecInner<I, T, ZeroCopyStrategy<T>>,
     ZeroCopyVecValue,
-    ZeroCopyVecIterator
+    ZeroCopyVecIterator,
+    CleanZeroCopyVecIterator,
+    DirtyZeroCopyVecIterator,
+    Format::ZeroCopy
 );

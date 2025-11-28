@@ -1,6 +1,4 @@
-use rawdb::Database;
-
-use crate::{BoxedVecIterator, Format, ImportOptions, Importable, Result, VecIndex, Version};
+use crate::{Format, impl_vec_wrapper};
 
 use super::RawVecInner;
 
@@ -40,63 +38,12 @@ pub use value::*;
 #[must_use = "Vector should be stored to keep data accessible"]
 pub struct BytesVec<I, T>(pub(crate) RawVecInner<I, T, BytesStrategy<T>>);
 
-impl<I, T> Importable for BytesVec<I, T>
-where
-    I: VecIndex,
-    T: BytesVecValue,
-{
-    fn import(db: &Database, name: &str, version: Version) -> Result<Self> {
-        Self::import_with((db, name, version).into())
-    }
-
-    fn import_with(options: ImportOptions) -> Result<Self> {
-        Ok(Self(RawVecInner::import_with(options, Format::Bytes)?))
-    }
-
-    fn forced_import(db: &Database, name: &str, version: Version) -> Result<Self> {
-        Self::forced_import_with((db, name, version).into())
-    }
-
-    fn forced_import_with(options: ImportOptions) -> Result<Self> {
-        Ok(Self(RawVecInner::forced_import_with(
-            options,
-            Format::Bytes,
-        )?))
-    }
-}
-
-impl<I, T> BytesVec<I, T>
-where
-    I: VecIndex,
-    T: BytesVecValue,
-{
-    /// The size of T in bytes.
-    pub const SIZE_OF_T: usize = size_of::<T>();
-
-    #[inline]
-    pub fn iter(&self) -> Result<BytesVecIterator<'_, I, T>> {
-        self.0.iter()
-    }
-
-    #[inline]
-    pub fn clean_iter(&self) -> Result<CleanBytesVecIterator<'_, I, T>> {
-        self.0.clean_iter()
-    }
-
-    #[inline]
-    pub fn dirty_iter(&self) -> Result<DirtyBytesVecIterator<'_, I, T>> {
-        self.0.dirty_iter()
-    }
-
-    #[inline]
-    pub fn boxed_iter(&self) -> Result<BoxedVecIterator<'_, I, T>> {
-        self.0.boxed_iter()
-    }
-}
-
-vecdb_macros::vec_wrapper!(
+impl_vec_wrapper!(
     BytesVec,
     RawVecInner<I, T, BytesStrategy<T>>,
     BytesVecValue,
-    BytesVecIterator
+    BytesVecIterator,
+    CleanBytesVecIterator,
+    DirtyBytesVecIterator,
+    Format::Bytes
 );

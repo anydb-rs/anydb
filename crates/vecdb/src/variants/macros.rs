@@ -1,71 +1,30 @@
-//! Internal proc-macros for vecdb vec wrapper trait implementations.
-//!
-//! This crate provides proc-macros that generate boilerplate trait implementations
-//! for vec wrapper types. Using proc-macros instead of declarative macros provides
-//! better IDE support (rust-analyzer can expand and analyze them).
-//!
-//! This crate is internal to vecdb and not intended for external use.
-
-use proc_macro::TokenStream;
-use quote::quote;
-use syn::{
-    parse::{Parse, ParseStream},
-    parse_macro_input, Ident, Token, Type,
-};
-
-/// Arguments for the vec_wrapper! macro.
-/// Format: vec_wrapper!(WrapperName, InnerType, ValueTrait, IteratorType)
-struct VecWrapperArgs {
-    wrapper_name: Ident,
-    _comma1: Token![,],
-    inner_type: Type,
-    _comma2: Token![,],
-    value_trait: Type,
-    _comma3: Token![,],
-    iterator_type: Ident,
-}
-
-impl Parse for VecWrapperArgs {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        Ok(Self {
-            wrapper_name: input.parse()?,
-            _comma1: input.parse()?,
-            inner_type: input.parse()?,
-            _comma2: input.parse()?,
-            value_trait: input.parse()?,
-            _comma3: input.parse()?,
-            iterator_type: input.parse()?,
-        })
-    }
-}
-
 /// Generates trait implementations for vec wrappers (LZ4Vec, PcoVec, ZstdVec, BytesVec, ZeroCopyVec).
 ///
 /// # Usage
 /// ```ignore
-/// vec_wrapper!(LZ4Vec, CompressedVecInner<I, T, LZ4Strategy<T>>, LZ4VecValue, LZ4VecIterator);
-/// vec_wrapper!(BytesVec, RawVecInner<I, T, BytesStrategy<T>>, BytesVecValue, BytesVecIterator);
+/// impl_vec_wrapper!(
+///     LZ4Vec,
+///     CompressedVecInner<I, T, LZ4Strategy<T>>,
+///     LZ4VecValue,
+///     LZ4VecIterator, CleanLZ4VecIterator, DirtyLZ4VecIterator,
+///     Format::LZ4
+/// );
 /// ```
 ///
 /// This generates implementations for:
 /// - `Deref` / `DerefMut`
+/// - `Importable`
 /// - `AnyVec`
 /// - `TypedVec`
 /// - `AnyStoredVec`
 /// - `GenericStoredVec`
 /// - `IntoIterator`
 /// - `IterableVec`
-#[proc_macro]
-pub fn vec_wrapper(input: TokenStream) -> TokenStream {
-    let args = parse_macro_input!(input as VecWrapperArgs);
-    let wrapper = &args.wrapper_name;
-    let inner = &args.inner_type;
-    let value_trait = &args.value_trait;
-    let iterator = &args.iterator_type;
-
-    let expanded = quote! {
-        impl<I, T> ::std::ops::Deref for #wrapper<I, T> {
-            type Target = #inner;
+/// - Iterator methods (`iter`, `clean_iter`, `dirty_iter`, `boxed_iter`)
+macro_rules! impl_vec_wrapper {
+    ($wrapper:ident, $inner:ty, $value_trait:ident, $iterator:ident, $clean_iter:ident, $dirty_iter:ident, $format:expr) => {
+        impl<I, T> ::std::ops::Deref for $wrapper<I, T> {
+            type Target = $inner;
 
             #[inline]
             fn deref(&self) -> &Self::Target {
@@ -73,20 +32,50 @@ pub fn vec_wrapper(input: TokenStream) -> TokenStream {
             }
         }
 
-        impl<I, T> ::std::ops::DerefMut for #wrapper<I, T> {
+        impl<I, T> ::std::ops::DerefMut for $wrapper<I, T> {
             #[inline]
             fn deref_mut(&mut self) -> &mut Self::Target {
                 &mut self.0
             }
         }
 
-        impl<I, T> crate::AnyVec for #wrapper<I, T>
+        impl<I, T> $crate::Importable for $wrapper<I, T>
         where
-            I: crate::VecIndex,
-            T: #value_trait,
+            I: $crate::VecIndex,
+            T: $value_trait,
+        {
+            fn import(
+                db: &::rawdb::Database,
+                name: &str,
+                version: $crate::Version,
+            ) -> $crate::Result<Self> {
+                Self::import_with((db, name, version).into())
+            }
+
+            fn import_with(options: $crate::ImportOptions) -> $crate::Result<Self> {
+                Ok(Self(<$inner>::import_with(options, $format)?))
+            }
+
+            fn forced_import(
+                db: &::rawdb::Database,
+                name: &str,
+                version: $crate::Version,
+            ) -> $crate::Result<Self> {
+                Self::forced_import_with((db, name, version).into())
+            }
+
+            fn forced_import_with(options: $crate::ImportOptions) -> $crate::Result<Self> {
+                Ok(Self(<$inner>::forced_import_with(options, $format)?))
+            }
+        }
+
+        impl<I, T> $crate::AnyVec for $wrapper<I, T>
+        where
+            I: $crate::VecIndex,
+            T: $value_trait,
         {
             #[inline]
-            fn version(&self) -> crate::Version {
+            fn version(&self) -> $crate::Version {
                 self.0.version()
             }
 
@@ -116,19 +105,19 @@ pub fn vec_wrapper(input: TokenStream) -> TokenStream {
             }
         }
 
-        impl<I, T> crate::TypedVec for #wrapper<I, T>
+        impl<I, T> $crate::TypedVec for $wrapper<I, T>
         where
-            I: crate::VecIndex,
-            T: #value_trait,
+            I: $crate::VecIndex,
+            T: $value_trait,
         {
             type I = I;
             type T = T;
         }
 
-        impl<I, T> crate::AnyStoredVec for #wrapper<I, T>
+        impl<I, T> $crate::AnyStoredVec for $wrapper<I, T>
         where
-            I: crate::VecIndex,
-            T: #value_trait,
+            I: $crate::VecIndex,
+            T: $value_trait,
         {
             #[inline]
             fn db_path(&self) -> ::std::path::PathBuf {
@@ -141,12 +130,12 @@ pub fn vec_wrapper(input: TokenStream) -> TokenStream {
             }
 
             #[inline]
-            fn header(&self) -> &crate::Header {
+            fn header(&self) -> &$crate::Header {
                 self.0.header()
             }
 
             #[inline]
-            fn mut_header(&mut self) -> &mut crate::Header {
+            fn mut_header(&mut self) -> &mut $crate::Header {
                 self.0.mut_header()
             }
 
@@ -171,36 +160,36 @@ pub fn vec_wrapper(input: TokenStream) -> TokenStream {
             }
 
             #[inline]
-            fn write(&mut self) -> crate::Result<()> {
+            fn write(&mut self) -> $crate::Result<()> {
                 self.0.write()
             }
 
             #[inline]
-            fn serialize_changes(&self) -> crate::Result<Vec<u8>> {
+            fn serialize_changes(&self) -> $crate::Result<Vec<u8>> {
                 self.0.serialize_changes()
             }
 
-            fn remove(self) -> crate::Result<()> {
+            fn remove(self) -> $crate::Result<()> {
                 self.0.remove()
             }
         }
 
-        impl<I, T> crate::GenericStoredVec<I, T> for #wrapper<I, T>
+        impl<I, T> $crate::GenericStoredVec<I, T> for $wrapper<I, T>
         where
-            I: crate::VecIndex,
-            T: #value_trait,
+            I: $crate::VecIndex,
+            T: $value_trait,
         {
             #[inline]
             fn unchecked_read_at(
                 &self,
                 index: usize,
                 reader: &::rawdb::Reader,
-            ) -> crate::Result<T> {
+            ) -> $crate::Result<T> {
                 self.0.unchecked_read_at(index, reader)
             }
 
             #[inline(always)]
-            fn read_value_from_bytes(&self, bytes: &[u8]) -> crate::Result<T> {
+            fn read_value_from_bytes(&self, bytes: &[u8]) -> $crate::Result<T> {
                 self.0.read_value_from_bytes(bytes)
             }
 
@@ -245,7 +234,7 @@ pub fn vec_wrapper(input: TokenStream) -> TokenStream {
             }
 
             #[inline]
-            fn reset(&mut self) -> crate::Result<()> {
+            fn reset(&mut self) -> $crate::Result<()> {
                 self.0.reset()
             }
 
@@ -254,7 +243,7 @@ pub fn vec_wrapper(input: TokenStream) -> TokenStream {
                 &self,
                 index: usize,
                 reader: &::rawdb::Reader,
-            ) -> crate::Result<T> {
+            ) -> $crate::Result<T> {
                 self.0.get_stored_value_for_serialization(index, reader)
             }
 
@@ -264,7 +253,7 @@ pub fn vec_wrapper(input: TokenStream) -> TokenStream {
             }
 
             #[inline]
-            fn truncate_if_needed_at(&mut self, index: usize) -> crate::Result<()> {
+            fn truncate_if_needed_at(&mut self, index: usize) -> $crate::Result<()> {
                 self.0.truncate_if_needed_at(index)
             }
 
@@ -279,53 +268,76 @@ pub fn vec_wrapper(input: TokenStream) -> TokenStream {
             }
 
             #[inline]
-            fn stamped_flush_with_changes(
-                &mut self,
-                stamp: crate::Stamp,
-            ) -> crate::Result<()> {
+            fn stamped_flush_with_changes(&mut self, stamp: $crate::Stamp) -> $crate::Result<()> {
                 self.0.stamped_flush_with_changes(stamp)
             }
 
             #[inline]
-            fn rollback_before(&mut self, stamp: crate::Stamp) -> crate::Result<crate::Stamp> {
+            fn rollback_before(&mut self, stamp: $crate::Stamp) -> $crate::Result<$crate::Stamp> {
                 self.0.rollback_before(stamp)
             }
 
             #[inline]
-            fn rollback(&mut self) -> crate::Result<()> {
+            fn rollback(&mut self) -> $crate::Result<()> {
                 self.0.rollback()
             }
 
             #[inline]
-            fn deserialize_then_undo_changes(&mut self, bytes: &[u8]) -> crate::Result<()> {
+            fn deserialize_then_undo_changes(&mut self, bytes: &[u8]) -> $crate::Result<()> {
                 self.0.deserialize_then_undo_changes(bytes)
             }
         }
 
-        impl<'a, I, T> IntoIterator for &'a #wrapper<I, T>
+        impl<'a, I, T> IntoIterator for &'a $wrapper<I, T>
         where
-            I: crate::VecIndex,
-            T: #value_trait,
+            I: $crate::VecIndex,
+            T: $value_trait,
         {
             type Item = T;
-            type IntoIter = #iterator<'a, I, T>;
+            type IntoIter = $iterator<'a, I, T>;
 
             fn into_iter(self) -> Self::IntoIter {
                 self.iter()
-                    .expect(concat!(stringify!(#iterator), "::new(self) to work"))
+                    .expect(concat!(stringify!($iterator), "::new(self) to work"))
             }
         }
 
-        impl<I, T> crate::IterableVec<I, T> for #wrapper<I, T>
+        impl<I, T> $crate::IterableVec<I, T> for $wrapper<I, T>
         where
-            I: crate::VecIndex,
-            T: #value_trait,
+            I: $crate::VecIndex,
+            T: $value_trait,
         {
-            fn iter(&self) -> crate::BoxedVecIterator<'_, I, T> {
+            fn iter(&self) -> $crate::BoxedVecIterator<'_, I, T> {
                 Box::new(self.into_iter())
             }
         }
-    };
 
-    TokenStream::from(expanded)
+        impl<I, T> $wrapper<I, T>
+        where
+            I: $crate::VecIndex,
+            T: $value_trait,
+        {
+            #[inline]
+            pub fn iter(&self) -> $crate::Result<$iterator<'_, I, T>> {
+                self.0.iter()
+            }
+
+            #[inline]
+            pub fn clean_iter(&self) -> $crate::Result<$clean_iter<'_, I, T>> {
+                self.0.clean_iter()
+            }
+
+            #[inline]
+            pub fn dirty_iter(&self) -> $crate::Result<$dirty_iter<'_, I, T>> {
+                self.0.dirty_iter()
+            }
+
+            #[inline]
+            pub fn boxed_iter(&self) -> $crate::Result<$crate::BoxedVecIterator<'_, I, T>> {
+                self.0.boxed_iter()
+            }
+        }
+    };
 }
+
+pub(crate) use impl_vec_wrapper;
