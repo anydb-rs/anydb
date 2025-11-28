@@ -139,9 +139,12 @@ where
 
     #[inline]
     fn compress_page(chunk: &[T]) -> Result<Vec<u8>> {
-        if chunk.len() > Self::PER_PAGE {
-            panic!();
-        }
+        debug_assert!(
+            chunk.len() <= Self::PER_PAGE,
+            "chunk length {} exceeds PER_PAGE {}",
+            chunk.len(),
+            Self::PER_PAGE
+        );
 
         S::compress(chunk)
     }

@@ -40,17 +40,17 @@ impl Pages {
     }
 
     pub fn flush(&mut self) -> Result<()> {
-        if self.change_at.is_none() {
+        let Some(change_at) = self.change_at.take() else {
             return Ok(());
-        }
+        };
 
-        let change_at = self.change_at.take().unwrap();
         let at = change_at * Self::SIZE_OF_PAGE;
+        let pages_to_write = self.vec.len() - change_at;
 
-        let bytes: Vec<u8> = self.vec[change_at..]
-            .iter()
-            .flat_map(|page| page.to_bytes())
-            .collect();
+        let mut bytes = Vec::with_capacity(pages_to_write * Self::SIZE_OF_PAGE);
+        for page in &self.vec[change_at..] {
+            bytes.extend_from_slice(&page.to_bytes());
+        }
 
         self.region.truncate_write(at, &bytes)?;
 

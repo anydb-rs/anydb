@@ -46,17 +46,17 @@ where
         source2: IterableBoxedVec<S2I, S2T>,
         compute: ComputeFrom2<I, T, S1I, S1T, S2I, S2T>,
     ) -> Self {
-        if ([
-            source1.index_type_to_string(),
-            source2.index_type_to_string(),
-        ])
-        .into_iter()
-        .filter(|t| *t == I::to_string())
-        .count()
-            == 0
-        {
-            panic!("At least one should have same index");
-        }
+        let target = I::to_string();
+        let s1 = source1.index_type_to_string();
+        let s2 = source2.index_type_to_string();
+
+        assert!(
+            s1 == target || s2 == target,
+            "LazyVecFrom2: at least one source must have index type {}, got {} and {}",
+            target,
+            s1,
+            s2
+        );
 
         Self {
             name: name.to_string(),

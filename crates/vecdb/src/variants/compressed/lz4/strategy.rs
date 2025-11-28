@@ -31,17 +31,20 @@ where
     T: LZ4VecValue,
 {
     fn compress(values: &[T]) -> Result<Vec<u8>> {
-        let bytes: Vec<u8> = values.iter().flat_map(|v| v.to_bytes()).collect();
+        let mut bytes = Vec::with_capacity(values.len() * size_of::<T>());
+        for v in values {
+            bytes.extend_from_slice(&v.to_bytes());
+        }
         Ok(lz4_flex::compress_prepend_size(&bytes))
     }
 
     fn decompress(bytes: &[u8], expected_len: usize) -> Result<Vec<T>> {
         let decompressed = lz4_flex::decompress_size_prepended(bytes)?;
 
-        let vec = decompressed
-            .chunks_exact(size_of::<T>())
-            .map(T::from_bytes)
-            .collect::<Result<Vec<T>>>()?;
+        let mut vec = Vec::with_capacity(expected_len);
+        for chunk in decompressed.chunks_exact(size_of::<T>()) {
+            vec.push(T::from_bytes(chunk)?);
+        }
 
         if likely(vec.len() == expected_len) {
             return Ok(vec);

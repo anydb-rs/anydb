@@ -43,9 +43,13 @@ where
         source: IterableBoxedVec<S1I, S1T>,
         compute: ComputeFrom1<I, T, S1I, S1T>,
     ) -> Self {
-        if I::to_string() != S1I::to_string() {
-            unreachable!()
-        }
+        assert_eq!(
+            I::to_string(),
+            S1I::to_string(),
+            "LazyVecFrom1 index type mismatch: expected {}, got {}",
+            I::to_string(),
+            S1I::to_string()
+        );
 
         Self {
             name: name.to_string(),

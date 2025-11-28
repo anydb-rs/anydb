@@ -28,7 +28,6 @@ pub struct CleanCompressedVecIterator<'a, I, T, S> {
     // Decoded page cache
     decoded_values: Vec<T>,
     decoded_page_index: usize, // usize::MAX means no page decoded
-    decoded_len: usize,
     pages: RwLockReadGuard<'a, Pages>,
     pub(crate) stored_len: usize,
     index: usize,
@@ -65,7 +64,6 @@ where
             buffer_page_start: 0,
             decoded_values: Vec::with_capacity(Self::PER_PAGE),
             decoded_page_index: Self::NO_PAGE,
-            decoded_len: 0,
             pages,
             stored_len,
             index: 0,
@@ -87,7 +85,6 @@ where
     #[inline(always)]
     fn clear_decoded_page(&mut self) {
         self.decoded_page_index = Self::NO_PAGE;
-        self.decoded_len = 0;
     }
 
     /// Set the absolute end position, capped at stored_len and current end_index
@@ -164,7 +161,6 @@ where
 
         self.decoded_values = S::decompress(compressed_data, values_count).ok()?;
         self.decoded_page_index = page_index;
-        self.decoded_len = self.decoded_values.len();
 
         Some(())
     }
