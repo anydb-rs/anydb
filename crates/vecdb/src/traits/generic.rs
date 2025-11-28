@@ -10,6 +10,9 @@ use crate::{
 const ONE_KIB: usize = 1024;
 const ONE_MIB: usize = ONE_KIB * ONE_KIB;
 const ONE_GIB: usize = ONE_KIB * ONE_MIB;
+
+/// Maximum in-memory cache size before forcing a flush (1 GiB).
+/// Prevents unbounded memory growth when pushing many values without flushing.
 const MAX_CACHE_SIZE: usize = ONE_GIB;
 
 use super::{VecIndex, VecValue};

@@ -32,7 +32,8 @@ impl<'a, I: VecIndex, T: VecValue> Lookback<'a, I, T> {
         match self {
             Self::Buffer { window, buf } => {
                 if buf.len() > *window {
-                    buf.front().cloned().unwrap()
+                    // SAFETY: We just checked buf.len() > window, so buf is non-empty
+                    buf.front().cloned().expect("buffer should be non-empty")
                 } else {
                     default
                 }
@@ -55,7 +56,8 @@ impl<'a, I: VecIndex, T: VecValue> Lookback<'a, I, T> {
         match self {
             Self::Buffer { window, buf } => {
                 let val = if buf.len() == *window {
-                    buf.pop_front().unwrap()
+                    // SAFETY: We just checked buf.len() == window (non-zero), so buf is non-empty
+                    buf.pop_front().expect("buffer should be non-empty")
                 } else {
                     default
                 };

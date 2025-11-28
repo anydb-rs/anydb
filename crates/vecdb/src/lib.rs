@@ -32,5 +32,10 @@ pub use variants::*;
 pub use version::*;
 
 const ONE_KIB: usize = 1024;
+
+/// Buffer size for reading compressed data (512 KiB).
+/// Chosen to balance memory usage with I/O efficiency - large enough to
+/// amortize syscall overhead while fitting comfortably in L2/L3 cache.
 const BUFFER_SIZE: usize = 512 * ONE_KIB;
+
 const SIZE_OF_U64: usize = std::mem::size_of::<u64>();

@@ -64,6 +64,12 @@ pub enum Error {
     PagesStillReferenced,
     #[error("Invalid format byte: {0}")]
     InvalidFormat(u8),
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(&'static str),
+    #[error("Arithmetic overflow")]
+    Overflow,
+    #[error("Arithmetic underflow")]
+    Underflow,
 }
 
 #[cfg(feature = "zerocopy")]

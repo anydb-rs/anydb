@@ -19,8 +19,11 @@ pub use page::*;
 pub use pages::*;
 pub use strategy::*;
 
-/// Maximum size in bytes of a single uncompressed page
-pub(crate) const MAX_UNCOMPRESSED_PAGE_SIZE: usize = 16 * 1024; // 16 KiB
+/// Maximum size in bytes of a single uncompressed page (16 KiB).
+/// Smaller pages reduce memory overhead during decompression and improve
+/// random access performance, while larger pages compress more efficiently.
+/// 16 KiB balances these trade-offs for typical workloads.
+pub(crate) const MAX_UNCOMPRESSED_PAGE_SIZE: usize = 16 * 1024;
 
 const VERSION: Version = Version::TWO;
 
@@ -114,7 +117,8 @@ where
             return Err(Error::ExpectVecToHaveIndex);
         }
 
-        let page = pages.get(page_index).unwrap();
+        // SAFETY: We checked page_index < pages.len() above
+        let page = pages.get(page_index).expect("page should exist after bounds check");
         let len = page.bytes as usize;
         let offset = page.start as usize;
 
@@ -350,7 +354,10 @@ where
             let page_index = starting_page_index + i;
 
             let start = if page_index != 0 {
-                let prev = pages.get(page_index - 1).unwrap();
+                // SAFETY: page_index > 0, so page_index - 1 >= 0; pages grow sequentially
+                let prev = pages
+                    .get(page_index - 1)
+                    .expect("previous page should exist");
                 prev.start + prev.bytes as u64
             } else {
                 offset

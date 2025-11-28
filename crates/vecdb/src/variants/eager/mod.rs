@@ -4,7 +4,6 @@ use std::{
     fmt::Debug,
     iter::Sum,
     ops::{Add, Div, Mul, Sub},
-    panic,
     path::PathBuf,
 };
 
@@ -17,7 +16,7 @@ pub use checked_sub::*;
 pub use saturating_add::*;
 
 use crate::{
-    AnyStoredVec, AnyVec, BoxedVecIterator, CollectableVec, Exit, GenericStoredVec, Header,
+    AnyStoredVec, AnyVec, BoxedVecIterator, CollectableVec, Error, Exit, GenericStoredVec, Header,
     ImportOptions, Importable, IterableVec, PrintableIndex, Result, StoredVec, TypedVec, VecIndex,
     VecValue, Version,
 };
@@ -351,7 +350,13 @@ where
             max_from,
             subtracted,
             subtracter,
-            |(i, v1, v2, ..)| (i, (v1.checked_sub(v2).unwrap())),
+            |(i, v1, v2, ..)| {
+                (
+                    i,
+                    v1.checked_sub(v2)
+                        .expect("subtraction underflow in compute_subtract"),
+                )
+            },
             exit,
         )
     }
@@ -867,14 +872,11 @@ where
 
                 let sum = if processed_values_count > len {
                     let prev_sum = prev.as_ref().unwrap().clone();
-                    // Pop the oldest value from our window buffer
+                    // Pop the oldest value from our window buffer (we own it, no clone needed)
                     let value_to_subtract = window_values.pop_front().unwrap();
                     prev_sum
-                        .clone()
-                        .checked_sub(value_to_subtract.clone())
-                        .unwrap_or_else(|| {
-                            panic!("Underflow: prev_sum={prev_sum:?}, sub={value_to_subtract:?}")
-                        })
+                        .checked_sub(value_to_subtract)
+                        .ok_or(Error::Underflow)?
                         + value.clone()
                 } else {
                     prev.as_ref().unwrap().clone() + value.clone()
@@ -988,7 +990,9 @@ where
         )?;
 
         if others.is_empty() {
-            unreachable!("others should've length of 1 at least");
+            return Err(Error::InvalidArgument(
+                "others must have at least one element",
+            ));
         }
 
         self.repeat_until_complete(exit, |this| {
@@ -1321,7 +1325,9 @@ where
         V::T: From<f32>,
     {
         if days == 0 || !days.is_multiple_of(365) {
-            panic!("bad days");
+            return Err(Error::InvalidArgument(
+                "days must be non-zero and a multiple of 365",
+            ));
         }
 
         let years = days / 365;

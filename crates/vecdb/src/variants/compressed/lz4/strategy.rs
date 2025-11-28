@@ -1,8 +1,8 @@
 use std::marker::PhantomData;
 
-use rawdb::likely;
+use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 
-use crate::{Error, RawStrategy, Result};
+use crate::{RawStrategy, Result};
 
 use super::super::inner::CompressionStrategy;
 use super::value::LZ4VecValue;
@@ -31,28 +31,11 @@ where
     T: LZ4VecValue,
 {
     fn compress(values: &[T]) -> Result<Vec<u8>> {
-        let mut bytes = Vec::with_capacity(size_of_val(values));
-        for v in values {
-            bytes.extend_from_slice(&v.to_bytes());
-        }
-        Ok(lz4_flex::compress_prepend_size(&bytes))
+        Ok(compress_prepend_size(&Self::values_to_bytes(values)))
     }
 
     fn decompress(bytes: &[u8], expected_len: usize) -> Result<Vec<T>> {
-        let decompressed = lz4_flex::decompress_size_prepended(bytes)?;
-
-        let mut vec = Vec::with_capacity(expected_len);
-        for chunk in decompressed.chunks_exact(size_of::<T>()) {
-            vec.push(T::from_bytes(chunk)?);
-        }
-
-        if likely(vec.len() == expected_len) {
-            return Ok(vec);
-        }
-
-        Err(Error::DecompressionMismatch {
-            expected_len,
-            actual_len: vec.len(),
-        })
+        let decompressed = decompress_size_prepended(bytes)?;
+        Self::bytes_to_values(&decompressed, expected_len)
     }
 }

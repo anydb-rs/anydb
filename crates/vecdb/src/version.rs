@@ -14,6 +14,7 @@ use crate::{Bytes, Error, Result, SIZE_OF_U64};
 /// in computation logic or source data versions. Supports validation
 /// against persisted versions to ensure compatibility.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[must_use = "Version values should be used for compatibility checks"]
 pub struct Version(u64);
 
 impl Version {

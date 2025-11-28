@@ -7,6 +7,8 @@ use crate::{Error, RawStrategy, Result, likely};
 use super::super::inner::CompressionStrategy;
 use super::value::{AsInnerSlice, FromInnerSlice, PcoVecValue};
 
+/// Pcodec compression level (0-12). Level 4 provides good compression
+/// for most numeric data while maintaining reasonable compression speed.
 const PCO_COMPRESSION_LEVEL: usize = 4;
 
 /// Pcodec compression strategy for numerical data.
@@ -33,7 +35,7 @@ where
     T: PcoVecValue,
 {
     fn compress(values: &[T]) -> Result<Vec<u8>> {
-        Ok(simpler_compress(values.as_inner_slice(), PCO_COMPRESSION_LEVEL).unwrap())
+        Ok(simpler_compress(values.as_inner_slice(), PCO_COMPRESSION_LEVEL)?)
     }
 
     fn decompress(bytes: &[u8], expected_len: usize) -> Result<Vec<T>> {

@@ -1,12 +1,14 @@
 use std::marker::PhantomData;
 
-use rawdb::likely;
+use zstd::{decode_all, encode_all};
 
-use crate::{Error, RawStrategy, Result};
+use crate::{RawStrategy, Result};
 
 use super::super::inner::CompressionStrategy;
 use super::value::ZstdVecValue;
 
+/// Zstd compression level (1-22). Level 3 provides a good balance
+/// between compression ratio and speed for most workloads.
 const ZSTD_COMPRESSION_LEVEL: i32 = 3;
 
 /// Zstd compression strategy for high compression ratios.
@@ -33,28 +35,12 @@ where
     T: ZstdVecValue,
 {
     fn compress(values: &[T]) -> Result<Vec<u8>> {
-        let mut bytes = Vec::with_capacity(size_of_val(values));
-        for v in values {
-            bytes.extend_from_slice(&v.to_bytes());
-        }
-        Ok(zstd::encode_all(bytes.as_slice(), ZSTD_COMPRESSION_LEVEL)?)
+        let bytes = Self::values_to_bytes(values);
+        Ok(encode_all(bytes.as_slice(), ZSTD_COMPRESSION_LEVEL)?)
     }
 
     fn decompress(bytes: &[u8], expected_len: usize) -> Result<Vec<T>> {
-        let decompressed = zstd::decode_all(bytes)?;
-
-        let mut vec = Vec::with_capacity(expected_len);
-        for chunk in decompressed.chunks_exact(size_of::<T>()) {
-            vec.push(T::from_bytes(chunk)?);
-        }
-
-        if likely(vec.len() == expected_len) {
-            return Ok(vec);
-        }
-
-        Err(Error::DecompressionMismatch {
-            expected_len,
-            actual_len: vec.len(),
-        })
+        let decompressed = decode_all(bytes)?;
+        Self::bytes_to_values(&decompressed, expected_len)
     }
 }
