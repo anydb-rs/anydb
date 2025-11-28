@@ -9,7 +9,10 @@
 use rawdb::Database;
 use std::ops::DerefMut;
 use tempfile::TempDir;
-use vecdb::{AnyStoredVec, CollectableVec, GenericStoredVec, ImportOptions, Importable, Result, Stamp, StoredVec, Version};
+use vecdb::{
+    AnyStoredVec, CollectableVec, GenericStoredVec, ImportOptions, Importable, Result, Stamp,
+    StoredVec, Version,
+};
 
 // ============================================================================
 // Test Setup
@@ -213,7 +216,7 @@ mod generic_rollback {
         assert_eq!(vec.collect(), vec![0, 1, 2, 3, 4, 5, 6, 7, 8]);
 
         // Rollback before stamp 4 (should go to stamp 3)
-        vec.rollback_before(Stamp::new(4))?;
+        let _ = vec.rollback_before(Stamp::new(4))?;
         assert_eq!(vec.collect(), vec![0, 1, 2, 3, 4, 5, 6]);
         assert_eq!(vec.stamp(), Stamp::new(3));
 
@@ -767,9 +770,9 @@ mod raw_rollback {
     // Implementations for BytesVec
     // ============================================================================
 
-    use vecdb::{BytesStrategy, BytesVec};
     #[cfg(not(feature = "zerocopy"))]
     use vecdb::RawVecInner;
+    use vecdb::{BytesStrategy, BytesVec};
 
     impl RollbackVec for BytesVec<usize, u32> {
         fn import_with_changes<'a>(
@@ -1399,7 +1402,7 @@ mod raw_rollback {
         assert_eq!(vec.deref_mut().collect(), vec![0, 1, 2, 3, 4, 5, 6, 7, 8]);
 
         // Rollback before stamp 4 (should go to stamp 3)
-        vec.deref_mut().rollback_before(Stamp::new(4))?;
+        let _ = vec.deref_mut().rollback_before(Stamp::new(4))?;
         assert_eq!(vec.deref_mut().collect(), vec![0, 1, 2, 3, 4, 5, 6]);
         assert_eq!(vec.deref_mut().stamp(), Stamp::new(3));
 

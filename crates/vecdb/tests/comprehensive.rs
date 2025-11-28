@@ -464,7 +464,7 @@ where
             ]
         );
 
-        vec.rollback_before(Stamp::new(1))?;
+        let _ = vec.rollback_before(Stamp::new(1))?;
 
         assert_eq!(
             vec.collect(),
@@ -561,7 +561,7 @@ where
             ]
         );
 
-        vec.rollback_before(Stamp::new(1))?;
+        let _ = vec.rollback_before(Stamp::new(1))?;
 
         assert_eq!(vec.stamp(), Stamp::new(0));
 
@@ -611,7 +611,7 @@ where
         vec.stamped_flush_with_changes(Stamp::new(2))?;
         assert_eq!(vec.stamp(), Stamp::new(2));
 
-        vec.rollback_before(Stamp::new(1))?;
+        let _ = vec.rollback_before(Stamp::new(1))?;
 
         assert_eq!(vec.stamp(), Stamp::new(0));
 

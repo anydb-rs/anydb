@@ -481,7 +481,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ]
         );
 
-        vec.rollback_before(Stamp::new(1))?;
+        let _ = vec.rollback_before(Stamp::new(1))?;
 
         assert_eq!(
             vec.collect(),
@@ -651,7 +651,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ]
         );
 
-        vec.rollback_before(Stamp::new(1))?;
+        let _ = vec.rollback_before(Stamp::new(1))?;
 
         dbg!((
             vec.prev_stored_len(),
@@ -738,7 +738,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         dbg!("-----------------------------------------------------------------------");
 
-        vec.rollback_before(Stamp::new(1))?;
+        let _ = vec.rollback_before(Stamp::new(1))?;
 
         dbg!((
             vec.prev_stored_len(),

@@ -626,17 +626,20 @@ where
         // Append RawVecInner-specific data: prev_updated, updated, prev_holes, holes
         let reader = self.create_reader();
 
-        let (prev_modified_indexes, prev_modified_values) = self
-            .prev_updated
-            .iter()
-            .map(|(&i, v)| (i, v.clone()))
-            .collect::<(Vec<_>, Vec<_>)>();
-        bytes.extend(prev_modified_indexes.len().to_bytes());
-        bytes.extend(prev_modified_indexes.to_bytes());
-        // Serialize values using strategy
-        for v in &prev_modified_values {
-            bytes.extend(S::write(v));
-        }
+        // ---
+        // Left in case it's needed again
+        // ---
+        // let (prev_modified_indexes, prev_modified_values) = self
+        //     .prev_updated
+        //     .iter()
+        //     .map(|(&i, v)| (i, v.clone()))
+        //     .collect::<(Vec<_>, Vec<_>)>();
+        // bytes.extend(prev_modified_indexes.len().to_bytes());
+        // bytes.extend(prev_modified_indexes.to_bytes());
+        // // Serialize values using strategy
+        // for v in &prev_modified_values {
+        //     bytes.extend(S::write(v));
+        // }
 
         let (modified_indexes, modified_values) = self
             .updated
@@ -662,9 +665,12 @@ where
         bytes.extend(prev_holes.len().to_bytes());
         bytes.extend(prev_holes.to_bytes());
 
-        let holes = self.holes.iter().copied().collect::<Vec<_>>();
-        bytes.extend(holes.len().to_bytes());
-        bytes.extend(holes.to_bytes());
+        // ---
+        // Left in case it's needed again
+        // ---
+        // let holes = self.holes.iter().copied().collect::<Vec<_>>();
+        // bytes.extend(holes.len().to_bytes());
+        // bytes.extend(holes.to_bytes());
 
         Ok(bytes)
     }
@@ -831,24 +837,27 @@ where
 
         // Parse RawVecInner-specific data: prev_updated, updated, prev_holes, holes
 
-        let prev_modified_len = usize::from_bytes(&bytes[pos..pos + len])?;
-        pos += len;
-        len = SIZE_OF_U64 * prev_modified_len;
-        let prev_indexes = bytes[pos..pos + len].chunks(SIZE_OF_U64);
-        pos += len;
-        len = Self::SIZE_OF_T * prev_modified_len;
-        let prev_values = bytes[pos..pos + len].chunks(Self::SIZE_OF_T);
-        let _prev_updated: BTreeMap<usize, T> = prev_indexes
-            .zip(prev_values)
-            .map(|(i, v)| {
-                let idx = usize::from_bytes(i)?;
-                let val = S::read(v)?;
-                Ok((idx, val))
-            })
-            .collect::<Result<_>>()?;
-        pos += len;
+        // ---
+        // Left in case it's needed again
+        // ---
+        // let prev_modified_len = usize::from_bytes(&bytes[pos..pos + len])?;
+        // pos += len;
+        // len = SIZE_OF_U64 * prev_modified_len;
+        // let prev_indexes = bytes[pos..pos + len].chunks(SIZE_OF_U64);
+        // pos += len;
+        // len = Self::SIZE_OF_T * prev_modified_len;
+        // let prev_values = bytes[pos..pos + len].chunks(Self::SIZE_OF_T);
+        // let prev_updated: BTreeMap<usize, T> = prev_indexes
+        //     .zip(prev_values)
+        //     .map(|(i, v)| {
+        //         let idx = usize::from_bytes(i)?;
+        //         let val = S::read(v)?;
+        //         Ok((idx, val))
+        //     })
+        //     .collect::<Result<_>>()?;
+        // pos += len;
 
-        len = SIZE_OF_U64;
+        // len = SIZE_OF_U64;
         let modified_len = usize::from_bytes(&bytes[pos..pos + len])?;
         pos += len;
         len = SIZE_OF_U64 * modified_len;
@@ -874,16 +883,19 @@ where
             .chunks(SIZE_OF_U64)
             .map(usize::from_bytes)
             .collect::<Result<BTreeSet<_>>>()?;
-        pos += len;
+        // pos += len;
 
-        len = SIZE_OF_U64;
-        let holes_len = usize::from_bytes(&bytes[pos..pos + len])?;
-        pos += len;
-        len = SIZE_OF_U64 * holes_len;
-        let _holes = bytes[pos..pos + len]
-            .chunks(SIZE_OF_U64)
-            .map(usize::from_bytes)
-            .collect::<Result<BTreeSet<_>>>()?;
+        // ---
+        // Left in case it's needed again
+        // ---
+        // len = SIZE_OF_U64;
+        // let holes_len = usize::from_bytes(&bytes[pos..pos + len])?;
+        // pos += len;
+        // len = SIZE_OF_U64 * holes_len;
+        // let holes = bytes[pos..pos + len]
+        //     .chunks(SIZE_OF_U64)
+        //     .map(usize::from_bytes)
+        //     .collect::<Result<BTreeSet<_>>>()?;
 
         if !self.holes.is_empty() || !self.prev_holes.is_empty() || !prev_holes.is_empty() {
             self.holes = prev_holes.clone();
