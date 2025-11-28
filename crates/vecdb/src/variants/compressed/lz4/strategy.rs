@@ -31,7 +31,7 @@ where
     T: LZ4VecValue,
 {
     fn compress(values: &[T]) -> Result<Vec<u8>> {
-        let mut bytes = Vec::with_capacity(values.len() * size_of::<T>());
+        let mut bytes = Vec::with_capacity(size_of_val(values));
         for v in values {
             bytes.extend_from_slice(&v.to_bytes());
         }

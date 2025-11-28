@@ -24,6 +24,7 @@ rayon = "1.11.0"
 tempfile = "3.23.0"
 vecdb = { version = "0.3.20", path = "crates/vecdb" }
 vecdb_derive = { version = "0.3.20", path = "crates/vecdb_derive" }
+vecdb_macros = { version = "0.3.20", path = "crates/vecdb_macros" }
 
 [workspace.metadata.release]
 shared-version = true
