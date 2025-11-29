@@ -3,7 +3,7 @@
 use rawdb::Database;
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, EagerVec, Exit, GenericStoredVec, Importable, IterableVec, StoredVec, Version,
+    AnyStoredVec, EagerVec, Exit, GenericStoredVec, ImportableVec, IterableVec, StoredVec, Version,
 };
 
 // ============================================================================

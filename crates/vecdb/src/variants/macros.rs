@@ -13,7 +13,7 @@
 ///
 /// This generates implementations for:
 /// - `Deref` / `DerefMut`
-/// - `Importable`
+/// - `ImportableVec`
 /// - `AnyVec`
 /// - `TypedVec`
 /// - `AnyStoredVec`
@@ -39,7 +39,7 @@ macro_rules! impl_vec_wrapper {
             }
         }
 
-        impl<I, T> $crate::Importable for $wrapper<I, T>
+        impl<I, T> $crate::ImportableVec for $wrapper<I, T>
         where
             I: $crate::VecIndex,
             T: $value_trait,

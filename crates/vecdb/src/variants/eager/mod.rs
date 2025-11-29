@@ -15,7 +15,7 @@ pub use saturating_add::*;
 
 use crate::{
     AnyStoredVec, AnyVec, BoxedVecIterator, Exit, GenericStoredVec, Header, ImportOptions,
-    Importable, IterableVec, PrintableIndex, Result, StoredVec, TypedVec, Version,
+    ImportableVec, IterableVec, PrintableIndex, Result, StoredVec, TypedVec, Version,
 };
 
 /// Wrapper for computing and storing derived values from source vectors.
@@ -39,7 +39,7 @@ use crate::{
 #[must_use = "Vector should be stored to keep data accessible"]
 pub struct EagerVec<V>(V);
 
-impl<V: Importable> Importable for EagerVec<V> {
+impl<V: ImportableVec> ImportableVec for EagerVec<V> {
     fn import(db: &Database, name: &str, version: Version) -> Result<Self> {
         Ok(Self(V::import(db, name, version)?))
     }

@@ -9,7 +9,7 @@ use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, CollectableVec, GenericStoredVec, ImportOptions, Importable, RawStrategy,
+    AnyStoredVec, CollectableVec, GenericStoredVec, ImportOptions, ImportableVec, RawStrategy,
     RawVecInner, Reader, Result, Stamp, StoredVec, Version,
 };
 
@@ -17,7 +17,7 @@ use vecdb::{
 // Traits for Raw Vec Types (supporting holes/updates)
 // ============================================================================
 
-pub trait IntegrityVec: StoredVec<I = usize, T = u32> + DerefMut + Importable + Sized
+pub trait IntegrityVec: StoredVec<I = usize, T = u32> + DerefMut + ImportableVec + Sized
 where
     Self::Target: IntegrityOps,
 {

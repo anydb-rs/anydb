@@ -6,7 +6,7 @@ use crate::{ImportOptions, Result, Version};
 ///
 /// This provides a uniform interface for constructing stored vectors,
 /// enabling generic wrappers like `EagerVec` to work with any storage format.
-pub trait Importable: Sized {
+pub trait ImportableVec: Sized {
     /// Import from database, creating if needed.
     fn import(db: &Database, name: &str, version: Version) -> Result<Self>;
 

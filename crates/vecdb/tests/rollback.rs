@@ -10,7 +10,7 @@ use rawdb::Database;
 use std::ops::DerefMut;
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, CollectableVec, GenericStoredVec, ImportOptions, Importable, Result, Stamp,
+    AnyStoredVec, CollectableVec, GenericStoredVec, ImportOptions, ImportableVec, Result, Stamp,
     StoredVec, Version,
 };
 

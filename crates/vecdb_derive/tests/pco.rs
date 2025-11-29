@@ -1,6 +1,6 @@
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, AnyVec, CollectableVec, Database, GenericStoredVec, Importable, Pco, PcoVec,
+    AnyStoredVec, AnyVec, CollectableVec, Database, GenericStoredVec, ImportableVec, Pco, PcoVec,
     Version,
 };
 

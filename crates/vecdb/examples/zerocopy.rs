@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, fs, path::Path};
 
 use vecdb::{
-    AnyStoredVec, AnyVec, CollectableVec, Database, GenericStoredVec, Importable, Stamp,
+    AnyStoredVec, AnyVec, CollectableVec, Database, GenericStoredVec, ImportableVec, Stamp,
     TypedVecIterator, Version, ZeroCopyVec,
 };
 
