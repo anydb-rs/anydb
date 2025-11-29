@@ -4,12 +4,12 @@ use crate::{
     AnyCollectableVec, CollectableVec, Formattable, TypedVec, ValueWriter, VecIteratorWriter,
 };
 
-pub trait AnyWritableVec: AnyCollectableVec {
+pub trait AnyVecWithWriter: AnyCollectableVec {
     /// Create a value writer that can be advanced row by row
     fn create_writer(&self, from: Option<i64>, to: Option<i64>) -> Box<dyn ValueWriter + '_>;
 }
 
-impl<V> AnyWritableVec for V
+impl<V> AnyVecWithWriter for V
 where
     V: TypedVec,
     V: CollectableVec<V::I, V::T>,
