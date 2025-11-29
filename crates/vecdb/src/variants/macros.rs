@@ -194,8 +194,8 @@ macro_rules! impl_vec_wrapper {
             }
 
             #[inline]
-            fn value_to_bytes(&self, value: &T) -> Vec<u8> {
-                self.0.value_to_bytes(value)
+            fn write_value_to(&self, value: &T, buf: &mut Vec<u8>) {
+                self.0.write_value_to(value, buf)
             }
 
             #[inline]

@@ -62,9 +62,11 @@ impl Format {
 }
 
 impl Bytes for Format {
+    type Array = [u8; size_of::<Self>()];
+
     #[inline]
-    fn to_bytes(&self) -> Vec<u8> {
-        vec![*self as u8]
+    fn to_bytes(&self) -> Self::Array {
+        [*self as u8]
     }
 
     #[inline]

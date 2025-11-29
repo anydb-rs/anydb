@@ -21,8 +21,8 @@ where
     }
 
     #[inline(always)]
-    fn write(value: &T) -> Vec<u8> {
-        value.to_bytes()
+    fn write_to(value: &T, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(value.to_bytes().as_ref());
     }
 }
 

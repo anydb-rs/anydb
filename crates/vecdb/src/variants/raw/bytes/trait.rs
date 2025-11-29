@@ -13,10 +13,14 @@ use crate::{Error, Result};
 ///
 /// For maximum performance on a single system, use `ZeroCopyVec` instead.
 pub trait Bytes: Sized {
+    /// The byte array type returned by `to_bytes`.
+    /// For fixed-size types, this is `[u8; N]` where N is the size of the type.
+    type Array: AsRef<[u8]>;
+
     /// Serializes this value to bytes.
     ///
     /// For numeric types, this uses little-endian byte order (via `to_le_bytes`).
-    fn to_bytes(&self) -> Vec<u8>;
+    fn to_bytes(&self) -> Self::Array;
 
     /// Deserializes a value from bytes.
     ///
@@ -29,9 +33,11 @@ macro_rules! impl_bytes_for_numeric {
     ($($t:ty),*) => {
         $(
             impl Bytes for $t {
+                type Array = [u8; std::mem::size_of::<$t>()];
+
                 #[inline]
-                fn to_bytes(&self) -> Vec<u8> {
-                    self.to_le_bytes().to_vec()
+                fn to_bytes(&self) -> Self::Array {
+                    self.to_le_bytes()
                 }
 
                 #[inline]
@@ -55,9 +61,11 @@ macro_rules! impl_bytes_for_array {
     ($($n:expr),*) => {
         $(
             impl Bytes for [u8; $n] {
+                type Array = [u8; $n];
+
                 #[inline]
-                fn to_bytes(&self) -> Vec<u8> {
-                    self.to_vec()
+                fn to_bytes(&self) -> Self::Array {
+                    *self
                 }
 
                 #[inline]
@@ -81,6 +89,8 @@ pub trait BytesExt {
 
 impl<T: Bytes> BytesExt for [T] {
     fn to_bytes(&self) -> Vec<u8> {
-        self.iter().flat_map(|item| item.to_bytes()).collect()
+        self.iter()
+            .flat_map(|item| item.to_bytes().as_ref().to_vec())
+            .collect()
     }
 }

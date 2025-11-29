@@ -27,7 +27,7 @@ impl Version {
     }
 
     pub fn write(&self, path: &Path) -> Result<(), io::Error> {
-        fs::write(path, self.to_bytes())
+        fs::write(path, self.to_bytes().as_ref())
     }
 
     pub fn swap_bytes(self) -> Self {
@@ -36,8 +36,10 @@ impl Version {
 }
 
 impl Bytes for Version {
+    type Array = [u8; size_of::<Self>()];
+
     #[inline]
-    fn to_bytes(&self) -> Vec<u8> {
+    fn to_bytes(&self) -> Self::Array {
         self.0.to_bytes()
     }
 

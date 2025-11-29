@@ -15,7 +15,7 @@ pub trait CompressionStrategy<T>: RawStrategy<T> {
     fn values_to_bytes(values: &[T]) -> Vec<u8> {
         let mut bytes = Vec::with_capacity(size_of_val(values));
         for v in values {
-            bytes.extend_from_slice(&Self::write(v));
+            Self::write_to(v, &mut bytes);
         }
         bytes
     }

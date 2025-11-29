@@ -8,6 +8,6 @@ pub trait RawStrategy<T>: Send + Sync + Clone {
     /// Deserializes a value from its byte representation.
     fn read(bytes: &[u8]) -> Result<T>;
 
-    /// Serializes a value to its byte representation.
-    fn write(value: &T) -> Vec<u8>;
+    /// Serializes a value by appending its byte representation to the buffer.
+    fn write_to(value: &T, buf: &mut Vec<u8>);
 }

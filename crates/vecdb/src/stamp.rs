@@ -26,8 +26,10 @@ impl From<Stamp> for u64 {
 }
 
 impl Bytes for Stamp {
+    type Array = [u8; size_of::<Self>()];
+
     #[inline]
-    fn to_bytes(&self) -> Vec<u8> {
+    fn to_bytes(&self) -> Self::Array {
         self.0.to_bytes()
     }
 

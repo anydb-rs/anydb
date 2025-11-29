@@ -17,7 +17,7 @@ impl<T: ZeroCopyVecValue> RawStrategy<T> for ZeroCopyStrategy<T> {
     }
 
     #[inline(always)]
-    fn write(value: &T) -> Vec<u8> {
-        value.as_bytes().to_vec()
+    fn write_to(value: &T, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(value.as_bytes());
     }
 }

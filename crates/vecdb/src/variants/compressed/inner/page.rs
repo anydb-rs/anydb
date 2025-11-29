@@ -28,11 +28,13 @@ impl Page {
 }
 
 impl Bytes for Page {
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(16);
-        bytes.extend_from_slice(&self.start.to_bytes());
-        bytes.extend_from_slice(&self.bytes.to_bytes());
-        bytes.extend_from_slice(&self.values.to_bytes());
+    type Array = [u8; size_of::<Self>()];
+
+    fn to_bytes(&self) -> Self::Array {
+        let mut bytes = [0u8; 16];
+        bytes[0..8].copy_from_slice(&self.start.to_bytes());
+        bytes[8..12].copy_from_slice(&self.bytes.to_bytes());
+        bytes[12..16].copy_from_slice(&self.values.to_bytes());
         bytes
     }
 

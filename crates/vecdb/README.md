@@ -32,7 +32,7 @@ cargo add vecdb
 ```rust
 use vecdb::{
     AnyStoredVec, BytesVec, Database, GenericStoredVec,
-    Importable, Result, Version
+    ImportableVec, Result, Version
 };
 use std::path::Path;
 

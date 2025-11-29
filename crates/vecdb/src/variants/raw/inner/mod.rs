@@ -571,10 +571,10 @@ where
 
         if has_new_data {
             // Serialize pushed values using strategy
-            let bytes: Vec<u8> = mem::take(self.mut_pushed())
-                .iter()
-                .flat_map(|v| S::write(v))
-                .collect();
+            let mut bytes = Vec::with_capacity(pushed_len * Self::SIZE_OF_T);
+            for v in mem::take(self.mut_pushed()).iter() {
+                S::write_to(v, &mut bytes);
+            }
             self.region().clone().truncate_write(from, &bytes)?;
             self.update_stored_len(stored_len + pushed_len);
         } else if truncated {
@@ -584,7 +584,8 @@ where
         if has_updated_data {
             let updated = self.updated.take_current();
             updated.into_iter().try_for_each(|(i, v)| -> Result<()> {
-                let bytes = S::write(&v);
+                let mut bytes = Vec::with_capacity(Self::SIZE_OF_T);
+                S::write_to(&v, &mut bytes);
                 let at = (i * Self::SIZE_OF_T) + HEADER_OFFSET;
                 self.region().write_at(&bytes, at)?;
                 Ok(())
@@ -652,11 +653,11 @@ where
                 (i, val)
             })
             .collect::<(Vec<_>, Vec<_>)>();
-        bytes.extend(modified_indexes.len().to_bytes());
+        bytes.extend(modified_indexes.len().to_bytes().as_ref());
         bytes.extend(modified_indexes.to_bytes());
         // Serialize values using strategy
         for v in &modified_values {
-            bytes.extend(S::write(v));
+            S::write_to(v, &mut bytes);
         }
 
         let prev_holes = self.prev_holes().iter().copied().collect::<Vec<_>>();
@@ -696,8 +697,8 @@ where
     }
 
     #[inline(always)]
-    fn value_to_bytes(&self, value: &T) -> Vec<u8> {
-        S::write(value)
+    fn write_value_to(&self, value: &T, buf: &mut Vec<u8>) {
+        S::write_to(value, buf);
     }
 
     #[inline(always)]

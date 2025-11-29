@@ -419,8 +419,8 @@ where
         S::read(bytes)
     }
 
-    fn value_to_bytes(&self, value: &T) -> Vec<u8> {
-        S::write(value)
+    fn write_value_to(&self, value: &T, buf: &mut Vec<u8>) {
+        S::write_to(value, buf);
     }
 
     #[inline]

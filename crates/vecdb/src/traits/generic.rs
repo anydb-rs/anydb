@@ -80,13 +80,15 @@ where
     /// Deserializes a value from bytes. Implementors use their strategy.
     fn read_value_from_bytes(&self, bytes: &[u8]) -> Result<T>;
 
-    /// Serializes a value to bytes. Implementors use their strategy.
-    fn value_to_bytes(&self, value: &T) -> Vec<u8>;
+    /// Writes a value to the provided buffer. Implementors use their strategy.
+    fn write_value_to(&self, value: &T, buf: &mut Vec<u8>);
 
-    /// Serializes multiple values to bytes. Default uses value_to_bytes.
+    /// Writes multiple values to the provided buffer.
     #[inline(always)]
-    fn values_to_bytes(&self, values: &[T]) -> Vec<u8> {
-        values.iter().flat_map(|v| self.value_to_bytes(v)).collect()
+    fn write_values_to(&self, values: &[T], buf: &mut Vec<u8>) {
+        for v in values {
+            self.write_value_to(v, buf);
+        }
     }
 
     /// Reads value at usize index, creating a temporary reader.
@@ -711,14 +713,14 @@ where
             let truncated_vals = (stored_len..prev_stored_len)
                 .map(|i| self.get_stored_value_for_serialization(i, &reader))
                 .collect::<Result<Vec<_>>>()?;
-            bytes.extend(self.values_to_bytes(&truncated_vals));
+            self.write_values_to(&truncated_vals, &mut bytes);
         }
 
         bytes.extend(self.prev_pushed().len().to_bytes());
-        bytes.extend(self.values_to_bytes(self.prev_pushed()));
+        self.write_values_to(self.prev_pushed(), &mut bytes);
 
         bytes.extend(self.pushed().len().to_bytes());
-        bytes.extend(self.values_to_bytes(self.pushed()));
+        self.write_values_to(self.pushed(), &mut bytes);
 
         Ok(bytes)
     }

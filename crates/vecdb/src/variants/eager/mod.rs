@@ -199,8 +199,8 @@ where
     }
 
     #[inline]
-    fn value_to_bytes(&self, value: &V::T) -> Vec<u8> {
-        self.0.value_to_bytes(value)
+    fn write_value_to(&self, value: &V::T, buf: &mut Vec<u8>) {
+        self.0.write_value_to(value, buf)
     }
 
     #[inline]

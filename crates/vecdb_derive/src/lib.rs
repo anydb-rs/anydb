@@ -19,7 +19,9 @@ use syn::{Data, DataStruct, DeriveInput, Fields, parse_macro_input};
 ///
 /// ```rust,ignore
 /// impl Bytes for Wrapper<T> where T: Bytes {
-///     fn to_bytes(&self) -> Vec<u8> {
+///     type Array = <T as Bytes>::Array;
+///
+///     fn to_bytes(&self) -> Self::Array {
 ///         self.0.to_bytes()
 ///     }
 ///     fn from_bytes(bytes: &[u8]) -> Result<Self> {
@@ -73,7 +75,9 @@ pub fn derive_bytes(input: TokenStream) -> TokenStream {
 
         quote! {
             impl #impl_generics ::vecdb::Bytes for #struct_name #ty_generics #where_clause {
-                fn to_bytes(&self) -> Vec<u8> {
+                type Array = <#inner_type as ::vecdb::Bytes>::Array;
+
+                fn to_bytes(&self) -> Self::Array {
                     self.0.to_bytes()
                 }
 
@@ -85,7 +89,9 @@ pub fn derive_bytes(input: TokenStream) -> TokenStream {
     } else {
         quote! {
             impl ::vecdb::Bytes for #struct_name {
-                fn to_bytes(&self) -> Vec<u8> {
+                type Array = <#inner_type as ::vecdb::Bytes>::Array;
+
+                fn to_bytes(&self) -> Self::Array {
                     self.0.to_bytes()
                 }
 
@@ -186,7 +192,9 @@ pub fn derive_pco(input: TokenStream) -> TokenStream {
 
         quote! {
             impl #impl_generics ::vecdb::Bytes for #struct_name #ty_generics #where_clause {
-                fn to_bytes(&self) -> Vec<u8> {
+                type Array = <#inner_type as ::vecdb::Bytes>::Array;
+
+                fn to_bytes(&self) -> Self::Array {
                     self.0.to_bytes()
                 }
 
@@ -204,7 +212,9 @@ pub fn derive_pco(input: TokenStream) -> TokenStream {
     } else {
         quote! {
             impl ::vecdb::Bytes for #struct_name {
-                fn to_bytes(&self) -> Vec<u8> {
+                type Array = <#inner_type as ::vecdb::Bytes>::Array;
+
+                fn to_bytes(&self) -> Self::Array {
                     self.0.to_bytes()
                 }
 
