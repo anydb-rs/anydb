@@ -14,7 +14,7 @@ use crate::{
     AnyStoredVec, AnyVec, BUFFER_SIZE, BaseVec, BoxedVecIterator, Bytes, BytesExt,
     CleanRawVecIterator, DirtyRawVecIterator, Error, Format, GenericStoredVec, HEADER_OFFSET,
     Header, ImportOptions, IterableVec, RawVecIterator, Result, SIZE_OF_U64, Stamp, TypedVec,
-    VecIndex, VecValue, Version, vec_region_name_with,
+    VecIndex, VecValue, Version, WithPrev, vec_region_name_with,
 };
 
 mod strategy;
@@ -35,10 +35,8 @@ const VERSION: Version = Version::ONE;
 pub struct RawVecInner<I, T, S> {
     pub(crate) base: BaseVec<I, T>,
     has_stored_holes: bool,
-    holes: BTreeSet<usize>,
-    prev_holes: BTreeSet<usize>,
-    updated: BTreeMap<usize, T>,
-    prev_updated: BTreeMap<usize, T>,
+    holes: WithPrev<BTreeSet<usize>>,
+    updated: WithPrev<BTreeMap<usize, T>>,
     _strategy: PhantomData<S>,
 }
 
@@ -106,10 +104,8 @@ where
         let mut this = Self {
             base,
             has_stored_holes: holes.is_some(),
-            holes: holes.clone().unwrap_or_default(),
-            prev_holes: holes.unwrap_or_default(),
-            updated: BTreeMap::new(),
-            prev_updated: BTreeMap::new(),
+            holes: WithPrev::new(holes.unwrap_or_default()),
+            updated: WithPrev::default(),
             _strategy: PhantomData,
         };
 
@@ -126,11 +122,6 @@ where
             self.mut_header().write(&r)?;
         }
         Ok(())
-    }
-
-    #[inline]
-    pub fn prev_holes(&self) -> &BTreeSet<usize> {
-        &self.prev_holes
     }
 
     /// Returns optimal buffer size for I/O operations, aligned to SIZE_OF_T boundary.
@@ -169,17 +160,22 @@ where
 
     #[inline(always)]
     pub fn holes(&self) -> &BTreeSet<usize> {
-        &self.holes
+        self.holes.current()
     }
 
-    #[inline]
+    #[inline(always)]
+    pub fn prev_holes(&self) -> &BTreeSet<usize> {
+        self.holes.previous()
+    }
+
+    #[inline(always)]
     pub fn mut_holes(&mut self) -> &mut BTreeSet<usize> {
-        &mut self.holes
+        self.holes.current_mut()
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn mut_prev_holes(&mut self) -> &mut BTreeSet<usize> {
-        &mut self.prev_holes
+        self.holes.previous_mut()
     }
 
     // ============================================================================
@@ -188,22 +184,22 @@ where
 
     #[inline(always)]
     pub fn updated(&self) -> &BTreeMap<usize, T> {
-        &self.updated
+        self.updated.current()
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn mut_updated(&mut self) -> &mut BTreeMap<usize, T> {
-        &mut self.updated
+        self.updated.current_mut()
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn prev_updated(&self) -> &BTreeMap<usize, T> {
-        &self.prev_updated
+        self.updated.previous()
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn mut_prev_updated(&mut self) -> &mut BTreeMap<usize, T> {
-        &mut self.prev_updated
+        self.updated.previous_mut()
     }
 
     // ============================================================================
@@ -229,7 +225,7 @@ where
     #[inline]
     pub fn get_any_or_read_at(&self, index: usize, reader: &Reader) -> Result<Option<T>> {
         // Check holes first
-        if !self.holes.is_empty() && self.holes.contains(&index) {
+        if !self.holes().is_empty() && self.holes().contains(&index) {
             return Ok(None);
         }
 
@@ -241,8 +237,8 @@ where
         }
 
         // Check updated layer
-        if !self.updated.is_empty()
-            && let Some(updated_value) = self.updated.get(&index)
+        if !self.updated().is_empty()
+            && let Some(updated_value) = self.updated().get(&index)
         {
             return Ok(Some(updated_value.clone()));
         }
@@ -284,11 +280,11 @@ where
             }
         }
 
-        if !self.holes.is_empty() {
-            self.holes.remove(&index);
+        if !self.holes().is_empty() {
+            self.mut_holes().remove(&index);
         }
 
-        self.updated.insert(index, value);
+        self.mut_updated().insert(index, value);
 
         Ok(())
     }
@@ -318,7 +314,7 @@ where
     /// Returns the first empty index (either the first hole or the length).
     #[inline]
     pub fn get_first_empty_index(&self) -> I {
-        self.holes
+        self.holes()
             .first()
             .cloned()
             .unwrap_or_else(|| self.len_())
@@ -328,13 +324,15 @@ where
     /// Fills the first hole with the value, or pushes if there are no holes. Returns the index used.
     #[inline]
     pub fn fill_first_hole_or_push(&mut self, value: T) -> Result<I> {
-        Ok(if let Some(hole) = self.holes.pop_first().map(I::from) {
-            self.update(hole, value)?;
-            hole
-        } else {
-            self.push(value);
-            I::from(self.len() - 1)
-        })
+        Ok(
+            if let Some(hole) = self.mut_holes().pop_first().map(I::from) {
+                self.update(hole, value)?;
+                hole
+            } else {
+                self.push(value);
+                I::from(self.len() - 1)
+            },
+        )
     }
 
     // ============================================================================
@@ -378,10 +376,10 @@ where
     #[inline]
     #[doc(hidden)]
     pub fn unchecked_delete_at(&mut self, index: usize) {
-        if !self.updated.is_empty() {
-            self.updated.remove(&index);
+        if !self.updated().is_empty() {
+            self.mut_updated().remove(&index);
         }
-        self.holes.insert(index);
+        self.mut_holes().insert(index);
     }
 
     // ============================================================================
@@ -560,8 +558,8 @@ where
         let truncated = stored_len < real_stored_len;
         let expanded = stored_len > real_stored_len;
         let has_new_data = pushed_len != 0;
-        let has_updated_data = !self.updated.is_empty();
-        let has_holes = !self.holes.is_empty();
+        let has_updated_data = !self.updated().is_empty();
+        let has_holes = !self.holes().is_empty();
         let had_holes = self.has_stored_holes;
 
         if !truncated && !expanded && !has_new_data && !has_updated_data && !has_holes && !had_holes
@@ -584,7 +582,7 @@ where
         }
 
         if has_updated_data {
-            let updated = mem::take(&mut self.updated);
+            let updated = self.updated.take_current();
             updated.into_iter().try_for_each(|(i, v)| -> Result<()> {
                 let bytes = S::write(&v);
                 let at = (i * Self::SIZE_OF_T) + HEADER_OFFSET;
@@ -600,7 +598,7 @@ where
                 .db()
                 .create_region_if_needed(&self.holes_region_name())?;
             let bytes = self
-                .holes
+                .holes()
                 .iter()
                 .flat_map(|i| i.to_ne_bytes())
                 .collect::<Vec<_>>();
@@ -642,12 +640,12 @@ where
         // }
 
         let (modified_indexes, modified_values) = self
-            .updated
+            .updated()
             .keys()
             .map(|&i| {
                 // Prefer prev_updated values over disk values (for post-rollback state)
                 let val = self
-                    .prev_updated
+                    .prev_updated()
                     .get(&i)
                     .cloned()
                     .unwrap_or_else(|| self.unchecked_read_at(i, &reader).unwrap());
@@ -661,7 +659,7 @@ where
             bytes.extend(S::write(v));
         }
 
-        let prev_holes = self.prev_holes.iter().copied().collect::<Vec<_>>();
+        let prev_holes = self.prev_holes().iter().copied().collect::<Vec<_>>();
         bytes.extend(prev_holes.len().to_bytes());
         bytes.extend(prev_holes.to_bytes());
 
@@ -736,8 +734,6 @@ where
         // Clear holes and updated data (specific to RawVecInner)
         self.holes.clear();
         self.updated.clear();
-        self.prev_holes.clear();
-        self.prev_updated.clear();
 
         // Use default reset for common cleanup
         self.default_reset()
@@ -749,7 +745,7 @@ where
 
     fn get_stored_value_for_serialization(&self, index: usize, reader: &Reader) -> Result<T> {
         // Prefer prev_updated, then read from disk
-        if let Some(val) = self.prev_updated.get(&index) {
+        if let Some(val) = self.prev_updated().get(&index) {
             return Ok(val.clone());
         }
         self.unchecked_read_at(index, reader)
@@ -757,22 +753,22 @@ where
 
     fn restore_truncated_value(&mut self, index: usize, value: T) {
         // RawVecInner restores truncated values into the updated map instead of pushing
-        self.updated.insert(index, value);
+        self.mut_updated().insert(index, value);
     }
 
     fn truncate_if_needed_at(&mut self, index: usize) -> Result<()> {
         // Handle holes - clear any beyond index
-        if self.holes.last().is_some_and(|&h| h >= index) {
-            self.holes.retain(|&i| i < index);
+        if self.holes().last().is_some_and(|&h| h >= index) {
+            self.mut_holes().retain(|&i| i < index);
         }
 
         // Handle updated - clear any beyond index
         if self
-            .updated
+            .updated()
             .last_key_value()
             .is_some_and(|(&k, _)| k >= index)
         {
-            self.updated.retain(|&i, _| i < index);
+            self.mut_updated().retain(|&i, _| i < index);
         }
 
         // Call default which handles pushed layer and stored_len
@@ -790,7 +786,7 @@ where
     }
 
     fn is_dirty(&self) -> bool {
-        !self.is_pushed_empty() || !self.holes.is_empty() || !self.updated.is_empty()
+        !self.is_pushed_empty() || !self.holes().is_empty() || !self.updated().is_empty()
     }
 
     fn stamped_flush_with_changes(&mut self, stamp: Stamp) -> Result<()> {
@@ -798,15 +794,13 @@ where
             return self.stamped_flush(stamp);
         }
 
-        // Save holes before flush (will become prev_holes after)
-        let holes_before_flush = self.holes.clone();
-
         // Call default which handles file management, serialize, flush, and updates prev_stored_len/prev_pushed
+        // serialize_changes() saves prev_holes, so we must call this BEFORE holes.save()
         self.default_stamped_flush_with_changes(stamp)?;
 
-        // Update RawVecInner-specific prev_ fields
-        self.prev_updated = BTreeMap::new();
-        self.prev_holes = holes_before_flush;
+        // Now update prev_ fields for next iteration
+        self.holes.save();
+        self.updated.clear_previous();
 
         Ok(())
     }
@@ -816,8 +810,8 @@ where
         let result = self.default_rollback_before(stamp)?;
 
         // Update RawVecInner-specific prev_ fields
-        self.prev_updated = self.updated.clone();
-        self.prev_holes = self.holes.clone();
+        self.holes.save();
+        self.updated.save();
 
         Ok(result)
     }
@@ -897,9 +891,9 @@ where
         //     .map(usize::from_bytes)
         //     .collect::<Result<BTreeSet<_>>>()?;
 
-        if !self.holes.is_empty() || !self.prev_holes.is_empty() || !prev_holes.is_empty() {
-            self.holes = prev_holes.clone();
-            self.prev_holes = prev_holes;
+        if !self.holes().is_empty() || !self.prev_holes().is_empty() || !prev_holes.is_empty() {
+            *self.holes.current_mut() = prev_holes.clone();
+            *self.holes.previous_mut() = prev_holes;
         }
 
         // Restore old values to updated map
@@ -908,7 +902,7 @@ where
         }
 
         // Update prev_ fields
-        self.prev_updated = self.updated.clone();
+        self.updated.save();
 
         Ok(())
     }

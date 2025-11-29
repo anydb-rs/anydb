@@ -1,11 +1,4 @@
-use std::{
-    marker::PhantomData,
-    path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-};
+use std::{marker::PhantomData, path::PathBuf, sync::Arc};
 
 use rawdb::{Database, Region};
 
@@ -14,10 +7,16 @@ use crate::{Error, Result, VecIndex, VecValue, Version};
 mod format;
 mod header;
 mod options;
+mod shared_len;
+mod stored_len;
+mod with_prev;
 
 pub use format::*;
 pub use header::*;
 pub use options::*;
+pub use shared_len::*;
+pub use stored_len::*;
+pub use with_prev::*;
 
 /// Base storage vector with fields common to all stored vector implementations.
 ///
@@ -28,10 +27,8 @@ pub(crate) struct BaseVec<I, T> {
     region: Region,
     header: Header,
     name: Arc<str>,
-    prev_pushed: Vec<T>,
-    pushed: Vec<T>,
-    prev_stored_len: usize,
-    stored_len: Arc<AtomicUsize>,
+    pushed: WithPrev<Vec<T>>,
+    stored_len: StoredLen,
     /// Default is 0
     saved_stamped_changes: u16,
     phantom: PhantomData<I>,
@@ -59,21 +56,15 @@ where
             Header::import_and_verify(&region, options.version, format)?
         };
 
-        let mut base = Self {
+        Ok(Self {
             region,
             header,
             name: Arc::from(options.name),
-            prev_pushed: vec![],
-            pushed: vec![],
-            prev_stored_len: 0,
-            stored_len: Arc::new(AtomicUsize::new(0)),
-            saved_stamped_changes: 0,
+            pushed: WithPrev::default(),
+            stored_len: StoredLen::default(),
+            saved_stamped_changes: options.saved_stamped_changes,
             phantom: PhantomData,
-        };
-
-        base.saved_stamped_changes = options.saved_stamped_changes;
-
-        Ok(base)
+        })
     }
 
     #[inline]
@@ -93,42 +84,42 @@ where
 
     #[inline]
     pub fn pushed(&self) -> &[T] {
-        &self.pushed
+        self.pushed.current()
     }
 
     #[inline]
     pub fn mut_pushed(&mut self) -> &mut Vec<T> {
-        &mut self.pushed
+        self.pushed.current_mut()
     }
 
     #[inline]
     pub fn prev_pushed(&self) -> &[T] {
-        &self.prev_pushed
+        self.pushed.previous()
     }
 
     #[inline]
     pub fn mut_prev_pushed(&mut self) -> &mut Vec<T> {
-        &mut self.prev_pushed
+        self.pushed.previous_mut()
     }
 
     #[inline]
     pub fn stored_len(&self) -> usize {
-        self.stored_len.load(Ordering::SeqCst)
+        self.stored_len.get()
     }
 
     #[inline]
     pub fn update_stored_len(&self, val: usize) {
-        self.stored_len.store(val, Ordering::SeqCst);
+        self.stored_len.set(val);
     }
 
     #[inline]
     pub fn prev_stored_len(&self) -> usize {
-        self.prev_stored_len
+        self.stored_len.previous()
     }
 
     #[inline(always)]
     pub fn mut_prev_stored_len(&mut self) -> &mut usize {
-        &mut self.prev_stored_len
+        self.stored_len.previous_mut()
     }
 
     #[inline(always)]
