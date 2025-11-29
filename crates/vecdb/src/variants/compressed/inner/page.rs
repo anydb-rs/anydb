@@ -39,8 +39,11 @@ impl Bytes for Page {
     }
 
     fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        if bytes.len() < 16 {
-            return Err(Error::WrongLength);
+        if bytes.len() < size_of::<Page>() {
+            return Err(Error::WrongLength {
+                expected: size_of::<Page>(),
+                received: bytes.len(),
+            });
         }
 
         let start = u64::from_bytes(&bytes[0..8])?;

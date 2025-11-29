@@ -59,7 +59,7 @@ where
         let res = Self::import_with(options, format);
         match res {
             Err(Error::WrongEndian)
-            | Err(Error::WrongLength)
+            | Err(Error::WrongLength { .. })
             | Err(Error::DifferentFormat { .. })
             | Err(Error::DifferentVersion { .. }) => {
                 info!("Resetting {}...", options.name);

@@ -71,9 +71,14 @@ impl Bytes for Format {
 
     #[inline]
     fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        if bytes.is_empty() {
-            return Err(Error::WrongLength);
+        let len = bytes.len();
+        if len != size_of::<Self>() {
+            return Err(Error::WrongLength {
+                expected: size_of::<Self>(),
+                received: len,
+            });
         }
+
         match bytes[0] {
             0 => Ok(Self::Bytes),
             1 => Ok(Self::ZeroCopy),

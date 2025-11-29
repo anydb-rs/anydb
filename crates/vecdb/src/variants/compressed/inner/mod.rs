@@ -55,7 +55,7 @@ where
         let res = Self::import_with(options, format);
         match res {
             Err(Error::WrongEndian)
-            | Err(Error::WrongLength)
+            | Err(Error::WrongLength { .. })
             | Err(Error::DifferentFormat { .. })
             | Err(Error::DifferentVersion { .. }) => {
                 info!("Resetting {}...", options.name);
@@ -118,7 +118,9 @@ where
         }
 
         // SAFETY: We checked page_index < pages.len() above
-        let page = pages.get(page_index).expect("page should exist after bounds check");
+        let page = pages
+            .get(page_index)
+            .expect("page should exist after bounds check");
         let len = page.bytes as usize;
         let offset = page.start as usize;
 

@@ -44,7 +44,10 @@ macro_rules! impl_bytes_for_numeric {
                 fn from_bytes(bytes: &[u8]) -> Result<Self> {
                     let arr: [u8; std::mem::size_of::<$t>()] = bytes
                         .try_into()
-                        .map_err(|_| Error::WrongLength)?;
+                        .map_err(|_| Error::WrongLength {
+                            expected: std::mem::size_of::<$t>(),
+                            received: bytes.len(),
+                        })?;
                     Ok(<$t>::from_le_bytes(arr))
                 }
             }
@@ -70,7 +73,10 @@ macro_rules! impl_bytes_for_array {
 
                 #[inline]
                 fn from_bytes(bytes: &[u8]) -> Result<Self> {
-                    bytes.try_into().map_err(|_| Error::WrongLength)
+                    bytes.try_into().map_err(|_| Error::WrongLength {
+                        expected: $n,
+                        received: bytes.len(),
+                    })
                 }
             }
         )*

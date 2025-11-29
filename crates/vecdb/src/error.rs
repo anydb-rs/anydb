@@ -35,20 +35,25 @@ pub enum Error {
     #[error(transparent)]
     SonicRS(#[from] sonic_rs::Error),
 
-    #[error("Wrong length")]
-    WrongLength,
+    #[error("Wrong length: received: {received:?}, expected: {expected:?}")]
+    WrongLength { received: usize, expected: usize },
     #[error("Wrong endian")]
     WrongEndian,
-    #[error("Different version found: {found:?}, expected: {expected:?}")]
-    DifferentVersion { found: Version, expected: Version },
+    #[error("Iterator ended")]
+    IteratorEnded,
+    #[error("Different version received: {received:?}, expected: {expected:?}")]
+    DifferentVersion {
+        received: Version,
+        expected: Version,
+    },
     #[error("Index too high: index: {index}, len: {len}")]
     IndexTooHigh { index: usize, len: usize },
     #[error("Expect vec to have index")]
     ExpectVecToHaveIndex,
     #[error("Failed to convert key to usize")]
     FailedKeyTryIntoUsize,
-    #[error("Different format found: {found:?}, expected: {expected:?}")]
-    DifferentFormat { found: Format, expected: Format },
+    #[error("Different format received: {received:?}, expected: {expected:?}")]
+    DifferentFormat { received: Format, expected: Format },
     #[error("Version cannot be zero, can't verify endianness otherwise")]
     VersionCannotBeZero,
     #[error("Stamp mismatch: file stamp {file:?} != vec stamp {vec:?}")]

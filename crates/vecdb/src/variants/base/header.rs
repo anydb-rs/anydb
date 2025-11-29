@@ -112,7 +112,10 @@ impl HeaderInner {
         let len = region.meta().len();
 
         if len < HEADER_OFFSET {
-            return Err(Error::WrongLength);
+            return Err(Error::WrongLength {
+                expected: HEADER_OFFSET,
+                received: len,
+            });
         }
 
         let reader = region.create_reader();
@@ -121,20 +124,20 @@ impl HeaderInner {
 
         if header.header_version != HEADER_VERSION {
             return Err(Error::DifferentVersion {
-                found: header.header_version,
+                received: header.header_version,
                 expected: HEADER_VERSION,
             });
         }
         if header.vec_version != vec_version {
             return Err(Error::DifferentVersion {
-                found: header.vec_version,
+                received: header.vec_version,
                 expected: vec_version,
             });
         }
 
         if header.format != format {
             return Err(Error::DifferentFormat {
-                found: header.format,
+                received: header.format,
                 expected: format,
             });
         }
@@ -154,8 +157,12 @@ impl HeaderInner {
     }
 
     fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        if bytes.len() < HEADER_OFFSET {
-            return Err(Error::WrongLength);
+        let len = bytes.len();
+        if len < HEADER_OFFSET {
+            return Err(Error::WrongLength {
+                expected: HEADER_OFFSET,
+                received: len,
+            });
         }
         let header_version = Version::from_bytes(&bytes[0..8])?;
         let vec_version = Version::from_bytes(&bytes[8..16])?;

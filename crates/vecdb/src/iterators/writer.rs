@@ -29,7 +29,7 @@ where
             value.fmt_csv(buf)?;
             Ok(())
         } else {
-            Err(Error::WrongLength)
+            Err(Error::IteratorEnded)
         }
     }
 }
