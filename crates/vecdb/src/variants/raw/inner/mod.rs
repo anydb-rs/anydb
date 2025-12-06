@@ -548,7 +548,7 @@ where
         self.base.stored_len()
     }
 
-    fn write(&mut self) -> Result<()> {
+    fn write(&mut self) -> Result<bool> {
         self.write_header_if_needed()?;
 
         let stored_len = self.stored_len();
@@ -564,7 +564,7 @@ where
 
         if !truncated && !expanded && !has_new_data && !has_updated_data && !has_holes && !had_holes
         {
-            return Ok(());
+            return Ok(false);
         }
 
         let from = stored_len * Self::SIZE_OF_T + HEADER_OFFSET;
@@ -611,7 +611,7 @@ where
                 .remove_region(&self.holes_region_name())?;
         }
 
-        Ok(())
+        Ok(true)
     }
 
     fn region(&self) -> &Region {

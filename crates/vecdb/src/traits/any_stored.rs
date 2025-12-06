@@ -17,25 +17,37 @@ pub trait AnyStoredVec: AnyVec {
     /// Number of stamped change files to keep for rollback support.
     fn saved_stamped_changes(&self) -> u16;
 
+    /// Writes pending changes to storage.
+    /// Returns `Ok(true)` if data was written, `Ok(false)` if nothing to write.
     #[doc(hidden)]
-    fn write(&mut self) -> Result<()>;
+    fn write(&mut self) -> Result<bool>;
 
     #[doc(hidden)]
     fn db(&self) -> Database;
 
     #[inline]
     fn flush(&mut self) -> Result<()> {
-        self.write()?;
-        self.region().flush()?; // OS only syncs dirty pages anyway
+        if self.write()? {
+            self.region().flush()?;
+        }
         Ok(())
     }
 
     /// Flushes while holding the exit lock to ensure consistency during shutdown.
     #[inline]
     fn safe_flush(&mut self, exit: &Exit) -> Result<()> {
-        // info!("safe flush {}", self.name());
         let _lock = exit.lock();
         self.flush()?;
+        Ok(())
+    }
+
+    /// Writes to mmap without fsync, holding the exit lock.
+    /// Data is visible to readers immediately but not durable until sync.
+    /// Use this for performance when durability can be deferred.
+    #[inline]
+    fn safe_write(&mut self, exit: &Exit) -> Result<()> {
+        let _lock = exit.lock();
+        self.write()?;
         Ok(())
     }
 
@@ -55,7 +67,8 @@ pub trait AnyStoredVec: AnyVec {
     #[inline]
     fn stamped_flush(&mut self, stamp: Stamp) -> Result<()> {
         self.update_stamp(stamp);
-        self.write()
+        self.write()?;
+        Ok(())
     }
 
     fn serialize_changes(&self) -> Result<Vec<u8>>;

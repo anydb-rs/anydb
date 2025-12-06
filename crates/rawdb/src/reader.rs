@@ -5,9 +5,12 @@ use crate::{Database, Region, RegionMetadata};
 
 /// Zero-copy reader for accessing region data from memory-mapped storage.
 ///
-/// Holds locks on the memory map and region metadata during its lifetime,
-/// preventing concurrent modifications. Should be dropped as soon as reading
-/// is complete to avoid blocking writes.
+/// Holds a lock on the memory map and a snapshot of region metadata.
+/// The metadata is cloned at reader creation time, providing snapshot isolation
+/// and avoiding lock ordering deadlocks with writers.
+///
+/// Should be dropped as soon as reading is complete to avoid blocking
+/// other mmap operations.
 ///
 /// The Reader owns references to the Database and Region to ensure the
 /// underlying data structures remain valid for the lifetime of the guards.
@@ -17,7 +20,7 @@ pub struct Reader {
     // They must be declared AFTER the guards so they are dropped AFTER the guards.
     // (Rust drops fields in declaration order)
     mmap: RwLockReadGuard<'static, MmapMut>,
-    meta: RwLockReadGuard<'static, RegionMetadata>,
+    meta: RegionMetadata,
     _db: Database,
     _region: Region,
 }
@@ -25,24 +28,31 @@ pub struct Reader {
 impl Reader {
     /// Creates a new Reader for the given region.
     ///
+    /// Clones the region metadata to provide snapshot isolation and avoid
+    /// lock ordering deadlocks with writers. The metadata lock is held only
+    /// briefly during clone, then released.
+    ///
     /// # Safety
-    /// This uses transmute to extend guard lifetimes to 'static. This is safe because:
-    /// - The guards borrow from RwLocks inside Arc-wrapped structures
-    /// - Reader owns clones of those Arcs (_db and _region fields)
-    /// - The Arcs are dropped AFTER the guards (field declaration order)
-    /// - Therefore the RwLocks remain valid for the guards' entire lifetime
+    /// This uses transmute to extend the mmap guard lifetime to 'static. This is safe because:
+    /// - The guard borrows from a RwLock inside an Arc-wrapped Database
+    /// - Reader owns a clone of that Arc (_db field)
+    /// - The Arc is dropped AFTER the guard (field declaration order)
+    /// - Therefore the RwLock remains valid for the guard's entire lifetime
     #[inline]
     pub(crate) fn new(region: &Region) -> Self {
         let db = region.db();
         let region = region.clone();
 
-        // SAFETY: The guards borrow from RwLocks inside the Arc-wrapped Database and Region.
-        // We store clones of these Arcs in the Reader struct, and Rust drops fields in
-        // declaration order, so the guards are dropped before the Arcs. This guarantees
-        // the RwLocks remain valid for the entire lifetime of the guards.
+        // Clone metadata, releasing the lock immediately.
+        // This avoids lock ordering deadlocks with writers who need region.meta().write()
+        // while holding pages.write().
+        let meta = region.meta().clone();
+
+        // SAFETY: The guard borrows from a RwLock inside the Arc-wrapped Database.
+        // We store a clone of this Arc in the Reader struct, and Rust drops fields in
+        // declaration order, so the guard is dropped before the Arc. This guarantees
+        // the RwLock remains valid for the entire lifetime of the guard.
         let mmap: RwLockReadGuard<'static, MmapMut> = unsafe { std::mem::transmute(db.mmap()) };
-        let meta: RwLockReadGuard<'static, RegionMetadata> =
-            unsafe { std::mem::transmute(region.meta()) };
 
         Self {
             mmap,

@@ -160,7 +160,7 @@ macro_rules! impl_vec_wrapper {
             }
 
             #[inline]
-            fn write(&mut self) -> $crate::Result<()> {
+            fn write(&mut self) -> $crate::Result<bool> {
                 self.0.write()
             }
 

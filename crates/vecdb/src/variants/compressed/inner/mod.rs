@@ -94,11 +94,13 @@ where
         Ok(this)
     }
 
+    /// Decodes a compressed page, returning the decompressed values.
     #[inline]
     pub(crate) fn decode_page(&self, page_index: usize, reader: &Reader) -> Result<Vec<T>> {
         Self::decode_page_(self.stored_len(), page_index, reader, &self.pages.read())
     }
 
+    /// Static version of decode_page that takes pages directly.
     #[inline]
     pub(crate) fn decode_page_(
         stored_len: usize,
@@ -301,50 +303,49 @@ where
         self.pages.read().stored_len(Self::PER_PAGE)
     }
 
-    fn write(&mut self) -> Result<()> {
+    fn write(&mut self) -> Result<bool> {
         self.base.write_header_if_needed()?;
 
         let stored_len = self.stored_len();
         let pushed_len = self.pushed_len();
-        let real_stored_len = self.real_stored_len();
-        assert!(stored_len <= real_stored_len);
-        let truncated = stored_len != real_stored_len;
-        let has_new_data = pushed_len != 0;
 
-        if !has_new_data && !truncated {
-            return Ok(());
-        }
+        // Phase 1: Check if work needed, read existing page data if truncating
+        let (truncate_at, mut values, starting_page_index) = {
+            let pages = self.pages.read();
 
-        let mut pages = self.pages.write();
-        let pages_len = pages.len();
-        let starting_page_index = Self::index_to_page_index(stored_len);
-        assert!(starting_page_index <= pages_len);
+            let real_stored_len = pages.stored_len(Self::PER_PAGE);
+            assert!(stored_len <= real_stored_len);
 
-        let mut values = vec![];
-
-        let offset = HEADER_OFFSET as u64;
-
-        let truncate_at = if starting_page_index < pages_len {
-            let len = stored_len % Self::PER_PAGE;
-
-            if len != 0 {
-                let mut page_values = Self::decode_page_(
-                    stored_len,
-                    starting_page_index,
-                    &self.create_reader(),
-                    &pages,
-                )?;
-                page_values.truncate(len);
-                values = page_values;
+            if pushed_len == 0 && stored_len == real_stored_len {
+                return Ok(false);
             }
 
-            pages.truncate(starting_page_index).unwrap().start
-        } else {
-            pages
-                .last()
-                .map_or(offset, |page| page.start + page.bytes as u64)
+            let starting_page_index = Self::index_to_page_index(stored_len);
+            assert!(starting_page_index <= pages.len());
+
+            let (truncate_at, values) = if starting_page_index < pages.len() {
+                let len = stored_len % Self::PER_PAGE;
+                let values = if len != 0 {
+                    let reader = self.create_reader();
+                    let mut page_values =
+                        Self::decode_page_(stored_len, starting_page_index, &reader, &pages)?;
+                    page_values.truncate(len);
+                    page_values
+                } else {
+                    vec![]
+                };
+                (pages.get(starting_page_index).unwrap().start, values)
+            } else {
+                let truncate_at = pages
+                    .last()
+                    .map_or(HEADER_OFFSET as u64, |page| page.start + page.bytes as u64);
+                (truncate_at, vec![])
+            };
+
+            (truncate_at, values, starting_page_index)
         };
 
+        // Phase 2: Compress (no locks held)
         values.append(&mut mem::take(self.base.mut_pushed()));
 
         let compressed = values
@@ -352,36 +353,37 @@ where
             .map(|chunk| Ok((Self::compress_page(chunk)?, chunk.len())))
             .collect::<Result<Vec<_>>>()?;
 
+        let buf = compressed
+            .iter()
+            .flat_map(|(v, _)| v.clone())
+            .collect::<Vec<_>>();
+
+        // Phase 3: Write with pages.write() held
+        let mut pages = self.pages.write();
+
+        self.region().truncate_write(truncate_at as usize, &buf)?;
+
+        pages.truncate(starting_page_index);
+
         compressed.iter().enumerate().for_each(|(i, (bytes, len))| {
             let page_index = starting_page_index + i;
 
             let start = if page_index != 0 {
-                // SAFETY: page_index > 0, so page_index - 1 >= 0; pages grow sequentially
                 let prev = pages
                     .get(page_index - 1)
                     .expect("previous page should exist");
                 prev.start + prev.bytes as u64
             } else {
-                offset
+                HEADER_OFFSET as u64
             };
 
-            let page = Page::new(start, bytes.len() as u32, *len as u32);
-
-            pages.checked_push(page_index, page);
+            pages.checked_push(page_index, Page::new(start, bytes.len() as u32, *len as u32));
         });
 
-        let buf = compressed
-            .into_iter()
-            .flat_map(|(v, _)| v)
-            .collect::<Vec<_>>();
-
-        self.region().truncate_write(truncate_at as usize, &buf)?;
-
         self.update_stored_len(stored_len + pushed_len);
-
         pages.flush()?;
 
-        Ok(())
+        Ok(true)
     }
 
     #[inline]
