@@ -103,7 +103,9 @@ where
             }
 
             Ok(())
-        })
+        })?;
+
+        Ok(())
     }
 
     pub fn compute_transform2<A, B, F>(

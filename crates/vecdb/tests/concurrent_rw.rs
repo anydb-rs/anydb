@@ -209,7 +209,8 @@ fn test_batched_writes_single_flush() -> Result<()> {
     assert_eq!(iter2.get(50), Some(100));
     assert_eq!(iter3.get(50), Some(150));
 
-    // Now flush everything at once
+    // Flush while iterators are still alive - no deadlock since
+    // dirty_range is in a separate Mutex from region metadata
     db.flush()?;
 
     // Data should still be readable
@@ -311,16 +312,21 @@ fn test_memory_ordering_len_vs_data() -> Result<()> {
 
     let reader = writer.clone();
 
+    let barrier = Arc::new(Barrier::new(2));
     let stop = Arc::new(AtomicBool::new(false));
     let errors = Arc::new(AtomicUsize::new(0));
     let reads = Arc::new(AtomicUsize::new(0));
 
+    let reader_barrier = barrier.clone();
     let stop_clone = stop.clone();
     let errors_clone = errors.clone();
     let reads_clone = reads.clone();
 
     // Reader thread: continuously check that if we see a length, we can read that data
     let reader_handle = thread::spawn(move || {
+        // Wait for writer to be ready
+        reader_barrier.wait();
+
         while !stop_clone.load(Ordering::Relaxed) {
             let len = reader.stored_len();
             if len > 0 {
@@ -353,10 +359,12 @@ fn test_memory_ordering_len_vs_data() -> Result<()> {
                     }
                 }
             }
-            // Small sleep to not spin too hard, but not too long to miss races
-            thread::sleep(Duration::from_nanos(100));
+            // No sleep - tight loop to maximize chance of catching races
         }
     });
+
+    // Synchronize start with reader
+    barrier.wait();
 
     // Writer thread: keep adding data
     for batch in 0..100 {
@@ -365,8 +373,12 @@ fn test_memory_ordering_len_vs_data() -> Result<()> {
             writer.push(val);
         }
         writer.write()?;
-        // No sleep - we want to trigger races
+        // Small yield to give reader a chance to run
+        thread::yield_now();
     }
+
+    // Let reader run a bit more after writer is done
+    thread::sleep(Duration::from_millis(1));
 
     stop.store(true, Ordering::Relaxed);
     reader_handle.join().unwrap();

@@ -1,6 +1,6 @@
 use std::{fs::File, sync::Arc};
 
-use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::{Database, Error, Reader, RegionMetadata, Result, WeakDatabase};
 
@@ -16,6 +16,9 @@ pub struct RegionInner {
     db: WeakDatabase,
     index: usize,
     meta: RwLock<RegionMetadata>,
+    /// Dirty range (start_offset, end_offset) relative to region start.
+    /// Separate from meta to allow flush without blocking iterators.
+    dirty_range: Mutex<Option<(usize, usize)>>,
 }
 
 impl Region {
@@ -31,6 +34,7 @@ impl Region {
             db: db.weak_clone(),
             index,
             meta: RwLock::new(RegionMetadata::new(id, start, len, reserved)),
+            dirty_range: Mutex::new(None),
         }))
     }
 
@@ -39,6 +43,7 @@ impl Region {
             db: db.weak_clone(),
             index,
             meta: RwLock::new(meta),
+            dirty_range: Mutex::new(None),
         }))
     }
 
@@ -153,6 +158,7 @@ impl Region {
                 db.write(write_start, data);
             }
 
+            self.extend_dirty_abs(start, write_start, data_len);
             meta.set_len(new_len);
             meta.write(index, &db.regions());
 
@@ -183,6 +189,7 @@ impl Region {
 
             db.write(write_start, data);
 
+            self.extend_dirty_abs(start, write_start, data_len);
             let mut meta = self.meta_mut();
             meta.set_len(new_len);
             meta.write(index, &db.regions());
@@ -206,6 +213,7 @@ impl Region {
 
             db.write(write_start, data);
 
+            self.extend_dirty_abs(start, write_start, data_len);
             let mut meta = self.meta_mut();
             meta.set_len(new_len);
             meta.write(index, &db.regions());
@@ -226,6 +234,8 @@ impl Region {
             let mut layout = db.layout_mut();
             layout.move_region(hole_start, self)?;
 
+            // Region moved, mark all data as dirty (relative to new start)
+            self.extend_dirty(0, new_len);
             let mut meta = self.meta_mut();
             meta.set_start(hole_start);
             meta.set_reserved(new_reserved);
@@ -253,6 +263,8 @@ impl Region {
         layout.move_region(new_start, self)?;
         assert!(layout.take_reserved(new_start) == Some(new_reserved));
 
+        // Region moved, mark all data as dirty (relative to new start)
+        self.extend_dirty(0, new_len);
         let mut meta = self.meta_mut();
         meta.set_start(new_start);
         meta.set_reserved(new_reserved);
@@ -291,15 +303,24 @@ impl Region {
         Ok(())
     }
 
-    /// Flushes this region's data and metadata to disk.
+    /// Flushes this region's dirty data and metadata to disk.
     ///
-    /// Ensures durability for all writes to this specific region.
-    pub fn flush(&self) -> Result<()> {
+    /// Only flushes the dirty range if any writes have been made since the last flush.
+    /// Returns `Ok(true)` if data was flushed, `Ok(false)` if nothing was dirty.
+    pub fn flush(&self) -> Result<bool> {
+        let Some((dirty_start, dirty_end)) = self.take_dirty_range() else {
+            return Ok(false);
+        };
+
         let db = self.db();
         let meta = self.meta();
-        db.mmap().flush_range(meta.start(), meta.len())?;
+        let start = meta.start();
+        let abs_start = start + dirty_start;
+        let dirty_len = dirty_end - dirty_start;
+
+        db.mmap().flush_range(abs_start, dirty_len)?;
         meta.flush(self.index(), &db.regions())?;
-        Ok(())
+        Ok(true)
     }
 
     #[inline(always)]
@@ -325,5 +346,31 @@ impl Region {
     #[inline(always)]
     pub fn db(&self) -> Database {
         self.0.db.upgrade()
+    }
+
+    /// Extends the dirty range to include the given write.
+    /// `offset` is relative to region start.
+    #[inline]
+    fn extend_dirty(&self, offset: usize, len: usize) {
+        let end = offset + len;
+        let mut dirty = self.0.dirty_range.lock();
+        *dirty = Some(match *dirty {
+            None => (offset, end),
+            Some((s, e)) => (s.min(offset), e.max(end)),
+        });
+    }
+
+    /// Extends the dirty range using absolute file positions.
+    /// Converts to relative offsets internally.
+    #[inline]
+    fn extend_dirty_abs(&self, region_start: usize, abs_start: usize, len: usize) {
+        let offset = abs_start - region_start;
+        self.extend_dirty(offset, len);
+    }
+
+    /// Takes and clears the dirty range, returning it if any.
+    #[inline]
+    fn take_dirty_range(&self) -> Option<(usize, usize)> {
+        self.0.dirty_range.lock().take()
     }
 }

@@ -38,13 +38,19 @@ impl Header {
     }
 
     pub fn update_stamp(&mut self, stamp: Stamp) {
-        self.modified = true;
-        self.inner.write().stamp = stamp;
+        let mut inner = self.inner.write();
+        if inner.stamp != stamp {
+            self.modified = true;
+            inner.stamp = stamp;
+        }
     }
 
     pub fn update_computed_version(&mut self, computed_version: Version) {
-        self.modified = true;
-        self.inner.write().computed_version = computed_version;
+        let mut inner = self.inner.write();
+        if inner.computed_version != computed_version {
+            self.modified = true;
+            inner.computed_version = computed_version;
+        }
     }
 
     #[inline(always)]

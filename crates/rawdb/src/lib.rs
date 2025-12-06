@@ -258,12 +258,48 @@ impl Database {
     ///
     /// This ensures durability - all writes are persisted and will survive a crash.
     /// Also promotes pending holes so they can be reused by future allocations.
-    pub fn flush(&self) -> Result<()> {
-        self.mmap().flush()?;
-        self.regions().flush()?;
-        self.file().sync_all()?;
+    /// Returns the number of regions that had dirty data.
+    pub fn flush(&self) -> Result<usize> {
+        use std::time::Instant;
+
+        // Flush each dirty region's data
+        let i = Instant::now();
+        let regions: Vec<_> = self
+            .regions()
+            .index_to_region()
+            .iter()
+            .flatten()
+            .cloned()
+            .collect();
+
+        let mut flushed = vec![];
+
+        let mut flushed_count = 0;
+        for region in &regions {
+            if region.flush()? {
+                flushed.push(region.meta().id().to_string());
+                flushed_count += 1;
+            }
+        }
+        debug!(
+            "region data flush ({} dirty): {:?}",
+            flushed_count,
+            i.elapsed()
+        );
+
+        // Only sync file if anything was flushed
+        if flushed_count > 0 {
+            let i = Instant::now();
+            self.regions().flush()?;
+            debug!("regions metadata flush: {:?}", i.elapsed());
+
+            let i = Instant::now();
+            self.file().sync_all()?;
+            debug!("file sync_all: {:?}", i.elapsed());
+        }
+
         self.layout_mut().promote_pending_holes();
-        Ok(())
+        Ok(flushed_count)
     }
 
     /// Compact the database by promoting pending holes and punching holes in the file.
@@ -271,8 +307,14 @@ impl Database {
     /// This flushes all dirty data first to ensure consistency.
     #[inline]
     pub fn compact(&self) -> Result<()> {
+        use std::time::Instant;
+        let i = Instant::now();
         self.flush()?;
-        self.punch_holes()
+        debug!("compact flush: {:?}", i.elapsed());
+        let i = Instant::now();
+        let r = self.punch_holes();
+        debug!("compact punch_holes: {:?}", i.elapsed());
+        r
     }
 
     fn punch_holes(&self) -> Result<()> {

@@ -1,3 +1,8 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
 use crate::{Error, GiB, PAGE_SIZE, Result, regions::Regions};
 
 pub const SIZE_OF_REGION_METADATA: usize = PAGE_SIZE; // 4096 bytes for atomic writes
@@ -16,6 +21,8 @@ pub struct RegionMetadata {
     reserved: usize,
     /// Unique identifier for the region.
     id: String,
+    /// Whether metadata has been modified since last flush.
+    dirty: Arc<AtomicBool>,
 }
 
 impl RegionMetadata {
@@ -44,6 +51,7 @@ impl RegionMetadata {
             len,
             reserved,
             start,
+            dirty: Arc::new(AtomicBool::new(true)), // New regions are dirty
         }
     }
 
@@ -55,7 +63,7 @@ impl RegionMetadata {
     #[inline]
     pub fn set_start(&mut self, start: usize) {
         assert!(start.is_multiple_of(PAGE_SIZE));
-        self.start = start;
+        Self::update_value_if_different(&mut self.start, start, &self.dirty)
     }
 
     #[allow(clippy::len_without_is_empty)]
@@ -67,7 +75,7 @@ impl RegionMetadata {
     #[inline]
     pub fn set_len(&mut self, len: usize) {
         assert!(len <= self.reserved());
-        self.len = len;
+        Self::update_value_if_different(&mut self.len, len, &self.dirty)
     }
 
     #[inline(always)]
@@ -82,7 +90,7 @@ impl RegionMetadata {
 
     pub fn set_id(&mut self, id: String) {
         Self::validate_id(&id);
-        self.id = id;
+        Self::update_value_if_different(&mut self.id, id, &self.dirty)
     }
 
     pub fn set_reserved(&mut self, reserved: usize) {
@@ -91,7 +99,18 @@ impl RegionMetadata {
         assert!(reserved.is_multiple_of(PAGE_SIZE));
         assert!(reserved <= MAX_RESERVED_SIZE);
 
-        self.reserved = reserved;
+        Self::update_value_if_different(&mut self.reserved, reserved, &self.dirty)
+    }
+
+    #[inline]
+    fn update_value_if_different<T>(own: &mut T, other: T, dirty: &Arc<AtomicBool>)
+    where
+        T: Eq,
+    {
+        if own != &other {
+            *own = other;
+            dirty.store(true, Ordering::Relaxed);
+        }
     }
 
     /// Returns the amount of reserved space not yet used by data.
@@ -104,11 +123,16 @@ impl RegionMetadata {
         regions.write_at(index, &self.to_bytes())
     }
 
-    pub(crate) fn flush(&self, index: usize, regions: &Regions) -> Result<()> {
+    /// Flushes metadata to disk if dirty.
+    /// Returns `Ok(true)` if flushed, `Ok(false)` if not dirty.
+    pub(crate) fn flush(&self, index: usize, regions: &Regions) -> Result<bool> {
+        if !self.dirty.swap(false, Ordering::AcqRel) {
+            return Ok(false);
+        }
         regions
             .mmap()
             .flush_range(index * SIZE_OF_REGION_METADATA, SIZE_OF_REGION_METADATA)?;
-        Ok(())
+        Ok(true)
     }
 
     /// Serialize to bytes using little endian encoding
@@ -156,12 +180,12 @@ impl RegionMetadata {
             return Err(Error::EmptyMetadata);
         }
 
-        // Loaded from disk, so not dirty
         Ok(Self {
             id,
             start,
             len,
             reserved,
+            dirty: Arc::new(AtomicBool::new(false)), // Loaded from disk, not dirty
         })
     }
 }

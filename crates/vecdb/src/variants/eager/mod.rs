@@ -75,7 +75,9 @@ where
         loop {
             f(self)?;
             let batch_limit_reached = self.batch_limit_reached();
-            self.safe_write(exit)?;
+            if self.is_dirty() {
+                self.safe_write(exit)?;
+            }
             if !batch_limit_reached {
                 break;
             }
