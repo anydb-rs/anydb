@@ -465,7 +465,7 @@ where
 
     /// Returns the path to the changes directory for this vector.
     fn changes_path(&self) -> PathBuf {
-        self.db_path().join(self.index_to_name()).join("changes")
+        self.db_path().join("changes").join(self.region_name())
     }
 
     /// Flushes with the given stamp, optionally saving changes for rollback.

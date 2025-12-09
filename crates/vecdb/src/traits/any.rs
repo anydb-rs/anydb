@@ -22,7 +22,7 @@ pub trait AnyVec: Send + Sync {
     /// Returns the string representation of the index type.
     fn index_type_to_string(&self) -> &'static str;
     /// Returns the combined name of the vector.
-    fn index_to_name(&self) -> String {
+    fn region_name(&self) -> String {
         vec_region_name(self.name(), self.index_type_to_string())
     }
     /// Returns the list of region names used by this vector.
