@@ -9,7 +9,6 @@ package.repository = "https://github.com/anydb-rs/anydb"
 package.readme = "README.md"
 package.keywords = ["vec", "disk", "database"]
 package.categories = ["database"]
-package.rust-version = "1.89"
 
 [profile.release]
 lto = "fat"

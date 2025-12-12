@@ -1,5 +1,6 @@
 use std::{fmt::Debug, path::PathBuf};
 
+use log::info;
 use rawdb::{Database, Reader, Region};
 
 mod aggregates;
@@ -75,6 +76,9 @@ where
         loop {
             f(self)?;
             let batch_limit_reached = self.batch_limit_reached();
+            if batch_limit_reached {
+                info!("Batch limit reached, saving to disk...");
+            }
             if self.is_dirty() {
                 self.safe_write(exit)?;
             }
