@@ -7,6 +7,199 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.4.0](https://github.com/anydb-rs/anydb/releases/tag/v0.4.0) - 2025-12-14
+
+### Breaking Changes
+#### `rawdb`
+- Changed all position and size types from `u64` to `usize` for consistent API ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/rawdb/src/lib.rs))
+  - `PAGE_SIZE`, file lengths, region offsets, and sizes now use `usize`
+  - Affects `Database::open_with_min_len()`, `Database::set_min_len()`, `Region` methods, and `RegionMetadata` fields
+- Extracted `RegionMetadata` into its own module with atomic dirty tracking ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/rawdb/src/region_metadata.rs))
+  - Now uses `Arc<AtomicBool>` for dirty flag instead of plain `bool`
+  - Enables concurrent metadata updates without full write locks
+- Removed `Database::write_all_to_region()`, `write_all_to_region_at()`, and `truncate_write_all_to_region()` methods
+  - Replaced by `Region::write()`, `Region::write_at()`, and `Region::truncate_write()` methods on the Region struct itself
+
+#### `vecdb`
+- **Trait renamed**: `Compressable` → `Pco` for clarity about Pcodec-specific compression ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/variants/compressed/pco/trait.rs))
+- **Trait renamed**: `TransparentCompressable` → `TransparentPco` ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/variants/compressed/pco/trait.rs))
+- **Derive macro renamed**: `#[derive(Compressable)]` → `#[derive(Pco)]` ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb_derive/src/lib.rs))
+- **Vector type renamed**: `CompressedVec` is now `PcoVec` to indicate Pcodec compression specifically ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/variants/compressed/pco/mod.rs))
+- **Removed**: `StoredVec` type - use specific vector types (`BytesVec`, `ZeroCopyVec`, `PcoVec`, `LZ4Vec`, `ZstdVec`) instead
+- **Removed**: `ComputedVec`, `ComputedVecFrom1`, `ComputedVecFrom2`, `ComputedVecFrom3` types - functionality consolidated
+- **Removed**: `Computation` type
+- **Changed**: `EagerVec<I, T>` is now `EagerVec<V>` where `V: StoredVec` - wraps any stored vector type ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/variants/eager/mod.rs))
+- **Changed**: All compression and serialization features are now optional
+  - Use `features = ["zerocopy"]` for `ZeroCopyVec`
+  - Use `features = ["pco"]` for `PcoVec`
+  - Use `features = ["lz4"]` for `LZ4Vec`
+  - Use `features = ["zstd"]` for `ZstdVec`
+  - Use `features = ["serde_json"]` or `features = ["sonic-rs"]` for JSON serialization
+- **Changed**: `Format` enum values restructured - `Raw` and `Compressed` replaced with specific formats ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/variants/base/format.rs))
+- **Removed**: `AnyWritableVec` trait renamed to `AnyWithWriter` ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/traits/any_with_writer.rs))
+- **Removed**: `Importable` trait renamed to `ImportableVec` ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/traits/importable.rs))
+
+#### `vecdb_derive`
+- **Renamed**: `#[derive(Compressable)]` → `#[derive(Pco)]` for Pcodec-compatible types ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb_derive/src/lib.rs))
+
+### New Features
+#### `rawdb`
+- Added `DiskUsage` struct for querying actual disk usage accounting for sparse files ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/rawdb/src/disk_usage.rs))
+  - `DiskUsage::from_file()` returns actual bytes on disk (not logical size)
+  - Uses `fstat` on Unix, falls back to logical size on other platforms
+  - `Display` implementation formats sizes as B/KiB/MiB/GiB
+- Added `HolePunch` struct for cross-platform sparse file hole punching ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/rawdb/src/hole_punch.rs))
+  - `HolePunch::punch()` deallocates file ranges to reclaim disk space
+  - Supports macOS (F_PUNCHHOLE), Linux (fallocate), and FreeBSD (fspacectl)
+  - Returns `HolePunchUnsupported` error on unsupported platforms
+- Added branch prediction hints `likely()` and `unlikely()` exported from rawdb ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/rawdb/src/hints.rs))
+- Added `GiB` constant for one gibibyte (1024³ bytes) ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/rawdb/src/lib.rs))
+- Added dual-indexed hole tracking in `Layout` for O(log n) best-fit hole search ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/rawdb/src/layout.rs))
+  - `hole_to_starts` secondary index maps hole sizes to their positions
+- Added atomic dirty tracking for `RegionMetadata` via `Arc<AtomicBool>` ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/rawdb/src/region_metadata.rs))
+  - Only flushes metadata when actually dirty, reducing I/O
+- Added `Region::create_reader()` method for zero-copy data access ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/rawdb/src/region.rs))
+- Added `Region::write()`, `Region::write_at()`, `Region::truncate()`, and `Region::truncate_write()` methods ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/rawdb/src/region.rs))
+- Added per-region dirty range tracking for optimized partial flushes ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/rawdb/src/region.rs))
+
+#### `vecdb`
+- Added `BytesVec` for portable little-endian serialization ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/variants/raw/bytes/mod.rs))
+  - Uses `Bytes` trait for explicit `to_bytes()/from_bytes()` serialization
+  - Portable across different endianness systems
+- Added `ZeroCopyVec` for native byte-order memory-mapped access ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/variants/raw/zerocopy/mod.rs))
+  - Uses `zerocopy` crate for direct mmap access without copying
+  - Includes `read_ref()` and `unchecked_read_ref_at()` for reference returns
+  - Fastest option but not portable across architectures
+- Added `LZ4Vec` for speed-optimized general-purpose compression ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/variants/compressed/lz4/mod.rs))
+  - Extremely fast compression/decompression, moderate ratios (2-3x)
+  - Requires `features = ["lz4"]`
+- Added `ZstdVec` for maximum compression ratio ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/variants/compressed/zstd/mod.rs))
+  - Highest compression ratios (3-5x), fast decompression
+  - Requires `features = ["zstd"]`
+- Added `Format` enum with explicit storage format variants ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/variants/base/format.rs))
+  - `Format::Bytes` - portable little-endian
+  - `Format::ZeroCopy` - native byte order
+  - `Format::Pco` - Pcodec numeric compression
+  - `Format::LZ4` - LZ4 compression
+  - `Format::Zstd` - Zstd compression
+- Added `ImportableVec` trait for uniform vector construction interface ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/traits/importable.rs))
+  - `import()`, `import_with()`, `forced_import()`, `forced_import_with()` methods
+- Added `AnyStoredVec` trait for common stored vector operations ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/traits/any_stored.rs))
+  - `flush()`, `safe_flush()`, `safe_write()`, `serialize_changes()`, `remove()` methods
+- Added `AnyCollectable`, `AnyExportable`, `AnySerializable` type-erased traits ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/traits/))
+- Added `Lookback` struct for efficient sliding window computations ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/lookback.rs))
+  - Automatically chooses between ring buffer (many items) and direct access (few items)
+  - `get_at_lookback()` and `get_and_push()` methods for window operations
+- Added `WithPrev<T>` wrapper for tracking current and previous values ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/variants/base/with_prev.rs))
+  - `save()`, `restore()`, `swap()` methods for rollback support
+- Added `BaseVec` internal struct for common stored vector fields ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/variants/base/mod.rs))
+- Added `impl_vec_wrapper!` macro to reduce boilerplate for vector implementations ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/variants/macros.rs))
+  - Generates `Deref`, `DerefMut`, `ImportableVec`, `AnyVec`, `TypedVec`, `AnyStoredVec`, `GenericStoredVec`, `IntoIterator`, `IterableVec` implementations
+- Added optional feature flags for dependencies ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/Cargo.toml))
+  - `zerocopy`, `pco`, `lz4`, `zstd` for storage formats
+  - `serde`, `serde_json`, `sonic-rs` for serialization
+
+#### `vecdb_derive`
+- Added `#[derive(Bytes)]` macro for custom wrapper types with `BytesVec` ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb_derive/src/lib.rs))
+  - Generates `Bytes` trait implementation delegating to inner type
+  - Supports generic type parameters
+
+### Internal Changes
+#### `rawdb`
+- Converted error handling to use `thiserror` derive macro ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/rawdb/src/error.rs))
+- Added new error variants: `HoleTooSmall`, `InvariantViolation`, `CorruptedMetadata`, `HolePunchUnsupported`
+- Added `smallvec` dependency for efficient small vector storage in layout
+- Reorganized internal modules with new `mmap.rs` helper module
+- Simplified `Regions` internal field naming (`index_to_region_file` → `file`)
+
+#### `vecdb`
+- Converted error handling to use `thiserror` derive macro with detailed messages ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/error.rs))
+- Added new error variants: `IteratorEnded`, `StampMismatch`, `CorruptedRegion`, `DecompressionMismatch`, `PagesStillReferenced`, `InvalidFormat`, `InvalidArgument`, `Overflow`, `Underflow`
+- Modularized `EagerVec` computation methods into submodules: `aggregates`, `arithmetic`, `checked_sub`, `lookback`, `saturating_add`, `statistics`, `transforms`
+- Refactored raw vector implementation into `RawVecInner` with strategy pattern ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/variants/raw/inner/mod.rs))
+- Refactored compressed vector implementation into `CompressedVecInner` with strategy pattern ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/variants/compressed/inner/mod.rs))
+- Moved `Iterable` trait from iterators module to traits module
+- Added `SIZE_OF_U64` constant
+- Renamed examples: `raw.rs` → `zerocopy.rs`, `compressed.rs` → `pcodec.rs`
+
+#### CI
+- Added test run with `--all-features` flag to verify all feature combinations ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/.github/workflows/rust.yml))
+
+#### Workspace
+- Removed `rust-version` requirement from workspace `Cargo.toml`
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.3.20...v0.4.0)
+
+## [v0.3.20](https://github.com/anydb-rs/anydb/releases/tag/v0.3.20) - 2025-11-12
+
+### Breaking Changes
+#### `rawdb`
+- Changed `rename()` and `rename_region()` methods to accept `&str` instead of `String` for new_id parameter ([source](https://github.com/anydb-rs/anydb/blob/v0.3.20/crates/rawdb/src/region.rs#L104))
+  - `Region::rename(&self, new_id: &str)` - no longer requires `.to_string()` on string literals
+  - `Database::rename_region(&self, old_id: &str, new_id: &str)` - consistent `&str` parameters
+  - `Regions::rename_region(&mut self, old_id: &str, new_id: &str)` - internal API updated
+
+### Bug Fixes
+#### `vecdb`
+- Fixed `RawVec::import_with()` to correctly add VERSION constant to the version parameter ([source](https://github.com/anydb-rs/anydb/blob/v0.3.20/crates/vecdb/src/variants/raw/mod.rs#L95))
+  - Previously VERSION was only added in `forced_import_with()`, not `import_with()`
+  - Ensures consistent version handling across both import methods
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.3.19...v0.3.20)
+
+## [v0.3.19](https://github.com/anydb-rs/anydb/releases/tag/v0.3.19) - 2025-11-12
+
+### New Features
+#### `rawdb`
+- Added `rename()` method to `Region` for renaming regions in-place ([source](https://github.com/anydb-rs/anydb/blob/v0.3.19/crates/rawdb/src/region.rs#L104-L107))
+  - Updates region metadata and ID-to-index mapping atomically
+  - Preserves all region data, metadata (start, len, reserved), and index position
+  - Returns error if new name already exists (`Error::RegionAlreadyExists`)
+- Added `remove()` method to `Region` for convenient self-removal ([source](https://github.com/anydb-rs/anydb/blob/v0.3.19/crates/rawdb/src/region.rs#L109-L112))
+  - Consumes the region and removes it from the database
+- Added `rename_region()` method to `Database` for renaming regions by ID ([source](https://github.com/anydb-rs/anydb/blob/v0.3.19/crates/rawdb/src/lib.rs#L390-L392))
+- Added `set_id()` method to `RegionMetadata` for updating region ID with validation ([source](https://github.com/anydb-rs/anydb/blob/v0.3.19/crates/rawdb/src/region.rs#L176-L179))
+
+#### `vecdb`
+- Added `remove()` method to `RawVec` to delete the vector and its associated holes region from the database ([source](https://github.com/anydb-rs/anydb/blob/v0.3.19/crates/vecdb/src/variants/raw/mod.rs#L207-L222))
+- Added `remove()` method to `CompressedVec` to delete the vector and its pages region ([source](https://github.com/anydb-rs/anydb/blob/v0.3.19/crates/vecdb/src/variants/compressed/mod.rs#L193-L204))
+  - Returns error if pages are still referenced elsewhere
+- Added `remove()` method to `StoredVec` delegating to the underlying variant ([source](https://github.com/anydb-rs/anydb/blob/v0.3.19/crates/vecdb/src/variants/stored/mod.rs#L60-L66))
+- Added `remove()` method to `EagerVec` ([source](https://github.com/anydb-rs/anydb/blob/v0.3.19/crates/vecdb/src/variants/eager/mod.rs#L1319-L1322))
+- Added `remove_if_stored()` method to `ComputedVec` for removing Eager vectors (no-op for Lazy) ([source](https://github.com/anydb-rs/anydb/blob/v0.3.19/crates/vecdb/src/variants/computed/mod.rs#L262-L271))
+- Added `boxed_iter()` method to `RawVec` returning `BoxedVecIterator<'_, I, T>` ([source](https://github.com/anydb-rs/anydb/blob/v0.3.19/crates/vecdb/src/variants/raw/mod.rs#L179-L182))
+- Added `boxed_iter()` method to `CompressedVec` returning `BoxedVecIterator<'_, I, T>` ([source](https://github.com/anydb-rs/anydb/blob/v0.3.19/crates/vecdb/src/variants/compressed/mod.rs#L176-L179))
+- Added `unchecked_read()` method to `GenericVec` trait for index-based unchecked reads ([source](https://github.com/anydb-rs/anydb/blob/v0.3.19/crates/vecdb/src/traits/generic.rs#L70-L74))
+- Added branch prediction hints: `cold()`, `likely()`, `unlikely()` helper functions ([source](https://github.com/anydb-rs/anydb/blob/v0.3.19/crates/vecdb/src/lib.rs#L41-L55))
+
+### Internal Changes
+#### `rawdb`
+- Refactored `RegionMetadata::new()` to use new `validate_id()` helper function for ID validation
+- Added `rename_region()` method to `Regions` struct for managing ID-to-index mapping updates
+- Added comprehensive test suite for region rename functionality (9 tests covering basic rename, persistence, conflicts, metadata preservation, special characters, and concurrency)
+
+#### `vecdb`
+- Added `remove()` method to `Pages` struct for cleanup support
+
+#### `vecdb_bench`
+- Disabled `vecdb_old` dependency and related benchmark code (commented out for cleanup)
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.3.18...v0.3.19)
+
+## [v0.3.18](https://github.com/anydb-rs/anydb/releases/tag/v0.3.18) - 2025-11-12
+
+### New Features
+#### `vecdb`
+- Added `vec_len()` method to `VecIterator` trait returning the total number of elements in the underlying vector ([source](https://github.com/anydb-rs/anydb/blob/v0.3.18/crates/vecdb/src/iterators/mod.rs#L43-L44))
+  - Enables querying the full vector length from any iterator instance
+  - Implemented across all iterator types: `CleanRawVecIterator`, `DirtyRawVecIterator`, `RawVecIterator`, `CleanCompressedVecIterator`, `DirtyCompressedVecIterator`, `CompressedVecIterator`, `StoredVecIterator`, `ComputedVecIterator`, `LazyVecFrom1Iterator`, `LazyVecFrom2Iterator`, `LazyVecFrom3Iterator`
+
+### Internal Changes
+#### `vecdb`
+- Added `#[inline]` attributes to `set_position_to()`, `set_end_to()`, and `vec_len()` methods across all iterator implementations for performance optimization
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.3.17...v0.3.18)
+
 ## [v0.3.17](https://github.com/anydb-rs/anydb/releases/tag/v0.3.17) - 2025-11-11
 
 ### Breaking Changes
