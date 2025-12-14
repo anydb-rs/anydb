@@ -1,7 +1,5 @@
 //! Transform computation methods for EagerVec.
 
-use log::info;
-
 use crate::{
     AnyVec, Exit, GenericStoredVec, IterableVec, Result, StoredVec, VecIndex, VecValue, Version,
 };
