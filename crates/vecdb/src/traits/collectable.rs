@@ -42,27 +42,6 @@ where
         let to = to.map(|i| self.i64_to_usize(i));
         self.collect_range(from, to)
     }
-
-    /// Collects values in the specified range as JSON bytes.
-    #[inline]
-    #[allow(unused)]
-    #[cfg(feature = "serde")]
-    fn collect_range_json_bytes(
-        &self,
-        from: Option<usize>,
-        to: Option<usize>,
-    ) -> crate::Result<Vec<u8>>
-    where
-        T: serde::Serialize,
-    {
-        let vec = self.iter_range(from, to).collect::<Vec<_>>();
-        let mut bytes = Vec::with_capacity(self.len() * 21);
-        #[cfg(feature = "serde_json")]
-        serde_json::to_writer(&mut bytes, &vec)?;
-        #[cfg(feature = "sonic-rs")]
-        sonic_rs::to_writer(&mut bytes, &vec)?;
-        Ok(bytes)
-    }
 }
 
 impl<I, T, V> CollectableVec<I, T> for V
