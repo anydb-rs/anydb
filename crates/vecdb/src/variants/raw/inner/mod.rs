@@ -583,13 +583,34 @@ where
 
         if has_updated_data {
             let updated = self.updated.take_current();
-            updated.into_iter().try_for_each(|(i, v)| -> Result<()> {
-                let mut bytes = Vec::with_capacity(Self::SIZE_OF_T);
-                S::write_to(&v, &mut bytes);
-                let at = (i * Self::SIZE_OF_T) + HEADER_OFFSET;
-                self.region().write_at(&bytes, at)?;
-                Ok(())
-            })?;
+            let region = self.region();
+
+            // Coalesce consecutive indices into single writes
+            let mut iter = updated.into_iter();
+            if let Some((first_i, first_v)) = iter.next() {
+                let mut run_start = first_i;
+                let mut run_bytes = Vec::with_capacity(Self::SIZE_OF_T * 8);
+                S::write_to(&first_v, &mut run_bytes);
+
+                for (i, v) in iter {
+                    let run_end = run_start + (run_bytes.len() / Self::SIZE_OF_T);
+                    if i == run_end {
+                        // Consecutive - extend the current run
+                        S::write_to(&v, &mut run_bytes);
+                    } else {
+                        // Gap - flush current run and start new one
+                        let at = (run_start * Self::SIZE_OF_T) + HEADER_OFFSET;
+                        region.write_at(&run_bytes, at)?;
+                        run_start = i;
+                        run_bytes.clear();
+                        S::write_to(&v, &mut run_bytes);
+                    }
+                }
+
+                // Flush final run
+                let at = (run_start * Self::SIZE_OF_T) + HEADER_OFFSET;
+                region.write_at(&run_bytes, at)?;
+            }
         }
 
         if has_holes {

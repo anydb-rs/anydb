@@ -97,7 +97,7 @@ impl Region {
             });
         }
         meta.set_len(from);
-        meta.write(self.index(), &self.db().regions());
+        meta.write_if_dirty(self.index(), &self.db().regions());
         Ok(())
     }
 
@@ -160,7 +160,7 @@ impl Region {
 
             self.extend_dirty_abs(start, write_start, data_len);
             meta.set_len(new_len);
-            meta.write(index, &db.regions());
+            meta.write_if_dirty(index, &db.regions());
 
             return Ok(());
         }
@@ -192,7 +192,7 @@ impl Region {
             self.extend_dirty_abs(start, write_start, data_len);
             let mut meta = self.meta_mut();
             meta.set_len(new_len);
-            meta.write(index, &db.regions());
+            meta.write_if_dirty(index, &db.regions());
 
             return Ok(());
         }
@@ -216,7 +216,7 @@ impl Region {
             self.extend_dirty_abs(start, write_start, data_len);
             let mut meta = self.meta_mut();
             meta.set_len(new_len);
-            meta.write(index, &db.regions());
+            meta.write_if_dirty(index, &db.regions());
 
             return Ok(());
         }
@@ -240,7 +240,7 @@ impl Region {
             meta.set_start(hole_start);
             meta.set_reserved(new_reserved);
             meta.set_len(new_len);
-            meta.write(index, &db.regions());
+            meta.write_if_dirty(index, &db.regions());
 
             return Ok(());
         }
@@ -269,7 +269,7 @@ impl Region {
         meta.set_start(new_start);
         meta.set_reserved(new_reserved);
         meta.set_len(new_len);
-        meta.write(index, &db.regions());
+        meta.write_if_dirty(index, &db.regions());
 
         Ok(())
     }
@@ -286,7 +286,7 @@ impl Region {
         let index = self.index();
         regions.rename(&old_id, new_id)?;
         meta.set_id(new_id.to_string());
-        meta.write(index, &regions);
+        meta.write_if_dirty(index, &regions);
         Ok(())
     }
 

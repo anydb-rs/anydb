@@ -119,14 +119,26 @@ impl RegionMetadata {
         self.reserved - self.len
     }
 
-    pub(crate) fn write(&self, index: usize, regions: &Regions) {
-        regions.write_at(index, &self.to_bytes())
+    #[inline(always)]
+    pub fn is_dirty(&self) -> bool {
+        self.dirty.load(Ordering::Relaxed)
+    }
+
+    #[inline(always)]
+    fn clear_dirty(&self) -> bool {
+        self.dirty.swap(false, Ordering::AcqRel)
+    }
+
+    pub(crate) fn write_if_dirty(&self, index: usize, regions: &Regions) {
+        if self.is_dirty() {
+            regions.write_at(index, &self.to_bytes())
+        }
     }
 
     /// Flushes metadata to disk if dirty.
     /// Returns `Ok(true)` if flushed, `Ok(false)` if not dirty.
     pub(crate) fn flush(&self, index: usize, regions: &Regions) -> Result<bool> {
-        if !self.dirty.swap(false, Ordering::AcqRel) {
+        if !self.clear_dirty() {
             return Ok(false);
         }
         regions

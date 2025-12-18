@@ -16,7 +16,7 @@ codegen-units = 1
 panic = "abort"
 
 [workspace.dependencies]
-log = "0.4.28"
+log = "0.4.29"
 parking_lot = "0.12.5"
 rawdb = { version = "0.4.2", path = "crates/rawdb" }
 rayon = "1.11.0"
