@@ -268,8 +268,8 @@ macro_rules! impl_vec_wrapper {
             }
 
             #[inline]
-            fn stamped_flush_with_changes(&mut self, stamp: $crate::Stamp) -> $crate::Result<()> {
-                self.0.stamped_flush_with_changes(stamp)
+            fn stamped_write_with_changes(&mut self, stamp: $crate::Stamp) -> $crate::Result<()> {
+                self.0.stamped_write_with_changes(stamp)
             }
 
             #[inline]

@@ -31,7 +31,7 @@ where
 pub trait IntegrityOps {
     fn update(&mut self, index: usize, value: u32) -> Result<()>;
     fn take(&mut self, index: usize) -> Result<Option<u32>>;
-    fn stamped_flush_with_changes(&mut self, stamp: Stamp) -> Result<()>;
+    fn stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()>;
     fn stamp(&self) -> Stamp;
     fn collect(&self) -> Vec<u32>;
     fn collect_holed(&self) -> Result<Vec<Option<u32>>>;
@@ -55,8 +55,8 @@ where
         result
     }
 
-    fn stamped_flush_with_changes(&mut self, stamp: Stamp) -> Result<()> {
-        GenericStoredVec::stamped_flush_with_changes(self, stamp)
+    fn stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()> {
+        GenericStoredVec::stamped_write_with_changes(self, stamp)
     }
 
     fn stamp(&self) -> Stamp {
@@ -168,7 +168,7 @@ where
     for i in 0..5 {
         vec.push(i);
     }
-    vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?;
+    vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
     println!("✓ Added values [0, 1, 2, 3, 4] and flushed (stamp 1)");
     println!("  Current data: {:?}", vec.deref_mut().collect());
 
@@ -177,7 +177,7 @@ where
     for i in 5..10 {
         vec.push(i);
     }
-    vec.deref_mut().stamped_flush_with_changes(Stamp::new(2))?;
+    vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?;
     println!("✓ Added values [5, 6, 7, 8, 9] and flushed (stamp 2)");
     println!("  Current data: {:?}", vec.deref_mut().collect());
 
@@ -197,21 +197,21 @@ where
     // Operation 1: Update some values
     vec.deref_mut().update(2, 100)?;
     vec.deref_mut().update(7, 200)?;
-    vec.deref_mut().stamped_flush_with_changes(Stamp::new(3))?;
+    vec.deref_mut().stamped_write_with_changes(Stamp::new(3))?;
     println!("✓ Operation 1: Updated index 2→100, 7→200 (stamp 3)");
     println!("  Current data: {:?}", vec.deref_mut().collect());
 
     // Operation 2: Add more values
     vec.push(20);
     vec.push(21);
-    vec.deref_mut().stamped_flush_with_changes(Stamp::new(4))?;
+    vec.deref_mut().stamped_write_with_changes(Stamp::new(4))?;
     println!("✓ Operation 2: Added values [20, 21] (stamp 4)");
     println!("  Current data: {:?}", vec.deref_mut().collect());
 
     // Operation 3: Create a hole and add value
     vec.deref_mut().take(5)?;
     vec.push(30);
-    vec.deref_mut().stamped_flush_with_changes(Stamp::new(5))?;
+    vec.deref_mut().stamped_write_with_changes(Stamp::new(5))?;
     println!("✓ Operation 3: Removed index 5, added value 30 (stamp 5)");
     println!("  Current data: {:?}", vec.deref_mut().collect());
     println!("  Data with holes: {:?}", vec.deref_mut().collect_holed()?);
@@ -264,7 +264,7 @@ where
     // Flush and close
     println!("\n--- Step 10: Flush, close, and reopen ---");
     vec.deref_mut()
-        .stamped_flush_with_changes(checkpoint1_stamp)?;
+        .stamped_write_with_changes(checkpoint1_stamp)?;
     let after_flush_hash = compute_directory_hash(test_path)?;
     println!("✓ Flushed to disk");
     println!("  File hash: {}", after_flush_hash);
@@ -330,21 +330,21 @@ where
     // Redo Operation 1: Update same values
     vec.deref_mut().update(2, 100)?;
     vec.deref_mut().update(7, 200)?;
-    vec.deref_mut().stamped_flush_with_changes(Stamp::new(3))?;
+    vec.deref_mut().stamped_write_with_changes(Stamp::new(3))?;
     println!("✓ Redo operation 1: Updated index 2→100, 7→200 (stamp 3)");
     println!("  Current data: {:?}", vec.deref_mut().collect());
 
     // Redo Operation 2: Add same values
     vec.push(20);
     vec.push(21);
-    vec.deref_mut().stamped_flush_with_changes(Stamp::new(4))?;
+    vec.deref_mut().stamped_write_with_changes(Stamp::new(4))?;
     println!("✓ Redo operation 2: Added values [20, 21] (stamp 4)");
     println!("  Current data: {:?}", vec.deref_mut().collect());
 
     // Redo Operation 3: Create hole and add value
     vec.deref_mut().take(5)?;
     vec.push(30);
-    vec.deref_mut().stamped_flush_with_changes(Stamp::new(5))?;
+    vec.deref_mut().stamped_write_with_changes(Stamp::new(5))?;
     println!("✓ Redo operation 3: Removed index 5, added value 30 (stamp 5)");
     println!("  Current data: {:?}", vec.deref_mut().collect());
     println!("  Data with holes: {:?}", vec.deref_mut().collect_holed()?);
@@ -373,7 +373,7 @@ where
     // Flush and close
     println!("\n--- Step 12: Flush, close, and reopen (after redo) ---");
     vec.deref_mut()
-        .stamped_flush_with_changes(checkpoint2_stamp)?;
+        .stamped_write_with_changes(checkpoint2_stamp)?;
     let after_redo_flush_hash = compute_directory_hash(test_path)?;
     println!("✓ Flushed to disk");
     println!("  File hash: {}", after_redo_flush_hash);

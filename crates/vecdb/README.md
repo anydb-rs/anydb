@@ -217,12 +217,12 @@ use vecdb::Stamp;
 // Create initial state
 vec.push(100);
 vec.push(200);
-vec.stamped_flush_with_changes(Stamp::new(1))?;
+vec.stamped_write_with_changes(Stamp::new(1))?;
 
 // Make more changes
 vec.push(300);
 vec.update(0, 999)?;
-vec.stamped_flush_with_changes(Stamp::new(2))?;
+vec.stamped_write_with_changes(Stamp::new(2))?;
 
 // Rollback to previous stamp (undoes changes from stamp 2)
 vec.rollback()?;

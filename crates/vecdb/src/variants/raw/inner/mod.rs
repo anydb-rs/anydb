@@ -790,14 +790,14 @@ where
         !self.is_pushed_empty() || !self.holes().is_empty() || !self.updated().is_empty()
     }
 
-    fn stamped_flush_with_changes(&mut self, stamp: Stamp) -> Result<()> {
+    fn stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()> {
         if self.saved_stamped_changes() == 0 {
-            return self.stamped_flush(stamp);
+            return self.stamped_write(stamp);
         }
 
         // Call default which handles file management, serialize, flush, and updates prev_stored_len/prev_pushed
         // serialize_changes() saves prev_holes, so we must call this BEFORE holes.save()
-        self.default_stamped_flush_with_changes(stamp)?;
+        self.default_stamped_write_with_changes(stamp)?;
 
         // Now update prev_ fields for next iteration
         self.holes.save();

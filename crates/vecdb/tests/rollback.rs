@@ -52,14 +52,14 @@ mod generic_rollback {
         for i in 0..5 {
             vec.push(i);
         }
-        vec.stamped_flush_with_changes(Stamp::new(1))?;
+        vec.stamped_write_with_changes(Stamp::new(1))?;
         assert_eq!(vec.collect(), vec![0, 1, 2, 3, 4]);
         assert_eq!(vec.stamp(), Stamp::new(1));
 
         // Stamp 2: [0, 1, 2, 3, 4, 5, 6]
         vec.push(5);
         vec.push(6);
-        vec.stamped_flush_with_changes(Stamp::new(2))?;
+        vec.stamped_write_with_changes(Stamp::new(2))?;
         assert_eq!(vec.collect(), vec![0, 1, 2, 3, 4, 5, 6]);
         assert_eq!(vec.stamp(), Stamp::new(2));
 
@@ -82,13 +82,13 @@ mod generic_rollback {
         for i in 0..5 {
             vec.push(i);
         }
-        vec.stamped_flush_with_changes(Stamp::new(1))?;
+        vec.stamped_write_with_changes(Stamp::new(1))?;
 
         // Stamp 2: [0, 1, 2, 3, 4, 5, 6, 7]
         vec.push(5);
         vec.push(6);
         vec.push(7);
-        vec.stamped_flush_with_changes(Stamp::new(2))?;
+        vec.stamped_write_with_changes(Stamp::new(2))?;
         assert_eq!(vec.collect(), vec![0, 1, 2, 3, 4, 5, 6, 7]);
 
         // Rollback - should restore to [0, 1, 2, 3, 4]
@@ -110,15 +110,15 @@ mod generic_rollback {
         for i in 0..5 {
             vec.push(i);
         }
-        vec.stamped_flush_with_changes(Stamp::new(1))?;
+        vec.stamped_write_with_changes(Stamp::new(1))?;
 
         // Stamp 2: [0, 1, 2, 3, 4, 5]
         vec.push(5);
-        vec.stamped_flush_with_changes(Stamp::new(2))?;
+        vec.stamped_write_with_changes(Stamp::new(2))?;
 
         // Stamp 3: [0, 1, 2, 3, 4, 5, 6]
         vec.push(6);
-        vec.stamped_flush_with_changes(Stamp::new(3))?;
+        vec.stamped_write_with_changes(Stamp::new(3))?;
         assert_eq!(vec.collect(), vec![0, 1, 2, 3, 4, 5, 6]);
 
         // Rollback to stamp 2
@@ -145,11 +145,11 @@ mod generic_rollback {
         for i in 0..5 {
             vec.push(i);
         }
-        vec.stamped_flush_with_changes(Stamp::new(1))?;
+        vec.stamped_write_with_changes(Stamp::new(1))?;
 
         // Stamp 2: [0, 1, 2, 3, 4, 5]
         vec.push(5);
-        vec.stamped_flush_with_changes(Stamp::new(2))?;
+        vec.stamped_write_with_changes(Stamp::new(2))?;
 
         // Rollback to stamp 1
         vec.rollback()?;
@@ -157,7 +157,7 @@ mod generic_rollback {
 
         // Save new stamp 2: [0, 1, 2, 3, 4, 99]
         vec.push(99);
-        vec.stamped_flush_with_changes(Stamp::new(2))?;
+        vec.stamped_write_with_changes(Stamp::new(2))?;
         assert_eq!(vec.collect(), vec![0, 1, 2, 3, 4, 99]);
         assert_eq!(vec.stamp(), Stamp::new(2));
 
@@ -172,14 +172,14 @@ mod generic_rollback {
         let mut vec = import_with_changes::<V>(&db, "test", 10)?;
 
         // Stamp 1: []
-        vec.stamped_flush_with_changes(Stamp::new(1))?;
+        vec.stamped_write_with_changes(Stamp::new(1))?;
         assert_eq!(vec.collect(), Vec::<u32>::new());
 
         // Stamp 2: [0, 1, 2]
         vec.push(0);
         vec.push(1);
         vec.push(2);
-        vec.stamped_flush_with_changes(Stamp::new(2))?;
+        vec.stamped_write_with_changes(Stamp::new(2))?;
         assert_eq!(vec.collect(), vec![0, 1, 2]);
 
         // Rollback to empty
@@ -200,19 +200,19 @@ mod generic_rollback {
         for i in 0..5 {
             vec.push(i);
         }
-        vec.stamped_flush_with_changes(Stamp::new(1))?;
+        vec.stamped_write_with_changes(Stamp::new(1))?;
 
         vec.push(5);
-        vec.stamped_flush_with_changes(Stamp::new(2))?;
+        vec.stamped_write_with_changes(Stamp::new(2))?;
 
         vec.push(6);
-        vec.stamped_flush_with_changes(Stamp::new(3))?;
+        vec.stamped_write_with_changes(Stamp::new(3))?;
 
         vec.push(7);
-        vec.stamped_flush_with_changes(Stamp::new(4))?;
+        vec.stamped_write_with_changes(Stamp::new(4))?;
 
         vec.push(8);
-        vec.stamped_flush_with_changes(Stamp::new(5))?;
+        vec.stamped_write_with_changes(Stamp::new(5))?;
         assert_eq!(vec.collect(), vec![0, 1, 2, 3, 4, 5, 6, 7, 8]);
 
         // Rollback before stamp 4 (should go to stamp 3)
@@ -231,20 +231,20 @@ mod generic_rollback {
         let mut vec = import_with_changes::<V>(&db, "test", 10)?;
 
         // Build chain of stamps with pushes only
-        vec.stamped_flush_with_changes(Stamp::new(1))?; // []
+        vec.stamped_write_with_changes(Stamp::new(1))?; // []
 
         vec.push(0);
-        vec.stamped_flush_with_changes(Stamp::new(2))?; // [0]
+        vec.stamped_write_with_changes(Stamp::new(2))?; // [0]
 
         vec.push(1);
-        vec.stamped_flush_with_changes(Stamp::new(3))?; // [0, 1]
+        vec.stamped_write_with_changes(Stamp::new(3))?; // [0, 1]
 
         vec.push(2);
-        vec.stamped_flush_with_changes(Stamp::new(4))?; // [0, 1, 2]
+        vec.stamped_write_with_changes(Stamp::new(4))?; // [0, 1, 2]
 
         vec.push(3);
         vec.push(4);
-        vec.stamped_flush_with_changes(Stamp::new(5))?; // [0, 1, 2, 3, 4]
+        vec.stamped_write_with_changes(Stamp::new(5))?; // [0, 1, 2, 3, 4]
         assert_eq!(vec.collect(), vec![0, 1, 2, 3, 4]);
 
         // Rollback through chain
@@ -276,15 +276,15 @@ mod generic_rollback {
             for i in 0..5 {
                 vec.push(i);
             }
-            vec.stamped_flush_with_changes(Stamp::new(1))?;
+            vec.stamped_write_with_changes(Stamp::new(1))?;
 
             vec.push(5);
             vec.push(6);
-            vec.stamped_flush_with_changes(Stamp::new(2))?;
+            vec.stamped_write_with_changes(Stamp::new(2))?;
 
             // Rollback and flush
             vec.rollback()?;
-            vec.stamped_flush_with_changes(Stamp::new(1))?;
+            vec.stamped_write_with_changes(Stamp::new(1))?;
         }
 
         // Reopen and verify
@@ -308,7 +308,7 @@ mod generic_rollback {
         for i in 0..10 {
             vec.push(i);
         }
-        vec.stamped_flush_with_changes(Stamp::new(1))?;
+        vec.stamped_write_with_changes(Stamp::new(1))?;
         assert_eq!(vec.len(), 10);
         assert_eq!(vec.stored_len(), 10);
         assert_eq!(vec.pushed_len(), 0);
@@ -338,7 +338,7 @@ mod generic_rollback {
         assert_eq!(vec.collect(), vec![100, 101, 102]);
 
         // Flush the new data
-        vec.stamped_flush_with_changes(Stamp::new(1))?;
+        vec.stamped_write_with_changes(Stamp::new(1))?;
         assert_eq!(vec.len(), 3);
         assert_eq!(vec.stored_len(), 3);
         assert_eq!(vec.pushed_len(), 0);
@@ -684,7 +684,7 @@ mod raw_rollback {
     pub trait RollbackOps {
         fn update(&mut self, index: usize, value: u32) -> Result<()>;
         fn take(&mut self, index: usize) -> Result<Option<u32>>;
-        fn stamped_flush_with_changes(&mut self, stamp: Stamp) -> Result<()>;
+        fn stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()>;
         fn rollback(&mut self) -> Result<()>;
         fn rollback_before(&mut self, stamp: Stamp) -> Result<Stamp>;
         fn stamp(&self) -> Stamp;
@@ -729,8 +729,8 @@ mod raw_rollback {
             result
         }
 
-        fn stamped_flush_with_changes(&mut self, stamp: Stamp) -> Result<()> {
-            GenericStoredVec::stamped_flush_with_changes(self, stamp)
+        fn stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()> {
+            GenericStoredVec::stamped_write_with_changes(self, stamp)
         }
 
         fn rollback(&mut self) -> Result<()> {
@@ -799,8 +799,8 @@ mod raw_rollback {
             result
         }
 
-        fn stamped_flush_with_changes(&mut self, stamp: Stamp) -> Result<()> {
-            GenericStoredVec::stamped_flush_with_changes(self, stamp)
+        fn stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()> {
+            GenericStoredVec::stamped_write_with_changes(self, stamp)
         }
 
         fn rollback(&mut self) -> Result<()> {
@@ -852,13 +852,13 @@ mod raw_rollback {
         for i in 0..5 {
             vec.push(i);
         }
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
         assert_eq!(vec.deref_mut().collect(), vec![0, 1, 2, 3, 4]);
         assert_eq!(vec.deref_mut().stamp(), Stamp::new(1));
 
         // Modify to [0, 1, 99, 3, 4]
         vec.deref_mut().update(2, 99)?;
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(2))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?;
         assert_eq!(vec.deref_mut().collect(), vec![0, 1, 99, 3, 4]);
         assert_eq!(vec.deref_mut().stamp(), Stamp::new(2));
 
@@ -882,14 +882,14 @@ mod raw_rollback {
         for i in 0..5 {
             vec.push(i);
         }
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
         assert_eq!(vec.deref_mut().collect(), vec![0, 1, 2, 3, 4]);
 
         // Add more: [0, 1, 2, 3, 4, 5, 6, 7]
         vec.push(5);
         vec.push(6);
         vec.push(7);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(2))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?;
         assert_eq!(vec.deref_mut().collect(), vec![0, 1, 2, 3, 4, 5, 6, 7]);
 
         // Rollback - should restore to [0, 1, 2, 3, 4]
@@ -912,15 +912,15 @@ mod raw_rollback {
         for i in 0..5 {
             vec.push(i);
         }
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
 
         // Stamp 2: [0, 1, 2, 3, 4, 5]
         vec.push(5);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(2))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?;
 
         // Stamp 3: [0, 1, 2, 3, 4, 5, 6]
         vec.push(6);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(3))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(3))?;
         assert_eq!(vec.deref_mut().collect(), vec![0, 1, 2, 3, 4, 5, 6]);
 
         // Rollback to stamp 2
@@ -948,11 +948,11 @@ mod raw_rollback {
         for i in 0..5 {
             vec.push(i);
         }
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
 
         // Stamp 2: [0, 1, 2, 3, 4, 5]
         vec.push(5);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(2))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?;
 
         // Rollback to stamp 1
         vec.deref_mut().rollback()?;
@@ -960,7 +960,7 @@ mod raw_rollback {
 
         // Now save a different state 2: [0, 1, 2, 3, 4, 99]
         vec.push(99);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(2))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?;
         assert_eq!(vec.deref_mut().collect(), vec![0, 1, 2, 3, 4, 99]);
         assert_eq!(vec.deref_mut().stamp(), Stamp::new(2));
 
@@ -979,12 +979,12 @@ mod raw_rollback {
         for i in 0..5 {
             vec.push(i);
         }
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
 
         // Stamp 2: [0, 99, 2, 88, 4] - update multiple values
         vec.deref_mut().update(1, 99)?;
         vec.deref_mut().update(3, 88)?;
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(2))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?;
         assert_eq!(vec.deref_mut().collect(), vec![0, 99, 2, 88, 4]);
 
         // Rollback to stamp 1 - should restore original values
@@ -1007,12 +1007,12 @@ mod raw_rollback {
         for i in 0..5 {
             vec.push(i);
         }
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
 
         // Stamp 2: delete some items (creating holes)
         vec.deref_mut().take(1)?;
         vec.deref_mut().take(3)?;
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(2))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?;
         assert_eq!(vec.deref_mut().collect(), vec![0, 2, 4]);
 
         // Rollback to stamp 1 - should restore deleted items
@@ -1035,13 +1035,13 @@ mod raw_rollback {
         for i in 0..5 {
             vec.push(i);
         }
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
 
         // Stamp 2: extend + update
         vec.deref_mut().update(1, 99)?;
         vec.push(5);
         vec.push(6);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(2))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?;
         assert_eq!(vec.deref_mut().collect(), vec![0, 99, 2, 3, 4, 5, 6]);
 
         // Rollback - should restore length AND value
@@ -1064,12 +1064,12 @@ mod raw_rollback {
         for i in 0..5 {
             vec.push(i);
         }
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
 
         // Stamp 2: delete + update
         vec.deref_mut().take(1)?;
         vec.deref_mut().update(2, 99)?;
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(2))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?;
         assert_eq!(vec.deref_mut().collect(), vec![0, 99, 3, 4]);
 
         // Rollback - should restore deleted item AND original value
@@ -1092,19 +1092,19 @@ mod raw_rollback {
         for i in 0..5 {
             vec.push(i);
         }
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
 
         // Stamp 2: [100, 1, 2, 3, 4]
         vec.deref_mut().update(0, 100)?;
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(2))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?;
 
         // Stamp 3: [200, 1, 2, 3, 4]
         vec.deref_mut().update(0, 200)?;
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(3))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(3))?;
 
         // Stamp 4: [300, 1, 2, 3, 4]
         vec.deref_mut().update(0, 300)?;
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(4))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(4))?;
         assert_eq!(vec.deref_mut().collect(), vec![300, 1, 2, 3, 4]);
 
         // Rollback to stamp 3
@@ -1134,7 +1134,7 @@ mod raw_rollback {
         for i in 0..10 {
             vec.push(i);
         }
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
 
         // Stamp 2: Complex operations
         // - Delete indices 1, 3, 5
@@ -1148,7 +1148,7 @@ mod raw_rollback {
         vec.deref_mut().update(8, 888)?;
         vec.push(100);
         vec.push(101);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(2))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?;
         assert_eq!(
             vec.deref_mut().collect(),
             vec![0, 222, 4, 666, 7, 888, 9, 100, 101]
@@ -1173,14 +1173,14 @@ mod raw_rollback {
         let (mut vec, _) = V::import_with_changes(&db, "test", 10)?;
 
         // Stamp 1: []
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
         assert_eq!(vec.deref_mut().collect(), Vec::<u32>::new());
 
         // Stamp 2: [0, 1, 2]
         vec.push(0);
         vec.push(1);
         vec.push(2);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(2))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?;
         assert_eq!(vec.deref_mut().collect(), vec![0, 1, 2]);
 
         // Rollback to empty
@@ -1202,7 +1202,7 @@ mod raw_rollback {
         for i in 0..10 {
             vec.push(i);
         }
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
         assert_eq!(vec.len(), 10);
         assert_eq!(vec.deref_mut().stored_len(), 10);
         assert_eq!(vec.pushed_len(), 0);
@@ -1235,7 +1235,7 @@ mod raw_rollback {
         assert_eq!(vec.deref_mut().collect(), vec![100, 101, 102]);
 
         // Flush the new data
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
         assert_eq!(vec.len(), 3);
         assert_eq!(vec.deref_mut().stored_len(), 3);
         assert_eq!(vec.pushed_len(), 0);
@@ -1253,35 +1253,35 @@ mod raw_rollback {
         let (mut vec, _) = V::import_with_changes(&db, "test", 10)?;
 
         // Build a chain of 10 stamps with different operations
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?; // []
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?; // []
 
         vec.push(0);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(2))?; // [0]
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?; // [0]
 
         vec.push(1);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(3))?; // [0, 1]
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(3))?; // [0, 1]
 
         vec.deref_mut().update(0, 10)?;
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(4))?; // [10, 1]
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(4))?; // [10, 1]
 
         vec.push(2);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(5))?; // [10, 1, 2]
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(5))?; // [10, 1, 2]
 
         vec.deref_mut().take(1)?;
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(6))?; // [10, 2]
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(6))?; // [10, 2]
 
         vec.push(3);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(7))?; // [10, 2, 3]
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(7))?; // [10, 2, 3]
 
         vec.deref_mut().update(0, 20)?;
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(8))?; // [20, 2, 3]
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(8))?; // [20, 2, 3]
 
         vec.push(4);
         vec.push(5);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(9))?; // [20, 2, 3, 4, 5]
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(9))?; // [20, 2, 3, 4, 5]
 
         vec.deref_mut().update(2, 33)?;
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(10))?; // [20, 33, 3, 4, 5]
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(10))?; // [20, 33, 3, 4, 5]
         assert_eq!(vec.deref_mut().collect(), vec![20, 33, 3, 4, 5]);
 
         // Rollback through the chain
@@ -1327,13 +1327,13 @@ mod raw_rollback {
         for i in 0..5 {
             vec.push(i);
         }
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
 
         // Stamp 2: Update ALL elements
         for i in 0..5 {
             vec.deref_mut().update(i, (i * 100) as u32)?;
         }
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(2))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?;
         assert_eq!(vec.deref_mut().collect(), vec![0, 100, 200, 300, 400]);
 
         // Rollback - should restore all original values
@@ -1355,13 +1355,13 @@ mod raw_rollback {
         for i in 0..10 {
             vec.push(i);
         }
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
 
         // Stamp 2: Delete every other element
         for i in (0..10).step_by(2) {
             vec.deref_mut().take(i)?;
         }
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(2))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?;
         assert_eq!(vec.deref_mut().collect(), vec![1, 3, 5, 7, 9]);
 
         // Rollback - should restore all deleted items
@@ -1386,19 +1386,19 @@ mod raw_rollback {
         for i in 0..5 {
             vec.push(i);
         }
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
 
         vec.push(5);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(2))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?;
 
         vec.push(6);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(3))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(3))?;
 
         vec.push(7);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(4))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(4))?;
 
         vec.push(8);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(5))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(5))?;
         assert_eq!(vec.deref_mut().collect(), vec![0, 1, 2, 3, 4, 5, 6, 7, 8]);
 
         // Rollback before stamp 4 (should go to stamp 3)
@@ -1645,13 +1645,13 @@ mod integration {
         for i in 0..5 {
             vec.push(i);
         }
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(1))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
 
         // Phase 2: More work
         for i in 5..10 {
             vec.push(i);
         }
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(2))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?;
 
         // Checkpoint 1
         let checkpoint1_data = vec.deref_mut().collect_holed()?;
@@ -1661,15 +1661,15 @@ mod integration {
         // Phase 3: Three more operations with flush
         vec.deref_mut().update(2, 100)?;
         vec.deref_mut().update(7, 200)?;
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(3))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(3))?;
 
         vec.push(20);
         vec.push(21);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(4))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(4))?;
 
         vec.deref_mut().take(5)?;
         vec.push(30);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(5))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(5))?;
 
         // Checkpoint 2
         let checkpoint2_data = vec.deref_mut().collect_holed()?;
@@ -1690,7 +1690,7 @@ mod integration {
 
         // Flush and close
         vec.deref_mut()
-            .stamped_flush_with_changes(checkpoint1_stamp)?;
+            .stamped_write_with_changes(checkpoint1_stamp)?;
         let _after_flush_hash = compute_directory_hash(test_path)?;
 
         drop(vec);
@@ -1716,15 +1716,15 @@ mod integration {
         // Redo the same 3 operations
         vec.deref_mut().update(2, 100)?;
         vec.deref_mut().update(7, 200)?;
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(3))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(3))?;
 
         vec.push(20);
         vec.push(21);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(4))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(4))?;
 
         vec.deref_mut().take(5)?;
         vec.push(30);
-        vec.deref_mut().stamped_flush_with_changes(Stamp::new(5))?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(5))?;
 
         // Verify in-memory data matches checkpoint2
         let after_redo_data = vec.deref_mut().collect_holed()?;
@@ -1735,7 +1735,7 @@ mod integration {
 
         // Flush and close
         vec.deref_mut()
-            .stamped_flush_with_changes(checkpoint2_stamp)?;
+            .stamped_write_with_changes(checkpoint2_stamp)?;
         drop(vec);
 
         // Reopen again

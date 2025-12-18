@@ -272,7 +272,7 @@ where
             ]
         );
 
-        vec.stamped_flush_with_changes(Stamp::new(1))?;
+        vec.stamped_write_with_changes(Stamp::new(1))?;
     }
 
     {
@@ -308,7 +308,7 @@ where
             ]
         );
 
-        vec.stamped_flush_with_changes(Stamp::new(2))?;
+        vec.stamped_write_with_changes(Stamp::new(2))?;
     }
 
     {
@@ -364,7 +364,7 @@ where
             ]
         );
 
-        vec.stamped_flush(Stamp::new(0))?;
+        vec.stamped_write(Stamp::new(0))?;
     }
 
     {
@@ -402,7 +402,7 @@ where
             ]
         );
 
-        vec.stamped_flush_with_changes(Stamp::new(1))?;
+        vec.stamped_write_with_changes(Stamp::new(1))?;
     }
 
     {
@@ -438,7 +438,7 @@ where
             ]
         );
 
-        vec.stamped_flush_with_changes(Stamp::new(2))?;
+        vec.stamped_write_with_changes(Stamp::new(2))?;
     }
 
     {
@@ -473,7 +473,7 @@ where
             ]
         );
 
-        vec.stamped_flush(Stamp::new(0))?;
+        vec.stamped_write(Stamp::new(0))?;
 
         vec.truncate_if_needed(10)?;
         let reader = vec.deref_mut().create_reader();
@@ -528,7 +528,7 @@ where
         vec.push(21);
         drop(reader);
 
-        vec.stamped_flush_with_changes(Stamp::new(1))?;
+        vec.stamped_write_with_changes(Stamp::new(1))?;
         assert_eq!(vec.stamp(), Stamp::new(1));
 
         let reader = vec.deref_mut().create_reader();
@@ -539,7 +539,7 @@ where
         vec.push(7);
         drop(reader);
 
-        vec.stamped_flush_with_changes(Stamp::new(2))?;
+        vec.stamped_write_with_changes(Stamp::new(2))?;
 
         assert_eq!(
             vec.deref_mut().collect_holed()?,
@@ -608,7 +608,7 @@ where
         );
 
         assert_eq!(vec.stamp(), Stamp::new(0));
-        vec.stamped_flush_with_changes(Stamp::new(2))?;
+        vec.stamped_write_with_changes(Stamp::new(2))?;
         assert_eq!(vec.stamp(), Stamp::new(2));
 
         let _ = vec.rollback_before(Stamp::new(1))?;
@@ -622,7 +622,7 @@ where
             ]
         );
 
-        vec.stamped_flush_with_changes(Stamp::new(0))?;
+        vec.stamped_write_with_changes(Stamp::new(0))?;
 
         let vec = V::forced_import_with(options)?;
 

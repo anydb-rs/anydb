@@ -229,7 +229,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ]
         );
 
-        vec.stamped_flush_with_changes(Stamp::new(1))?;
+        vec.stamped_write_with_changes(Stamp::new(1))?;
     }
 
     {
@@ -265,7 +265,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ]
         );
 
-        vec.stamped_flush_with_changes(Stamp::new(2))?;
+        vec.stamped_write_with_changes(Stamp::new(2))?;
     }
 
     {
@@ -369,7 +369,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ]
         );
 
-        vec.stamped_flush(Stamp::new(0))?;
+        vec.stamped_write(Stamp::new(0))?;
     }
 
     {
@@ -419,7 +419,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ]
         );
 
-        vec.stamped_flush_with_changes(Stamp::new(1))?;
+        vec.stamped_write_with_changes(Stamp::new(1))?;
     }
 
     {
@@ -455,7 +455,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ]
         );
 
-        vec.stamped_flush_with_changes(Stamp::new(2))?;
+        vec.stamped_write_with_changes(Stamp::new(2))?;
     }
 
     {
@@ -490,7 +490,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ]
         );
 
-        vec.stamped_flush(Stamp::new(0))?;
+        vec.stamped_write(Stamp::new(0))?;
 
         vec.truncate_if_needed(10)?;
         let reader = vec.create_reader();
@@ -582,7 +582,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             vec.holes(),
         ));
 
-        vec.stamped_flush_with_changes(Stamp::new(1))?;
+        vec.stamped_write_with_changes(Stamp::new(1))?;
         assert_eq!(vec.stamp(), Stamp::new(1));
 
         dbg!((
@@ -617,7 +617,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             vec.holes(),
         ));
 
-        vec.stamped_flush_with_changes(Stamp::new(2))?;
+        vec.stamped_write_with_changes(Stamp::new(2))?;
 
         dbg!((
             vec.prev_stored_len(),
@@ -721,7 +721,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         assert_eq!(vec.stamp(), Stamp::new(0));
-        vec.stamped_flush_with_changes(Stamp::new(2))?;
+        vec.stamped_write_with_changes(Stamp::new(2))?;
         assert_eq!(vec.stamp(), Stamp::new(2));
 
         dbg!((
@@ -761,7 +761,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ]
         );
 
-        vec.stamped_flush_with_changes(Stamp::new(0))?;
+        vec.stamped_write_with_changes(Stamp::new(0))?;
 
         let vec: VEC = ZeroCopyVec::forced_import_with(options)?;
         dbg!(("0", vec.prev_holes(), vec.updated()));
@@ -786,7 +786,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //     vec.push(21);
     //     drop(reader);
 
-    //     vec.stamped_flush_with_changes(Stamp::new(1))?;
+    //     vec.stamped_write_with_changes(Stamp::new(1))?;
     //     assert_eq!(vec.stamp(), Stamp::new(1));
 
     //     dbg!(("1", vec.stamp(), vec.stored_len()));
@@ -799,7 +799,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //     vec.push(7);
     //     drop(reader);
 
-    //     vec.stamped_flush_with_changes(Stamp::new(2))?;
+    //     vec.stamped_write_with_changes(Stamp::new(2))?;
 
     //     assert_eq!(
     //         vec.collect_holed()?,
@@ -874,7 +874,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //         ]
     //     );
 
-    //     vec.stamped_flush_with_changes(Stamp::new(0))?;
+    //     vec.stamped_write_with_changes(Stamp::new(0))?;
 
     //     let vec: VEC = ZeroCopyVec::forced_import_with(options)?;
     //     dbg!(("0", vec.prev_holes(), vec.updated()));

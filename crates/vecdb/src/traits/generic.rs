@@ -470,23 +470,23 @@ where
 
     /// Flushes with the given stamp, optionally saving changes for rollback.
     #[inline]
-    fn stamped_flush_maybe_with_changes(&mut self, stamp: Stamp, with_changes: bool) -> Result<()> {
+    fn stamped_write_maybe_with_changes(&mut self, stamp: Stamp, with_changes: bool) -> Result<()> {
         if with_changes {
-            self.stamped_flush_with_changes(stamp)
+            self.stamped_write_with_changes(stamp)
         } else {
-            self.stamped_flush(stamp)
+            self.stamped_write(stamp)
         }
     }
 
-    /// Default implementation of stamped_flush_with_changes.
+    /// Default implementation of stamped_write_with_changes.
     /// Handles file management, serialization, flush, and base prev_ field updates.
-    /// RawVecInner overrides stamped_flush_with_changes to also update prev_holes/prev_updated.
+    /// RawVecInner overrides stamped_write_with_changes to also update prev_holes/prev_updated.
     #[doc(hidden)]
-    fn default_stamped_flush_with_changes(&mut self, stamp: Stamp) -> Result<()> {
+    fn default_stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()> {
         let saved_stamped_changes = self.saved_stamped_changes();
 
         if saved_stamped_changes == 0 {
-            return self.stamped_flush(stamp);
+            return self.stamped_write(stamp);
         }
 
         let path = self.changes_path();
@@ -523,7 +523,7 @@ where
             self.serialize_changes()?,
         )?;
 
-        self.stamped_flush(stamp)?;
+        self.stamped_write(stamp)?;
 
         // Update prev_ fields to reflect the PERSISTED state after flush
         *self.mut_prev_stored_len() = self.stored_len();
@@ -533,8 +533,8 @@ where
     }
 
     /// Flushes with the given stamp, saving changes to enable rollback.
-    fn stamped_flush_with_changes(&mut self, stamp: Stamp) -> Result<()> {
-        self.default_stamped_flush_with_changes(stamp)
+    fn stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()> {
+        self.default_stamped_write_with_changes(stamp)
     }
 
     /// Default implementation of rollback_before.

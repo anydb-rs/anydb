@@ -65,7 +65,7 @@ pub trait AnyStoredVec: AnyVec {
     }
 
     #[inline]
-    fn stamped_flush(&mut self, stamp: Stamp) -> Result<()> {
+    fn stamped_write(&mut self, stamp: Stamp) -> Result<()> {
         self.update_stamp(stamp);
         self.write()?;
         Ok(())
