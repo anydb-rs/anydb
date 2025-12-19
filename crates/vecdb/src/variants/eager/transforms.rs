@@ -23,15 +23,17 @@ where
     {
         self.validate_computed_version_or_reset(Version::ZERO + self.inner_version() + version)?;
 
+        self.truncate_if_needed(max_from)?;
+
         self.repeat_until_complete(exit, |this| {
-            let from = this.len().min(max_from.to_usize());
+            let from = this.len();
             if from >= to {
                 return Ok(());
             }
 
             for i in from..to {
                 let (idx, val) = t(V::I::from(i));
-                this.truncate_push(idx, val)?;
+                this.checked_push(idx, val)?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -90,12 +92,14 @@ where
             Version::ZERO + self.inner_version() + other.version(),
         )?;
 
+        self.truncate_if_needed(max_from)?;
+
         self.repeat_until_complete(exit, |this| {
-            let skip = this.len().min(max_from.to_usize());
+            let skip = this.len();
 
             for (i, b) in other.iter().enumerate().skip(skip) {
                 let (i, v) = t((V::I::from(i), b, this));
-                this.truncate_push(i, v)?;
+                this.checked_push(i, v)?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -125,13 +129,15 @@ where
             Version::ZERO + self.inner_version() + other1.version() + other2.version(),
         )?;
 
+        self.truncate_if_needed(max_from)?;
+
         self.repeat_until_complete(exit, |this| {
-            let skip = this.len().min(max_from.to_usize());
+            let skip = this.len();
             let mut iter2 = other2.iter().skip(skip);
 
             for (i, b) in other1.iter().enumerate().skip(skip) {
                 let (i, v) = t((V::I::from(i), b, iter2.next().unwrap(), this));
-                this.truncate_push(i, v)?;
+                this.checked_push(i, v)?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -165,8 +171,10 @@ where
                 + other3.version(),
         )?;
 
+        self.truncate_if_needed(max_from)?;
+
         self.repeat_until_complete(exit, |this| {
-            let skip = this.len().min(max_from.to_usize());
+            let skip = this.len();
             let mut iter2 = other2.iter().skip(skip);
             let mut iter3 = other3.iter().skip(skip);
 
@@ -178,7 +186,7 @@ where
                     iter3.next().unwrap(),
                     this,
                 ));
-                this.truncate_push(i, v)?;
+                this.checked_push(i, v)?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -216,8 +224,10 @@ where
                 + other4.version(),
         )?;
 
+        self.truncate_if_needed(max_from)?;
+
         self.repeat_until_complete(exit, |this| {
-            let skip = this.len().min(max_from.to_usize());
+            let skip = this.len();
             let mut iter2 = other2.iter().skip(skip);
             let mut iter3 = other3.iter().skip(skip);
             let mut iter4 = other4.iter().skip(skip);
@@ -231,7 +241,7 @@ where
                     iter4.next().unwrap(),
                     this,
                 ));
-                this.truncate_push(i, v)?;
+                this.checked_push(i, v)?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -257,9 +267,11 @@ where
         )?;
 
         self.repeat_until_complete(exit, |this| {
-            let skip = max_from
-                .to_usize()
-                .min(this.iter().last().map_or(0_usize, |v| v.to_usize()));
+            let skip = this
+                .iter()
+                .last()
+                .map(|v| v.to_usize().min(max_from.to_usize()))
+                .unwrap_or(0);
 
             let mut prev_i = None;
             for (v, i) in other.iter().enumerate().skip(skip) {

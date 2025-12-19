@@ -14,7 +14,7 @@ use crate::{
     AnyStoredVec, AnyVec, BUFFER_SIZE, BaseVec, BoxedVecIterator, Bytes, BytesExt,
     CleanRawVecIterator, DirtyRawVecIterator, Error, Format, GenericStoredVec, HEADER_OFFSET,
     Header, ImportOptions, IterableVec, RawVecIterator, Result, SIZE_OF_U64, Stamp, TypedVec,
-    VecIndex, VecValue, Version, WithPrev, vec_region_name_with,
+    VecIndex, VecValue, Version, WithPrev, short_type_name, vec_region_name_with,
 };
 
 mod strategy;
@@ -500,6 +500,11 @@ where
     #[inline]
     fn value_type_to_size_of(&self) -> usize {
         size_of::<T>()
+    }
+
+    #[inline]
+    fn value_type_to_string(&self) -> &'static str {
+        short_type_name::<T>()
     }
 
     #[inline]

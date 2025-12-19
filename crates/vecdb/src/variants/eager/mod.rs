@@ -17,6 +17,7 @@ pub use saturating_add::*;
 use crate::{
     AnyStoredVec, AnyVec, BoxedVecIterator, Exit, GenericStoredVec, Header, ImportOptions,
     ImportableVec, IterableVec, PrintableIndex, Result, StoredVec, TypedVec, Version,
+    short_type_name,
 };
 
 /// Wrapper for computing and storing derived values from source vectors.
@@ -123,6 +124,11 @@ where
     #[inline]
     fn value_type_to_size_of(&self) -> usize {
         size_of::<V::T>()
+    }
+
+    #[inline]
+    fn value_type_to_string(&self) -> &'static str {
+        short_type_name::<V::T>()
     }
 
     #[inline]

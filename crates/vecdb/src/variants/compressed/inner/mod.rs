@@ -8,7 +8,7 @@ use crate::{
     AnyStoredVec, AnyVec, BaseVec, BoxedVecIterator, CleanCompressedVecIterator,
     CompressedVecIterator, DirtyCompressedVecIterator, Error, Format, GenericStoredVec,
     HEADER_OFFSET, Header, ImportOptions, IterableVec, Result, TypedVec, VecIndex, VecValue,
-    Version, likely, unlikely, vec_region_name_with,
+    Version, likely, short_type_name, unlikely, vec_region_name_with,
 };
 
 mod page;
@@ -254,6 +254,11 @@ where
     #[inline]
     fn value_type_to_size_of(&self) -> usize {
         size_of::<T>()
+    }
+
+    #[inline]
+    fn value_type_to_string(&self) -> &'static str {
+        short_type_name::<T>()
     }
 
     #[inline]

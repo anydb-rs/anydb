@@ -1,7 +1,7 @@
-use std::{cmp::Ordering, collections::BTreeMap, fs, path::PathBuf};
+use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use log::info;
-use rawdb::Reader;
+use rawdb::{Reader, unlikely};
 
 use crate::{
     AnyStoredVec, Bytes, Error, Result, SIZE_OF_U64, Stamp, Version, likely, vec_region_name_with,
@@ -263,34 +263,28 @@ where
         self.mut_pushed().push(value)
     }
 
-    /// Pushes a value if the index equals the current length, otherwise does nothing if already exists.
-    /// Returns an error if the index is too high.
+    /// Pushes a value at the given index, erroring if index != current length.
+    /// Use this when you expect to always append in order.
     #[inline]
-    fn push_if_needed(&mut self, index: I, value: T) -> Result<()> {
-        let index = index.to_usize();
+    fn checked_push(&mut self, index: I, value: T) -> Result<()> {
+        self.checked_push_at(index.to_usize(), value)
+    }
+
+    /// Pushes a value at the given usize index, erroring if index != current length.
+    /// Use this when you expect to always append in order.
+    #[inline]
+    fn checked_push_at(&mut self, index: usize, value: T) -> Result<()> {
         let len = self.len();
 
-        if index == len {
-            self.push(value);
-            return Ok(());
+        if unlikely(index != len) {
+            return Err(Error::UnexpectedIndex {
+                expected: len,
+                got: index,
+            });
         }
 
-        // Already pushed
-        if index < len {
-            return Ok(());
-        }
-
-        // This should never happen in correct code
-        debug_assert!(
-            false,
-            "Index too high: idx={}, len={}, header={:?}, region={}",
-            index,
-            len,
-            self.header(),
-            self.region().index()
-        );
-
-        Err(Error::IndexTooHigh { index, len })
+        self.push(value);
+        Ok(())
     }
 
     /// Pushes a value at the given index, truncating if necessary.
@@ -303,17 +297,15 @@ where
     #[inline]
     fn truncate_push_at(&mut self, index: usize, value: T) -> Result<()> {
         let len = self.len();
-        match len.cmp(&index) {
-            Ordering::Less => {
-                return Err(Error::IndexTooHigh { index, len });
-            }
-            ord => {
-                if ord == Ordering::Greater {
-                    self.truncate_if_needed_at(index)?;
-                }
-                self.push(value);
-            }
+
+        if unlikely(len < index) {
+            return Err(Error::IndexTooHigh { index, len });
+        } else if unlikely(len > index) {
+            self.truncate_if_needed_at(index)?;
         }
+
+        self.push(value);
+
         Ok(())
     }
 

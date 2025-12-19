@@ -48,6 +48,8 @@ pub enum Error {
     },
     #[error("Index too high: index: {index}, len: {len}")]
     IndexTooHigh { index: usize, len: usize },
+    #[error("Unexpected index: expected {expected}, got {got}")]
+    UnexpectedIndex { expected: usize, got: usize },
     #[error("Expect vec to have index")]
     ExpectVecToHaveIndex,
     #[error("Failed to convert key to usize")]

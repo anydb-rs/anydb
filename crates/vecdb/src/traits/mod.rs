@@ -3,6 +3,8 @@ mod any_collectable;
 mod any_exportable;
 mod any_serializable;
 mod any_stored;
+#[cfg(feature = "schemars")]
+mod any_with_schema;
 mod any_with_writer;
 mod collectable;
 mod formattable;
@@ -21,6 +23,8 @@ pub use any_collectable::*;
 pub use any_exportable::*;
 pub use any_serializable::*;
 pub use any_stored::*;
+#[cfg(feature = "schemars")]
+pub use any_with_schema::*;
 pub use any_with_writer::*;
 pub use collectable::*;
 pub use formattable::*;

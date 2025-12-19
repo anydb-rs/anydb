@@ -100,6 +100,11 @@ macro_rules! impl_vec_wrapper {
             }
 
             #[inline]
+            fn value_type_to_string(&self) -> &'static str {
+                self.0.value_type_to_string()
+            }
+
+            #[inline]
             fn region_names(&self) -> Vec<String> {
                 self.0.region_names()
             }

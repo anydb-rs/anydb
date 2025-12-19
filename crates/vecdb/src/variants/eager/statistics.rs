@@ -34,8 +34,10 @@ where
             Version::ZERO + self.inner_version() + source.version(),
         )?;
 
+        self.truncate_if_needed(max_from)?;
+
         self.repeat_until_complete(exit, |this| {
-            let skip = max_from.to_usize().min(this.len());
+            let skip = this.len();
             let mut deque: VecDeque<(usize, A)> = VecDeque::new();
 
             for (i, value) in source
@@ -68,7 +70,7 @@ where
                 }
 
                 let v = deque.front().unwrap().1.clone();
-                this.truncate_push_at(i, V::T::from(v))?;
+                this.checked_push_at(i, V::T::from(v))?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -122,8 +124,10 @@ where
             Version::ONE + self.inner_version() + source.version(),
         )?;
 
+        self.truncate_if_needed(max_from)?;
+
         self.repeat_until_complete(exit, |this| {
-            let skip = max_from.to_usize().min(this.len());
+            let skip = this.len();
             let mut prev = skip
                 .checked_sub(1)
                 .and_then(|prev_i| this.iter().get(V::I::from(prev_i)))
@@ -168,7 +172,7 @@ where
                 }
 
                 prev.replace(sum.clone());
-                this.truncate_push_at(i, sum)?;
+                this.checked_push_at(i, sum)?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -211,8 +215,10 @@ where
             Version::ONE + self.inner_version() + source.version(),
         )?;
 
+        self.truncate_if_needed(max_from)?;
+
         self.repeat_until_complete(exit, |this| {
-            let skip = max_from.to_usize().min(this.len());
+            let skip = this.len();
             let min_i = min_i.map(|i| i.to_usize());
             let min_prev_i = min_i.unwrap_or_default();
 
@@ -265,9 +271,9 @@ where
                     }
 
                     prev.replace(sma_result.clone());
-                    this.truncate_push_at(i, sma_result)?;
+                    this.checked_push_at(i, sma_result)?;
                 } else {
-                    this.truncate_push_at(i, V::T::from(f32::NAN))?;
+                    this.checked_push_at(i, V::T::from(f32::NAN))?;
                 }
 
                 if this.batch_limit_reached() {
@@ -311,12 +317,14 @@ where
             Version::new(3) + self.inner_version() + source.version(),
         )?;
 
+        self.truncate_if_needed(max_from)?;
+
         let smoothing: f32 = 2.0;
         let k = smoothing / (ema as f32 + 1.0);
         let _1_minus_k = 1.0 - k;
 
         self.repeat_until_complete(exit, |this| {
-            let skip = max_from.to_usize().min(this.len());
+            let skip = this.len();
             let min_i = min_i.map(|i| i.to_usize());
             let min_prev_i = min_i.unwrap_or_default();
 
@@ -350,9 +358,9 @@ where
                     };
 
                     prev.replace(ema.clone());
-                    this.truncate_push_at(index, ema)?;
+                    this.checked_push_at(index, ema)?;
                 } else {
-                    this.truncate_push_at(index, V::T::from(f32::NAN))?;
+                    this.checked_push_at(index, V::T::from(f32::NAN))?;
                 }
 
                 if this.batch_limit_reached() {

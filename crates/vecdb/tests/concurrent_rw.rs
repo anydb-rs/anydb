@@ -430,11 +430,7 @@ fn test_length_data_consistency_stress() -> Result<()> {
                 let reader_ref = reader.create_reader();
 
                 // Check first, last, and a few sample indices
-                let indices_to_check = [
-                    0,
-                    len.saturating_sub(1),
-                    len / 2,
-                ];
+                let indices_to_check = [0, len.saturating_sub(1), len / 2];
 
                 for &i in &indices_to_check {
                     if i >= len {
@@ -625,40 +621,40 @@ fn test_realworld_stress() -> Result<()> {
                         let reader_c_ref = r_c.create_reader();
 
                         // Check first element
-                        if let Ok(Some(v)) = r_a.get_pushed_or_read_at(0, &reader_a_ref) {
-                            if v != 0 {
-                                local_errors += 1;
-                            }
+                        if let Ok(Some(v)) = r_a.get_pushed_or_read_at(0, &reader_a_ref)
+                            && v != 0
+                        {
+                            local_errors += 1;
                         }
 
                         // Check last safe element
                         let safe_idx = min_len.saturating_sub(1);
-                        if let Ok(Some(v)) = r_a.get_pushed_or_read_at(safe_idx, &reader_a_ref) {
-                            if v != safe_idx as u64 {
-                                eprintln!(
-                                    "Reader {}: vec_a[{}] = {} (expected {})",
-                                    reader_id, safe_idx, v, safe_idx
-                                );
-                                local_errors += 1;
-                            }
+                        if let Ok(Some(v)) = r_a.get_pushed_or_read_at(safe_idx, &reader_a_ref)
+                            && v != safe_idx as u64
+                        {
+                            eprintln!(
+                                "Reader {}: vec_a[{}] = {} (expected {})",
+                                reader_id, safe_idx, v, safe_idx
+                            );
+                            local_errors += 1;
                         }
-                        if let Ok(Some(v)) = r_b.get_pushed_or_read_at(safe_idx, &reader_b_ref) {
-                            if v != (safe_idx as u64) * 2 {
-                                local_errors += 1;
-                            }
+                        if let Ok(Some(v)) = r_b.get_pushed_or_read_at(safe_idx, &reader_b_ref)
+                            && v != (safe_idx as u64) * 2
+                        {
+                            local_errors += 1;
                         }
-                        if let Ok(Some(v)) = r_c.get_pushed_or_read_at(safe_idx, &reader_c_ref) {
-                            if v != (safe_idx as u64) * 3 {
-                                local_errors += 1;
-                            }
+                        if let Ok(Some(v)) = r_c.get_pushed_or_read_at(safe_idx, &reader_c_ref)
+                            && v != (safe_idx as u64) * 3
+                        {
+                            local_errors += 1;
                         }
 
                         // Check a middle element
                         let mid_idx = min_len / 2;
-                        if let Ok(Some(v)) = r_a.get_pushed_or_read_at(mid_idx, &reader_a_ref) {
-                            if v != mid_idx as u64 {
-                                local_errors += 1;
-                            }
+                        if let Ok(Some(v)) = r_a.get_pushed_or_read_at(mid_idx, &reader_a_ref)
+                            && v != mid_idx as u64
+                        {
+                            local_errors += 1;
                         }
 
                         local_reads += 1;
@@ -680,7 +676,10 @@ fn test_realworld_stress() -> Result<()> {
     let values_per_block = 50;
     let mut current_idx = 1000u64;
 
-    println!("Starting {} blocks of {} values each...", num_blocks, values_per_block);
+    println!(
+        "Starting {} blocks of {} values each...",
+        num_blocks, values_per_block
+    );
 
     for block in 0..num_blocks {
         // Simulate processing a block - write to multiple vecs
@@ -721,7 +720,12 @@ fn test_realworld_stress() -> Result<()> {
 
     println!("\n=== Results ===");
     println!("Write duration: {:?}", write_duration);
-    println!("Final vec lengths: a={}, b={}, c={}", vec_a.len(), vec_b.len(), vec_c.len());
+    println!(
+        "Final vec lengths: a={}, b={}, c={}",
+        vec_a.len(),
+        vec_b.len(),
+        vec_c.len()
+    );
     println!("Total reader verifications: {}", final_reads);
     println!("Errors detected: {}", final_errors);
 
@@ -731,7 +735,10 @@ fn test_realworld_stress() -> Result<()> {
     assert_eq!(vec_b.len(), expected_len);
     assert_eq!(vec_c.len(), expected_len);
     assert_eq!(final_errors, 0, "Data integrity errors detected!");
-    assert!(final_reads > 100, "Should have completed many read verifications");
+    assert!(
+        final_reads > 100,
+        "Should have completed many read verifications"
+    );
 
     // Verify all data is correct after everything is done
     println!("Verifying final data integrity...");
@@ -813,13 +820,14 @@ fn test_extended_stress() -> Result<()> {
 
                         // Also check a random-ish index
                         let random_idx = (len * 7) / 11; // Pseudo-random
-                        if random_idx < len {
-                            if let Ok(Some(v)) = reader.get_pushed_or_read_at(random_idx, &reader_ref) {
-                                if v != random_idx as u64 {
-                                    local_errors += 1;
-                                }
-                                local_reads += 1;
+                        if random_idx < len
+                            && let Ok(Some(v)) =
+                                reader.get_pushed_or_read_at(random_idx, &reader_ref)
+                        {
+                            if v != random_idx as u64 {
+                                local_errors += 1;
                             }
+                            local_reads += 1;
                         }
                     }
                     // Small sleep between reads
@@ -853,7 +861,7 @@ fn test_extended_stress() -> Result<()> {
         writes_completed.fetch_add(1, Ordering::Relaxed);
         batches += 1;
 
-        if batches % 10 == 0 {
+        if batches.is_multiple_of(10) {
             println!("Written {} batches, {} values", batches, current_idx);
         }
 
@@ -862,7 +870,7 @@ fn test_extended_stress() -> Result<()> {
         thread::sleep(Duration::from_millis(100));
 
         // Flush every 10 batches
-        if batches % 10 == 0 {
+        if batches.is_multiple_of(10) {
             db.flush()?;
         }
     }
@@ -902,7 +910,13 @@ fn test_extended_stress() -> Result<()> {
     // Spot-check final data
     println!("Spot-checking final data...");
     let reader_ref = writer.create_reader();
-    for i in [0, 100, 1000, current_idx as usize / 2, current_idx as usize - 1] {
+    for i in [
+        0,
+        100,
+        1000,
+        current_idx as usize / 2,
+        current_idx as usize - 1,
+    ] {
         if i < writer.len() {
             let v = writer.get_pushed_or_read_at(i, &reader_ref)?.unwrap();
             assert_eq!(v, i as u64, "Value at {} incorrect", i);
@@ -925,7 +939,8 @@ fn test_extended_stress_bytes() -> Result<()> {
     let (db, _temp) = setup_test_db()?;
     let version = Version::ONE;
 
-    let mut writer: BytesVec<usize, u64> = BytesVec::forced_import(&db, "stress_vec_bytes", version)?;
+    let mut writer: BytesVec<usize, u64> =
+        BytesVec::forced_import(&db, "stress_vec_bytes", version)?;
 
     let stop = Arc::new(AtomicBool::new(false));
     let writes_completed = Arc::new(AtomicUsize::new(0));
@@ -969,13 +984,14 @@ fn test_extended_stress_bytes() -> Result<()> {
 
                         // Also check a random-ish index
                         let random_idx = (len * 7) / 11;
-                        if random_idx < len {
-                            if let Ok(Some(v)) = reader.get_pushed_or_read_at(random_idx, &reader_ref) {
-                                if v != random_idx as u64 {
-                                    local_errors += 1;
-                                }
-                                local_reads += 1;
+                        if random_idx < len
+                            && let Ok(Some(v)) =
+                                reader.get_pushed_or_read_at(random_idx, &reader_ref)
+                        {
+                            if v != random_idx as u64 {
+                                local_errors += 1;
                             }
+                            local_reads += 1;
                         }
                     }
                     // Very tight loop for BytesVec - no sleep needed
@@ -1009,7 +1025,7 @@ fn test_extended_stress_bytes() -> Result<()> {
         batches += 1;
 
         // Occasionally flush (simulating block boundaries)
-        if batches % 10 == 0 {
+        if batches.is_multiple_of(10) {
             db.flush()?;
         }
     }
@@ -1044,12 +1060,21 @@ fn test_extended_stress_bytes() -> Result<()> {
 
     assert_eq!(writer.len(), current_idx as usize);
     assert_eq!(final_errors, 0, "Data integrity errors detected!");
-    assert!(final_reads > 10000, "Should have many read verifications with tight loop");
+    assert!(
+        final_reads > 10000,
+        "Should have many read verifications with tight loop"
+    );
 
     // Spot-check final data
     println!("Spot-checking final data...");
     let reader_ref = writer.create_reader();
-    for i in [0, 100, 1000, current_idx as usize / 2, current_idx as usize - 1] {
+    for i in [
+        0,
+        100,
+        1000,
+        current_idx as usize / 2,
+        current_idx as usize - 1,
+    ] {
         if i < writer.len() {
             let v = writer.get_pushed_or_read_at(i, &reader_ref)?.unwrap();
             assert_eq!(v, i as u64, "Value at {} incorrect", i);

@@ -34,8 +34,10 @@ where
             ));
         }
 
+        self.truncate_if_needed(max_from)?;
+
         self.repeat_until_complete(exit, |this| {
-            let skip = max_from.to_usize().min(this.len());
+            let skip = this.len();
             let mut others_iter = others
                 .iter()
                 .map(|v| v.iter().skip(skip))
@@ -44,7 +46,7 @@ where
             for i in skip..others.first().unwrap().len() {
                 let values = Box::new(others_iter.iter_mut().map(|iter| iter.next().unwrap()));
                 let result = aggregate(values);
-                this.truncate_push_at(i, result)?;
+                this.checked_push_at(i, result)?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -143,8 +145,10 @@ where
                 + source.version(),
         )?;
 
+        self.truncate_if_needed(max_from)?;
+
         self.repeat_until_complete(exit, |this| {
-            let skip = max_from.to_usize().min(this.len());
+            let skip = this.len();
             let mut source_iter = source.iter();
 
             // Set position once - source indices are sequential
@@ -159,7 +163,7 @@ where
                     .take(count)
                     .filter(|v| filter(v))
                     .fold(V::T::default(), |acc, val| acc.saturating_add(val));
-                this.truncate_push_at(i, sum)?;
+                this.checked_push_at(i, sum)?;
 
                 if this.batch_limit_reached() {
                     break;
@@ -225,8 +229,10 @@ where
                 + other_to_else.version(),
         )?;
 
+        self.truncate_if_needed(max_from)?;
+
         self.repeat_until_complete(exit, |this| {
-            let skip = max_from.to_usize().min(this.len());
+            let skip = this.len();
             let mut other_iter = first_indexes.iter();
 
             for (i, first_index) in first_indexes.iter().enumerate().skip(skip) {
@@ -237,7 +243,7 @@ where
 
                 let range = first_index.to_usize()..end;
                 let count = range.into_iter().filter(|i| filter(A::from(*i))).count();
-                this.truncate_push_at(i, V::T::from(A::from(count)))?;
+                this.checked_push_at(i, V::T::from(A::from(count)))?;
 
                 if this.batch_limit_reached() {
                     break;

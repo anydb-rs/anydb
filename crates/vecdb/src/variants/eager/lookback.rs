@@ -1,8 +1,7 @@
 //! Lookback computation methods for EagerVec (change, percentage change, CAGR).
 
 use crate::{
-    AnyVec, Error, Exit, GenericStoredVec, IterableVec, Result, StoredVec, VecIndex, VecValue,
-    Version,
+    AnyVec, Error, Exit, GenericStoredVec, IterableVec, Result, StoredVec, VecValue, Version,
 };
 
 use super::{CheckedSub, EagerVec};
@@ -28,14 +27,16 @@ where
             Version::ZERO + self.inner_version() + source.version(),
         )?;
 
+        self.truncate_if_needed(max_from)?;
+
         self.repeat_until_complete(exit, |this| {
-            let skip = max_from.to_usize().min(this.len());
+            let skip = this.len();
             let mut lookback = source.create_lookback(skip, lookback_len, 0);
 
             for (i, current) in source.iter().enumerate().skip(skip) {
                 let previous = lookback.get_and_push(i, current.clone(), A::default());
                 let result = transform(i, current, previous);
-                this.truncate_push_at(i, result)?;
+                this.checked_push_at(i, result)?;
 
                 if this.batch_limit_reached() {
                     break;

@@ -1,6 +1,6 @@
 use crate::{
     AnyVec, BoxedVecIterator, IterableBoxedVec, IterableVec, TypedVec, TypedVecIterator, VecIndex,
-    VecValue, Version,
+    VecValue, Version, short_type_name,
 };
 
 mod iterator;
@@ -127,6 +127,11 @@ where
     #[inline]
     fn value_type_to_size_of(&self) -> usize {
         size_of::<T>()
+    }
+
+    #[inline]
+    fn value_type_to_string(&self) -> &'static str {
+        short_type_name::<T>()
     }
 
     #[inline]
