@@ -1,9 +1,4 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
-
-use crate::{Error, GiB, PAGE_SIZE, Result, regions::Regions};
+use crate::{Error, GiB, PAGE_SIZE, RegionState, Regions, Result};
 
 pub const SIZE_OF_REGION_METADATA: usize = PAGE_SIZE; // 4096 bytes for atomic writes
 const SIZE_OF_U64: usize = std::mem::size_of::<u64>();
@@ -22,7 +17,7 @@ pub struct RegionMetadata {
     /// Unique identifier for the region.
     id: String,
     /// Whether metadata has been modified since last flush.
-    dirty: Arc<AtomicBool>,
+    state: RegionState,
 }
 
 impl RegionMetadata {
@@ -51,7 +46,7 @@ impl RegionMetadata {
             len,
             reserved,
             start,
-            dirty: Arc::new(AtomicBool::new(true)), // New regions are dirty
+            state: RegionState::new(), // New regions are dirty
         }
     }
 
@@ -63,7 +58,7 @@ impl RegionMetadata {
     #[inline]
     pub fn set_start(&mut self, start: usize) {
         assert!(start.is_multiple_of(PAGE_SIZE));
-        Self::update_value_if_different(&mut self.start, start, &self.dirty)
+        Self::update_value_if_different(&mut self.start, start, &self.state)
     }
 
     #[allow(clippy::len_without_is_empty)]
@@ -75,7 +70,7 @@ impl RegionMetadata {
     #[inline]
     pub fn set_len(&mut self, len: usize) {
         assert!(len <= self.reserved());
-        Self::update_value_if_different(&mut self.len, len, &self.dirty)
+        Self::update_value_if_different(&mut self.len, len, &self.state)
     }
 
     #[inline(always)]
@@ -90,7 +85,7 @@ impl RegionMetadata {
 
     pub fn set_id(&mut self, id: String) {
         Self::validate_id(&id);
-        Self::update_value_if_different(&mut self.id, id, &self.dirty)
+        Self::update_value_if_different(&mut self.id, id, &self.state)
     }
 
     pub fn set_reserved(&mut self, reserved: usize) {
@@ -99,17 +94,17 @@ impl RegionMetadata {
         assert!(reserved.is_multiple_of(PAGE_SIZE));
         assert!(reserved <= MAX_RESERVED_SIZE);
 
-        Self::update_value_if_different(&mut self.reserved, reserved, &self.dirty)
+        Self::update_value_if_different(&mut self.reserved, reserved, &self.state)
     }
 
     #[inline]
-    fn update_value_if_different<T>(own: &mut T, other: T, dirty: &Arc<AtomicBool>)
+    fn update_value_if_different<T>(own: &mut T, other: T, state: &RegionState)
     where
         T: Eq,
     {
         if own != &other {
             *own = other;
-            dirty.store(true, Ordering::Relaxed);
+            state.set_needs_write();
         }
     }
 
@@ -119,28 +114,24 @@ impl RegionMetadata {
         self.reserved - self.len
     }
 
-    #[inline(always)]
-    pub fn is_dirty(&self) -> bool {
-        self.dirty.load(Ordering::Relaxed)
-    }
-
-    #[inline(always)]
-    fn clear_dirty(&self) -> bool {
-        self.dirty.swap(false, Ordering::AcqRel)
-    }
-
     pub(crate) fn write_if_dirty(&self, index: usize, regions: &Regions) {
-        if self.is_dirty() {
-            regions.write_at(index, &self.to_bytes())
+        let state = &self.state;
+        if state.needs_write() {
+            regions.write_at(index, &self.to_bytes());
+            state.set_needs_flush();
         }
     }
 
     /// Flushes metadata to disk if dirty.
     /// Returns `Ok(true)` if flushed, `Ok(false)` if not dirty.
     pub(crate) fn flush(&self, index: usize, regions: &Regions) -> Result<bool> {
-        if !self.clear_dirty() {
+        let state = &self.state;
+        if state.is_clean() {
             return Ok(false);
+        } else if state.needs_write() {
+            return Err(Error::RegionMetadataUnwritten);
         }
+        state.set_is_clean();
         regions
             .mmap()
             .flush_range(index * SIZE_OF_REGION_METADATA, SIZE_OF_REGION_METADATA)?;
@@ -197,7 +188,7 @@ impl RegionMetadata {
             start,
             len,
             reserved,
-            dirty: Arc::new(AtomicBool::new(false)), // Loaded from disk, not dirty
+            state: RegionState::new(), // Loaded from disk
         })
     }
 }

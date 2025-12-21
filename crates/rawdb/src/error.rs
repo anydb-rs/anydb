@@ -17,6 +17,9 @@ pub enum Error {
     #[error("Region not found")]
     RegionNotFound,
 
+    #[error("Region metadata is has unwritten data")]
+    RegionMetadataUnwritten,
+
     #[error("Region already exists")]
     RegionAlreadyExists,
 

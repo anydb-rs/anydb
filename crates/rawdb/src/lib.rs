@@ -21,6 +21,7 @@ mod mmap;
 mod reader;
 mod region;
 mod region_metadata;
+mod region_state;
 mod regions;
 
 pub use disk_usage::*;
@@ -33,6 +34,7 @@ use rayon::prelude::*;
 pub use reader::*;
 pub use region::*;
 pub use region_metadata::*;
+use region_state::*;
 use regions::*;
 
 pub const PAGE_SIZE: usize = 4096;
