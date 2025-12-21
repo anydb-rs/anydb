@@ -71,6 +71,24 @@ pub trait AnyStoredVec: AnyVec {
         Ok(())
     }
 
+    /// Flushes with the given stamp, saving changes to enable rollback.
+    /// Named with trailing underscore to avoid conflict with GenericStoredVec method.
+    fn any_stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()>;
+
+    /// Flushes with the given stamp, optionally saving changes for rollback.
+    #[inline]
+    fn any_stamped_write_maybe_with_changes(
+        &mut self,
+        stamp: Stamp,
+        with_changes: bool,
+    ) -> Result<()> {
+        if with_changes {
+            self.any_stamped_write_with_changes(stamp)
+        } else {
+            self.stamped_write(stamp)
+        }
+    }
+
     fn serialize_changes(&self) -> Result<Vec<u8>>;
 
     /// Removes this vector's region from the database.

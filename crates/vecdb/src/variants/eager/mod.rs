@@ -16,7 +16,7 @@ pub use saturating_add::*;
 
 use crate::{
     AnyStoredVec, AnyVec, BoxedVecIterator, Exit, GenericStoredVec, Header, ImportOptions,
-    ImportableVec, IterableVec, PrintableIndex, Result, StoredVec, TypedVec, Version,
+    ImportableVec, IterableVec, PrintableIndex, Result, Stamp, StoredVec, TypedVec, Version,
     short_type_name,
 };
 
@@ -189,6 +189,10 @@ where
     #[inline]
     fn db(&self) -> Database {
         self.0.db()
+    }
+
+    fn any_stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()> {
+        self.0.stamped_write_with_changes(stamp)
     }
 
     fn remove(self) -> Result<()> {

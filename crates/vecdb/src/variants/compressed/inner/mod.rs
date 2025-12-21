@@ -7,7 +7,7 @@ use rawdb::{Database, Reader, Region};
 use crate::{
     AnyStoredVec, AnyVec, BaseVec, BoxedVecIterator, CleanCompressedVecIterator,
     CompressedVecIterator, DirtyCompressedVecIterator, Error, Format, GenericStoredVec,
-    HEADER_OFFSET, Header, ImportOptions, IterableVec, Result, TypedVec, VecIndex, VecValue,
+    HEADER_OFFSET, Header, ImportOptions, IterableVec, Result, Stamp, TypedVec, VecIndex, VecValue,
     Version, likely, short_type_name, unlikely, vec_region_name_with,
 };
 
@@ -382,7 +382,10 @@ where
                 HEADER_OFFSET as u64
             };
 
-            pages.checked_push(page_index, Page::new(start, bytes.len() as u32, *len as u32));
+            pages.checked_push(
+                page_index,
+                Page::new(start, bytes.len() as u32, *len as u32),
+            );
         });
 
         self.update_stored_len(stored_len + pushed_len);
@@ -399,6 +402,10 @@ where
     #[inline]
     fn db(&self) -> Database {
         self.base.db()
+    }
+
+    fn any_stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()> {
+        <Self as GenericStoredVec<I, T>>::stamped_write_with_changes(self, stamp)
     }
 
     fn remove(self) -> Result<()> {

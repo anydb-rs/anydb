@@ -700,6 +700,10 @@ where
         Ok(bytes)
     }
 
+    fn any_stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()> {
+        <Self as GenericStoredVec<I, T>>::stamped_write_with_changes(self, stamp)
+    }
+
     fn remove(self) -> Result<()> {
         Self::remove(self)
     }

@@ -174,6 +174,14 @@ macro_rules! impl_vec_wrapper {
                 self.0.serialize_changes()
             }
 
+            #[inline]
+            fn any_stamped_write_with_changes(
+                &mut self,
+                stamp: $crate::Stamp,
+            ) -> $crate::Result<()> {
+                $crate::GenericStoredVec::stamped_write_with_changes(&mut self.0, stamp)
+            }
+
             fn remove(self) -> $crate::Result<()> {
                 self.0.remove()
             }
@@ -270,11 +278,6 @@ macro_rules! impl_vec_wrapper {
             #[inline]
             fn is_dirty(&self) -> bool {
                 self.0.is_dirty()
-            }
-
-            #[inline]
-            fn stamped_write_with_changes(&mut self, stamp: $crate::Stamp) -> $crate::Result<()> {
-                self.0.stamped_write_with_changes(stamp)
             }
 
             #[inline]
