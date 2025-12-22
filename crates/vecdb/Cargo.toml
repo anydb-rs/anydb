@@ -26,7 +26,7 @@ ctrlc = { version = "3.5.1", features = ["termination"] }
 log = { workspace = true }
 parking_lot = { workspace = true }
 rawdb = { workspace = true }
-serde_json = { version = "1.0.145", features = ["float_roundtrip"], optional = true }
+serde_json = { version = "1.0.146", features = ["float_roundtrip"], optional = true }
 thiserror = "2"
 
 # [optional-dependencies]
