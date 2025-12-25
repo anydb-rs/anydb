@@ -7,6 +7,99 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.4.6](https://github.com/anydb-rs/anydb/releases/tag/v0.4.6) - 2025-12-21
+
+### Breaking Changes
+#### `rawdb`
+- Replaced `dirty: Arc<AtomicBool>` in `RegionMetadata` with `state: RegionState` tri-state tracking system ([source](https://github.com/anydb-rs/anydb/blob/v0.4.6/crates/rawdb/src/region_metadata.rs))
+- Removed `RegionMetadata::is_dirty()` public method - state is now managed internally via `RegionState` ([source](https://github.com/anydb-rs/anydb/blob/v0.4.6/crates/rawdb/src/region_metadata.rs))
+
+### New Features
+#### `rawdb`
+- Added `RegionState` struct with tri-state tracking (`IS_CLEAN`, `NEEDS_FLUSH`, `NEEDS_WRITE`) for proper metadata lifecycle management ([source](https://github.com/anydb-rs/anydb/blob/v0.4.6/crates/rawdb/src/region_state.rs))
+- Added `Error::RegionMetadataUnwritten` returned when `flush()` is called on metadata that hasn't been written yet ([source](https://github.com/anydb-rs/anydb/blob/v0.4.6/crates/rawdb/src/error.rs))
+
+### Internal Changes
+#### `rawdb`
+- `write_if_dirty()` now transitions state from `NEEDS_WRITE` to `NEEDS_FLUSH` after writing, establishing write→flush ordering ([source](https://github.com/anydb-rs/anydb/blob/v0.4.6/crates/rawdb/src/region_metadata.rs))
+- `flush()` now validates state and returns error if metadata is in `NEEDS_WRITE` state, then transitions to `IS_CLEAN` after successful flush ([source](https://github.com/anydb-rs/anydb/blob/v0.4.6/crates/rawdb/src/region_metadata.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.4.5...v0.4.6)
+
+## [v0.4.5](https://github.com/anydb-rs/anydb/releases/tag/v0.4.5) - 2025-12-21
+
+### New Features
+#### `vecdb`
+- Added `any_stamped_write_with_changes()` method to `AnyStoredVec` trait for type-erased stamped writes with rollback support ([source](https://github.com/anydb-rs/anydb/blob/v0.4.5/crates/vecdb/src/traits/any_stored.rs))
+- Added `any_stamped_write_maybe_with_changes()` method to `AnyStoredVec` trait for conditional stamped writes through trait objects ([source](https://github.com/anydb-rs/anydb/blob/v0.4.5/crates/vecdb/src/traits/any_stored.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.4.4...v0.4.5)
+
+## [v0.4.4](https://github.com/anydb-rs/anydb/releases/tag/v0.4.4) - 2025-12-19
+
+### Breaking Changes
+#### `vecdb`
+- Renamed `push_if_needed()` → `checked_push()` and added `checked_push_at()` with strict validation - now returns `Error::UnexpectedIndex` if index doesn't equal current length instead of silently succeeding ([source](https://github.com/anydb-rs/anydb/blob/v0.4.4/crates/vecdb/src/traits/generic.rs))
+- All `EagerVec` compute methods now call `truncate_if_needed(max_from)` before computing and use strict `checked_push_at()` internally - affects `aggregate()`, `sum()`, `count()`, `lookback_compute()`, `running_min()`, `running_max()`, `running_sum()`, `sma()`, `ema()`, and all transform methods ([source](https://github.com/anydb-rs/anydb/blob/v0.4.4/crates/vecdb/src/variants/eager/aggregates.rs))
+
+### New Features
+#### `vecdb`
+- Added optional `schemars` feature flag for JSON schema generation ([source](https://github.com/anydb-rs/anydb/blob/v0.4.4/crates/vecdb/Cargo.toml))
+- Added `AnyVecWithSchema` trait with `value_schema()` method for vectors whose value type implements `JsonSchema` ([source](https://github.com/anydb-rs/anydb/blob/v0.4.4/crates/vecdb/src/traits/any_with_schema.rs))
+- Added `value_type_to_string()` method to `AnyVec` trait returning the short type name (e.g., "Sats", "StoredF64") for display purposes ([source](https://github.com/anydb-rs/anydb/blob/v0.4.4/crates/vecdb/src/traits/any.rs))
+- Added `short_type_name<T>()` utility function with caching for efficient extraction of short type names from full type paths ([source](https://github.com/anydb-rs/anydb/blob/v0.4.4/crates/vecdb/src/traits/printable.rs))
+- Added `Error::UnexpectedIndex { expected, got }` variant for strict index validation in push operations ([source](https://github.com/anydb-rs/anydb/blob/v0.4.4/crates/vecdb/src/error.rs))
+
+### Internal Changes
+#### `vecdb`
+- Simplified `truncate_push_at()` logic with `unlikely()` branch prediction hints for better performance ([source](https://github.com/anydb-rs/anydb/blob/v0.4.4/crates/vecdb/src/traits/generic.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.4.3...v0.4.4)
+
+## [v0.4.3](https://github.com/anydb-rs/anydb/releases/tag/v0.4.3) - 2025-12-18
+
+### Breaking Changes
+#### `rawdb`
+- Renamed `RegionMetadata::write()` → `write_if_dirty()` to make conditional behavior explicit - now only writes to disk when dirty flag is set ([source](https://github.com/anydb-rs/anydb/blob/v0.4.3/crates/rawdb/src/region_metadata.rs))
+
+### New Features
+#### `rawdb`
+- Added `RegionMetadata::is_dirty()` public method to check if metadata has pending changes ([source](https://github.com/anydb-rs/anydb/blob/v0.4.3/crates/rawdb/src/region_metadata.rs))
+
+### Internal Changes
+#### `rawdb`
+- Added internal `clear_dirty()` helper for atomic dirty flag clearing in `RegionMetadata` ([source](https://github.com/anydb-rs/anydb/blob/v0.4.3/crates/rawdb/src/region_metadata.rs))
+
+#### `vecdb`
+- Optimized `flush()` to coalesce consecutive updated indices into single batch writes instead of individual writes per index ([source](https://github.com/anydb-rs/anydb/blob/v0.4.3/crates/vecdb/src/variants/raw/inner/mod.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.4.2...v0.4.3)
+
+## [v0.4.2](https://github.com/anydb-rs/anydb/releases/tag/v0.4.2) - 2025-12-18
+
+### Breaking Changes
+#### `vecdb`
+- Renamed all `stamped_flush*` methods to `stamped_write*` for terminology consistency ([source](https://github.com/anydb-rs/anydb/blob/v0.4.2/crates/vecdb/src/traits/any_stored.rs))
+  - `stamped_flush()` → `stamped_write()`
+  - `stamped_flush_with_changes()` → `stamped_write_with_changes()`
+  - `stamped_flush_maybe_with_changes()` → `stamped_write_maybe_with_changes()`
+  - `default_stamped_flush_with_changes()` → `default_stamped_write_with_changes()`
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.4.1...v0.4.2)
+
+## [v0.4.1](https://github.com/anydb-rs/anydb/releases/tag/v0.4.1) - 2025-12-16
+
+### Breaking Changes
+#### `vecdb`
+- Replaced `collect_range_json_bytes()` method in `AnySerializableVec` trait with `write_json()` that writes to a provided buffer instead of returning a new allocation ([source](https://github.com/anydb-rs/anydb/blob/v0.4.1/crates/vecdb/src/traits/any_serializable.rs))
+- Removed `collect_range_json_bytes()` method from `CollectableVec` trait - use `AnySerializableVec::write_json()` instead ([source](https://github.com/anydb-rs/anydb/blob/v0.4.1/crates/vecdb/src/traits/collectable.rs))
+
+### New Features
+#### `vecdb`
+- Added `write_json_value()` method to `AnySerializableVec` trait for writing a single JSON value to an output buffer ([source](https://github.com/anydb-rs/anydb/blob/v0.4.1/crates/vecdb/src/traits/any_serializable.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.4.0...v0.4.1)
+
 ## [v0.4.0](https://github.com/anydb-rs/anydb/releases/tag/v0.4.0) - 2025-12-14
 
 ### Breaking Changes
