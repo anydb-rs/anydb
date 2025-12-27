@@ -7,6 +7,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.5.0](https://github.com/anydb-rs/anydb/releases/tag/v0.5.0) - 2025-12-27
+
+### Breaking Changes
+#### `rawdb`
+- Changed `Region` dirty tracking from single range `Option<(usize, usize)>` to multiple ranges `Vec<(usize, usize)>` to support non-contiguous dirty regions ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/rawdb/src/region.rs))
+- Renamed `Region::extend_dirty()` to `mark_dirty()` and made it public for external dirty range tracking ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/rawdb/src/region.rs))
+- Renamed `RegionState::new()` to `new_dirty()` for creating dirty state on new regions ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/rawdb/src/region_state.rs))
+
+#### `vecdb`
+- Renamed `RawStrategy::write_to()` to `write_to_vec()` across all strategy implementations (BytesStrategy, ZeroCopyStrategy, LZ4Strategy, PcoStrategy, ZstdStrategy) ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/vecdb/src/variants/raw/inner/strategy.rs))
+
+### New Features
+#### `rawdb`
+- Added lock ordering documentation specifying acquisition order: layout → regions → mmap → file → meta → dirty_ranges to prevent deadlocks ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/rawdb/src/lib.rs))
+- Added `Region::batch_write_each()` for writing multiple values directly to mmap with dirty range tracking in a single pass without intermediate allocations ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/rawdb/src/region.rs))
+- Added `RegionState::new_clean()` constructor for regions loaded from disk ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/rawdb/src/region_state.rs))
+- Added `RegionMetadata::needs_flush()` to check if metadata needs syncing and `mark_clean()` to reset state ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/rawdb/src/region_metadata.rs))
+
+#### `vecdb`
+- Added `RawStrategy::write_to_slice()` method for direct serialization into fixed-size byte slices without allocation ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/vecdb/src/variants/raw/inner/strategy.rs))
+- Added `GenericStoredVec::fill_to()` to extend vector to target length with a value, batching writes in ~1GB chunks to avoid memory explosion ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/vecdb/src/traits/generic.rs))
+
+### Bug Fixes
+#### `rawdb`
+- Fixed hole boundary condition in `Layout::len()` changing `> start` to `>= start` for correct length calculation when hole starts at current position ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/rawdb/src/layout.rs))
+- Fixed `RegionMetadata::flush()` to flush data before marking clean, ensuring retry will still see `needs_flush` state if flush fails ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/rawdb/src/region_metadata.rs))
+
+### Internal Changes
+#### `rawdb`
+- Reordered `DatabaseInner` struct fields to match lock acquisition order (layout, regions, mmap, file) for clarity ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/rawdb/src/lib.rs))
+- Optimized `Database::flush()` to collect all dirty ranges, sort by position, merge adjacent ranges within 64KB gap, and flush in batches reducing syscalls ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/rawdb/src/lib.rs))
+- Optimized `create_region_if_needed()` to pre-extend file outside lock when no adequate hole exists, reducing lock contention during parallel operations ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/rawdb/src/lib.rs))
+- Extracted `create_mmap()` to shared module function eliminating duplicate implementations in `Database` and `Regions` ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/rawdb/src/mmap.rs))
+- Enforced lock ordering throughout codebase with explicit lock acquisition order in `truncate()`, `write_with()`, `remove()`, and `punch_holes()` ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/rawdb/src/region.rs))
+
+#### `vecdb`
+- Optimized `RawVecInner::write()` to use `batch_write_each()` for zero-allocation direct mmap writes in normal case, falling back to `write_at()` only after rollback ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/vecdb/src/variants/raw/inner/mod.rs))
+- Optimized holes serialization to pre-allocate buffer with known size instead of using flat_map iterator ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/vecdb/src/variants/raw/inner/mod.rs))
+- Optimized compressed page buffer allocation to pre-calculate total size and allocate once instead of iterative extension ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/vecdb/src/variants/compressed/inner/mod.rs))
+- Consolidated import statements and removed organizational comment headers across trait and variant modules
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.4.6...v0.5.0)
+
 ## [v0.4.6](https://github.com/anydb-rs/anydb/releases/tag/v0.4.6) - 2025-12-21
 
 ### Breaking Changes
