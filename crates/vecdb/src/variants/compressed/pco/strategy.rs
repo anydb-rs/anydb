@@ -4,8 +4,7 @@ use pco::standalone::{simple_decompress, simpler_compress};
 
 use crate::{Error, RawStrategy, Result, likely};
 
-use super::super::inner::CompressionStrategy;
-use super::value::{AsInnerSlice, FromInnerSlice, PcoVecValue};
+use super::{super::inner::CompressionStrategy, value::{AsInnerSlice, FromInnerSlice, PcoVecValue}};
 
 /// Pcodec compression level (0-12). Level 4 provides good compression
 /// for most numeric data while maintaining reasonable compression speed.
@@ -25,8 +24,13 @@ where
     }
 
     #[inline(always)]
-    fn write_to(value: &T, buf: &mut Vec<u8>) {
+    fn write_to_vec(value: &T, buf: &mut Vec<u8>) {
         buf.extend_from_slice(value.to_bytes().as_ref());
+    }
+
+    #[inline(always)]
+    fn write_to_slice(value: &T, dst: &mut [u8]) {
+        dst.copy_from_slice(value.to_bytes().as_ref());
     }
 }
 

@@ -8,7 +8,7 @@ use std::{
 };
 
 use log::info;
-use rawdb::{Database, Reader, Region};
+use rawdb::{Database, Reader, Region, unlikely};
 
 use crate::{
     AnyStoredVec, AnyVec, BUFFER_SIZE, BaseVec, BoxedVecIterator, Bytes, BytesExt,
@@ -88,9 +88,9 @@ where
             return Err(Error::CorruptedRegion { region_len });
         }
 
-        let holes = if let Some(holes) = db.get_region(&Self::holes_region_name_with(name)) {
+        let holes = if let Some(region) = db.get_region(&Self::holes_region_name_with(name)) {
             Some(
-                holes
+                region
                     .create_reader()
                     .read_all()
                     .chunks(size_of::<usize>())
@@ -154,10 +154,6 @@ where
         format!("{}_holes", vec_region_name_with::<I>(name))
     }
 
-    // ============================================================================
-    // Holes Accessors
-    // ============================================================================
-
     #[inline(always)]
     pub fn holes(&self) -> &BTreeSet<usize> {
         self.holes.current()
@@ -178,10 +174,6 @@ where
         self.holes.previous_mut()
     }
 
-    // ============================================================================
-    // Updated Accessors
-    // ============================================================================
-
     #[inline(always)]
     pub fn updated(&self) -> &BTreeMap<usize, T> {
         self.updated.current()
@@ -201,10 +193,6 @@ where
     pub fn mut_prev_updated(&mut self) -> &mut BTreeMap<usize, T> {
         self.updated.previous_mut()
     }
-
-    // ============================================================================
-    // Get or Read Operations (checks all layers including holes/updated)
-    // ============================================================================
 
     /// Gets value checking all layers: updated, pushed, and storage.
     ///
@@ -252,10 +240,6 @@ where
     pub fn get_any_or_read_at_once(&self, index: usize) -> Result<Option<T>> {
         self.get_any_or_read_at(index, &self.create_reader())
     }
-
-    // ============================================================================
-    // Update Operations
-    // ============================================================================
 
     /// Updates the value at the given index.
     #[inline]
@@ -307,10 +291,6 @@ where
         }
     }
 
-    // ============================================================================
-    // Holes Operations
-    // ============================================================================
-
     /// Returns the first empty index (either the first hole or the length).
     #[inline]
     pub fn get_first_empty_index(&self) -> I {
@@ -334,10 +314,6 @@ where
             },
         )
     }
-
-    // ============================================================================
-    // Delete and Take Operations
-    // ============================================================================
 
     /// Takes (removes and returns) the value at the given index using provided reader.
     pub fn take(&mut self, index: I, reader: &Reader) -> Result<Option<T>> {
@@ -382,10 +358,6 @@ where
         self.mut_holes().insert(index);
     }
 
-    // ============================================================================
-    // Collection Operations (with holes)
-    // ============================================================================
-
     /// Collects all values into a Vec, with None for holes.
     pub fn collect_holed(&self) -> Result<Vec<Option<T>>> {
         self.collect_holed_range(None, None)
@@ -411,10 +383,6 @@ where
             .map(|i| self.get_any_or_read_at(i, &reader))
             .collect::<Result<Vec<_>>>()
     }
-
-    // ============================================================================
-    // Helper methods from GenericStoredVec/AnyStoredVec used internally
-    // ============================================================================
 
     #[inline]
     pub fn len_(&self) -> usize {
@@ -445,10 +413,6 @@ where
     pub fn index_to_name(&self) -> String {
         vec_region_name_with::<I>(self.name())
     }
-
-    // ====================
-    // Iterators
-    // ====================
 
     #[inline]
     pub fn iter(&self) -> Result<RawVecIterator<'_, I, T, S>> {
@@ -578,7 +542,7 @@ where
             // Serialize pushed values using strategy
             let mut bytes = Vec::with_capacity(pushed_len * Self::SIZE_OF_T);
             for v in mem::take(self.mut_pushed()).iter() {
-                S::write_to(v, &mut bytes);
+                S::write_to_vec(v, &mut bytes);
             }
             self.region().clone().truncate_write(from, &bytes)?;
             self.update_stored_len(stored_len + pushed_len);
@@ -590,46 +554,39 @@ where
             let updated = self.updated.take_current();
             let region = self.region();
 
-            // Coalesce consecutive indices into single writes
-            let mut iter = updated.into_iter();
-            if let Some((first_i, first_v)) = iter.next() {
-                let mut run_start = first_i;
-                let mut run_bytes = Vec::with_capacity(Self::SIZE_OF_T * 8);
-                S::write_to(&first_v, &mut run_bytes);
-
-                for (i, v) in iter {
-                    let run_end = run_start + (run_bytes.len() / Self::SIZE_OF_T);
-                    if i == run_end {
-                        // Consecutive - extend the current run
-                        S::write_to(&v, &mut run_bytes);
-                    } else {
-                        // Gap - flush current run and start new one
-                        let at = (run_start * Self::SIZE_OF_T) + HEADER_OFFSET;
-                        region.write_at(&run_bytes, at)?;
-                        run_start = i;
-                        run_bytes.clear();
-                        S::write_to(&v, &mut run_bytes);
-                    }
+            if unlikely(expanded) {
+                // After rollback, updates may extend beyond current disk length.
+                // Use write_at which handles extension (slower but necessary).
+                for (index, value) in updated {
+                    let offset = index * Self::SIZE_OF_T + HEADER_OFFSET;
+                    let mut bytes = Vec::with_capacity(Self::SIZE_OF_T);
+                    S::write_to_vec(&value, &mut bytes);
+                    region.write_at(&bytes, offset)?;
                 }
-
-                // Flush final run
-                let at = (run_start * Self::SIZE_OF_T) + HEADER_OFFSET;
-                region.write_at(&run_bytes, at)?;
+            } else {
+                // Normal case: write directly to mmap, no intermediate allocations
+                region.batch_write_each(
+                    updated
+                        .into_iter()
+                        .map(|(index, value)| (index * Self::SIZE_OF_T + HEADER_OFFSET, value)),
+                    Self::SIZE_OF_T,
+                    S::write_to_slice,
+                );
             }
         }
 
         if has_holes {
             self.has_stored_holes = true;
-            let holes = self
+            let holes_region = self
                 .region()
                 .db()
                 .create_region_if_needed(&self.holes_region_name())?;
-            let bytes = self
-                .holes()
-                .iter()
-                .flat_map(|i| i.to_ne_bytes())
-                .collect::<Vec<_>>();
-            holes.truncate_write(0, &bytes)?;
+            let holes = self.holes();
+            let mut bytes = Vec::with_capacity(holes.len() * size_of::<usize>());
+            for i in holes.iter() {
+                bytes.extend_from_slice(&i.to_ne_bytes());
+            }
+            holes_region.truncate_write(0, &bytes)?;
         } else if had_holes {
             self.has_stored_holes = false;
             self.region()
@@ -648,23 +605,8 @@ where
         // Get base serialization (stamp, stored_len info, truncated, pushed)
         let mut bytes = self.default_serialize_changes()?;
 
-        // Append RawVecInner-specific data: prev_updated, updated, prev_holes, holes
+        // Append RawVecInner-specific data: updated, prev_holes
         let reader = self.create_reader();
-
-        // ---
-        // Left in case it's needed again
-        // ---
-        // let (prev_modified_indexes, prev_modified_values) = self
-        //     .prev_updated
-        //     .iter()
-        //     .map(|(&i, v)| (i, v.clone()))
-        //     .collect::<(Vec<_>, Vec<_>)>();
-        // bytes.extend(prev_modified_indexes.len().to_bytes());
-        // bytes.extend(prev_modified_indexes.to_bytes());
-        // // Serialize values using strategy
-        // for v in &prev_modified_values {
-        //     bytes.extend(S::write(v));
-        // }
 
         let (modified_indexes, modified_values) = self
             .updated()
@@ -683,19 +625,12 @@ where
         bytes.extend(modified_indexes.to_bytes());
         // Serialize values using strategy
         for v in &modified_values {
-            S::write_to(v, &mut bytes);
+            S::write_to_vec(v, &mut bytes);
         }
 
         let prev_holes = self.prev_holes().iter().copied().collect::<Vec<_>>();
         bytes.extend(prev_holes.len().to_bytes());
         bytes.extend(prev_holes.to_bytes());
-
-        // ---
-        // Left in case it's needed again
-        // ---
-        // let holes = self.holes.iter().copied().collect::<Vec<_>>();
-        // bytes.extend(holes.len().to_bytes());
-        // bytes.extend(holes.to_bytes());
 
         Ok(bytes)
     }
@@ -728,7 +663,7 @@ where
 
     #[inline(always)]
     fn write_value_to(&self, value: &T, buf: &mut Vec<u8>) {
-        S::write_to(value, buf);
+        S::write_to_vec(value, buf);
     }
 
     #[inline(always)]
@@ -769,10 +704,6 @@ where
         // Use default reset for common cleanup
         self.default_reset()
     }
-
-    // ============================================================================
-    // Override trait methods to handle holes/updated
-    // ============================================================================
 
     fn get_stored_value_for_serialization(&self, index: usize, reader: &Reader) -> Result<T> {
         // Prefer prev_updated, then read from disk
@@ -860,29 +791,8 @@ where
         let mut pos = self.default_deserialize_then_undo_changes(bytes)?;
         let mut len = SIZE_OF_U64;
 
-        // Parse RawVecInner-specific data: prev_updated, updated, prev_holes, holes
+        // Parse RawVecInner-specific data: updated, prev_holes
 
-        // ---
-        // Left in case it's needed again
-        // ---
-        // let prev_modified_len = usize::from_bytes(&bytes[pos..pos + len])?;
-        // pos += len;
-        // len = SIZE_OF_U64 * prev_modified_len;
-        // let prev_indexes = bytes[pos..pos + len].chunks(SIZE_OF_U64);
-        // pos += len;
-        // len = Self::SIZE_OF_T * prev_modified_len;
-        // let prev_values = bytes[pos..pos + len].chunks(Self::SIZE_OF_T);
-        // let prev_updated: BTreeMap<usize, T> = prev_indexes
-        //     .zip(prev_values)
-        //     .map(|(i, v)| {
-        //         let idx = usize::from_bytes(i)?;
-        //         let val = S::read(v)?;
-        //         Ok((idx, val))
-        //     })
-        //     .collect::<Result<_>>()?;
-        // pos += len;
-
-        // len = SIZE_OF_U64;
         let modified_len = usize::from_bytes(&bytes[pos..pos + len])?;
         pos += len;
         len = SIZE_OF_U64 * modified_len;
@@ -908,19 +818,6 @@ where
             .chunks(SIZE_OF_U64)
             .map(usize::from_bytes)
             .collect::<Result<BTreeSet<_>>>()?;
-        // pos += len;
-
-        // ---
-        // Left in case it's needed again
-        // ---
-        // len = SIZE_OF_U64;
-        // let holes_len = usize::from_bytes(&bytes[pos..pos + len])?;
-        // pos += len;
-        // len = SIZE_OF_U64 * holes_len;
-        // let holes = bytes[pos..pos + len]
-        //     .chunks(SIZE_OF_U64)
-        //     .map(usize::from_bytes)
-        //     .collect::<Result<BTreeSet<_>>>()?;
 
         if !self.holes().is_empty() || !self.prev_holes().is_empty() || !prev_holes.is_empty() {
             *self.holes.current_mut() = prev_holes.clone();

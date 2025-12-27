@@ -4,8 +4,7 @@ use zstd::{decode_all, encode_all};
 
 use crate::{RawStrategy, Result};
 
-use super::super::inner::CompressionStrategy;
-use super::value::ZstdVecValue;
+use super::{super::inner::CompressionStrategy, value::ZstdVecValue};
 
 /// Zstd compression level (1-22). Level 3 provides a good balance
 /// between compression ratio and speed for most workloads.
@@ -25,8 +24,13 @@ where
     }
 
     #[inline(always)]
-    fn write_to(value: &T, buf: &mut Vec<u8>) {
+    fn write_to_vec(value: &T, buf: &mut Vec<u8>) {
         buf.extend_from_slice(value.to_bytes().as_ref());
+    }
+
+    #[inline(always)]
+    fn write_to_slice(value: &T, dst: &mut [u8]) {
+        dst.copy_from_slice(value.to_bytes().as_ref());
     }
 }
 

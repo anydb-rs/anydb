@@ -9,7 +9,7 @@ use std::{
 };
 
 use log::debug;
-use memmap2::{MmapMut, MmapOptions};
+use memmap2::MmapMut;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 mod disk_usage;
@@ -50,13 +50,30 @@ pub const GiB: usize = 1024 * 1024 * 1024;
 #[derive(Debug, Clone)]
 #[must_use = "Database should be stored to keep the database open"]
 pub struct Database(Arc<DatabaseInner>);
+
+/// # Lock Ordering
+///
+/// To prevent deadlocks, locks must always be acquired in this order:
+///
+/// ```text
+/// 1. layout     (Database-level: allocation and hole tracking)
+/// 2. regions    (Database-level: region registry)
+/// 3. mmap       (Database-level: memory-mapped file)
+/// 4. file       (Database-level: file handle)
+/// 5. meta       (Region-level: per-region metadata)
+/// 6. dirty_ranges (Region-level: per-region dirty tracking)
+/// ```
+///
+/// If you need multiple locks, acquire them top-to-bottom. Never hold a
+/// lower lock while acquiring a higher one.
 #[derive(Debug)]
 struct DatabaseInner {
     path: PathBuf,
-    regions: RwLock<Regions>,
+    // Lock order: layout → regions → mmap → file
     layout: RwLock<Layout>,
-    file: RwLock<File>,
+    regions: RwLock<Regions>,
     mmap: RwLock<MmapMut>,
+    file: RwLock<File>,
 }
 
 impl Database {
@@ -88,15 +105,15 @@ impl Database {
         }
 
         let regions = Regions::open(path)?;
-        let mmap = Self::create_mmap(&file)?;
+        let mmap = create_mmap(&file)?;
         debug!("Mmap created.");
 
         let db = Self(Arc::new(DatabaseInner {
             path: path.to_owned(),
-            file: RwLock::new(file),
-            mmap: RwLock::new(mmap),
-            regions: RwLock::new(regions),
             layout: RwLock::new(Layout::default()),
+            regions: RwLock::new(regions),
+            mmap: RwLock::new(mmap),
+            file: RwLock::new(file),
         }));
 
         db.regions_mut().fill(&db)?;
@@ -105,11 +122,6 @@ impl Database {
         debug!("Layout created.");
 
         Ok(db)
-    }
-
-    #[inline]
-    fn create_mmap(file: &File) -> Result<MmapMut> {
-        Ok(unsafe { MmapOptions::new().map_mut(file)? })
     }
 
     /// Returns the current length of the database file in bytes.
@@ -132,7 +144,7 @@ impl Database {
         let mut mmap = self.mmap_mut();
         let file = self.file_mut();
         file.set_len(len as u64)?;
-        *mmap = Self::create_mmap(&file)?;
+        *mmap = create_mmap(&file)?;
         Ok(())
     }
 
@@ -156,32 +168,34 @@ impl Database {
             return Ok(region);
         }
 
-        let mut regions = self.regions_mut();
+        // Pre-extend outside lock if needed (file I/O shouldn't block other threads)
+        let layout = self.layout();
+        if layout.find_smallest_adequate_hole(PAGE_SIZE).is_none() {
+            let end = layout.len();
+            drop(layout);
+            self.set_min_len(end + PAGE_SIZE * 16)?;
+        } else {
+            drop(layout);
+        }
+
+        // Lock order: layout → regions
         let mut layout = self.layout_mut();
+        let mut regions = self.regions_mut();
+
+        // Double-check after lock (another thread may have created it)
+        if let Some(region) = regions.get_from_id(id).cloned() {
+            return Ok(region);
+        }
 
         let start = if let Some(start) = layout.find_smallest_adequate_hole(PAGE_SIZE) {
             layout.remove_or_compress_hole(start, PAGE_SIZE)?;
             start
         } else {
-            let start = layout
-                .get_last_region()
-                .map(|(_, region)| {
-                    let region_meta = region.meta();
-                    region_meta.start() + region_meta.reserved()
-                })
-                .unwrap_or_default();
-
-            let len = start + PAGE_SIZE;
-
-            self.set_min_len(len)?;
-
-            start
+            layout.len()
         };
 
         let region = regions.create(self, id.to_owned(), start)?;
-
         layout.insert_region(start, &region);
-
         Ok(region)
     }
 
@@ -193,10 +207,12 @@ impl Database {
     /// Copy data within the mmap, chunked to avoid excessive memory pressure
     pub(crate) fn copy(&self, src: usize, dst: usize, len: usize) {
         const CHUNK_SIZE: usize = GiB; // 1GB chunks
+        let mmap = self.mmap();
         for offset in (0..len).step_by(CHUNK_SIZE) {
-            let start = src + offset;
-            let end = start + (len - offset).min(CHUNK_SIZE);
-            self.write(dst + offset, &self.mmap()[start..end]);
+            let chunk_len = (len - offset).min(CHUNK_SIZE);
+            let src_start = src + offset;
+            let dst_start = dst + offset;
+            write_to_mmap(&mmap, dst_start, &mmap[src_start..src_start + chunk_len]);
         }
     }
 
@@ -260,48 +276,78 @@ impl Database {
     ///
     /// This ensures durability - all writes are persisted and will survive a crash.
     /// Also promotes pending holes so they can be reused by future allocations.
-    /// Returns the number of regions that had dirty data.
+    /// Returns the number of regions that had dirty data or metadata.
     pub fn flush(&self) -> Result<usize> {
-        use std::time::Instant;
-
-        // Flush each dirty region's data
-        let i = Instant::now();
-        let regions: Vec<_> = self
+        // Collect dirty regions (take ranges, clearing them atomically)
+        let dirty_regions: Vec<(Region, Vec<(usize, usize)>)> = self
             .regions()
             .index_to_region()
             .iter()
             .flatten()
-            .cloned()
+            .filter_map(|r| {
+                let ranges = r.take_dirty_ranges();
+                if !ranges.is_empty() || r.meta().needs_flush() {
+                    Some((r.clone(), ranges))
+                } else {
+                    None
+                }
+            })
             .collect();
 
-        let mut flushed = vec![];
+        if dirty_regions.is_empty() {
+            self.layout_mut().promote_pending_holes();
+            return Ok(0);
+        }
 
-        let mut flushed_count = 0;
-        for region in &regions {
-            if region.flush()? {
-                flushed.push(region.meta().id().to_string());
-                flushed_count += 1;
+        // Collect all dirty ranges with their region info
+        let data_regions: Vec<_> = dirty_regions
+            .iter()
+            .filter(|(_, ranges)| !ranges.is_empty())
+            .collect();
+
+        if !data_regions.is_empty() {
+            // Flatten all ranges into absolute positions
+            let mut all_ranges: Vec<_> = data_regions
+                .iter()
+                .flat_map(|(r, ranges)| {
+                    let region_start = r.meta().start();
+                    ranges
+                        .iter()
+                        .map(move |(s, e)| (region_start + s, region_start + e))
+                })
+                .collect();
+            all_ranges.sort_unstable_by_key(|(s, _)| *s);
+
+            // Merge adjacent ranges (gap < 64KB)
+            const MERGE_GAP: usize = 64 * 1024;
+            let merged: Vec<(usize, usize)> =
+                all_ranges
+                    .into_iter()
+                    .fold(Vec::new(), |mut acc, (s, e)| {
+                        if let Some((_, last_end)) = acc.last_mut()
+                            && s <= *last_end + MERGE_GAP
+                        {
+                            *last_end = (*last_end).max(e);
+                        } else {
+                            acc.push((s, e));
+                        }
+                        acc
+                    });
+
+            let mmap = self.mmap();
+            for (start, end) in merged {
+                mmap.flush_range(start, end - start)?;
             }
         }
-        debug!(
-            "region data flush ({} dirty): {:?}",
-            flushed_count,
-            i.elapsed()
-        );
 
-        // Only sync file if anything was flushed
-        if flushed_count > 0 {
-            let i = Instant::now();
-            self.regions().flush()?;
-            debug!("regions metadata flush: {:?}", i.elapsed());
-
-            let i = Instant::now();
-            self.file().sync_all()?;
-            debug!("file sync_all: {:?}", i.elapsed());
+        // Sync metadata, then mark clean
+        self.regions().flush()?;
+        for (region, _) in &dirty_regions {
+            region.meta().mark_clean();
         }
 
         self.layout_mut().promote_pending_holes();
-        Ok(flushed_count)
+        Ok(dirty_regions.len())
     }
 
     /// Compact the database by promoting pending holes and punching holes in the file.
@@ -320,10 +366,11 @@ impl Database {
     }
 
     fn punch_holes(&self) -> Result<()> {
-        let file = self.file_mut();
-        let mut mmap = self.mmap_mut();
-        let regions = self.regions();
+        // Lock order: layout → regions → mmap → file
         let layout = self.layout();
+        let regions = self.regions();
+        let mut mmap = self.mmap_mut();
+        let file = self.file_mut();
 
         let mut punched = regions
             .index_to_region()
@@ -368,7 +415,7 @@ impl Database {
             unsafe {
                 libc::fsync(file.as_raw_fd());
             }
-            *mmap = Self::create_mmap(&file)?;
+            *mmap = create_mmap(&file)?;
         }
 
         Ok(())

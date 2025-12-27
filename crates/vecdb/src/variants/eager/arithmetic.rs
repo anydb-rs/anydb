@@ -1,5 +1,3 @@
-//! Arithmetic computation methods for EagerVec.
-
 use std::ops::{Add, Div, Mul, Sub};
 
 use crate::{Exit, IterableVec, Result, StoredVec, VecValue};

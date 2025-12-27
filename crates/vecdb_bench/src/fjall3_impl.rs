@@ -32,12 +32,6 @@ impl DatabaseBenchmark for Fjall3Bench {
     }
 
     fn write_sequential(&mut self, count: u64) -> Result<()> {
-        // Should be another test
-        // self.keyspace.ingest((0..count).map(|i| {
-        //     let b = i.to_be_bytes();
-        //     (b, b)
-        // }))?;
-
         (0..count).try_for_each(|i| {
             let b = i.to_be_bytes();
             self.keyspace.insert(b, b)

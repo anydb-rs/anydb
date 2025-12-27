@@ -14,7 +14,6 @@ pub fn unlikely(b: bool) -> bool {
     b
 }
 
-// Branch prediction hints
 #[inline(always)]
 #[cold]
 fn cold() {}

@@ -17,11 +17,7 @@ fn main() {
         },
         BenchConfig {
             write_count: 1_000_000_000,
-            databases: vec![
-                // Database::ZeroCopyVecOld,
-                Database::BytesVec,
-                Database::PcoVec,
-            ],
+            databases: vec![Database::BytesVec, Database::PcoVec],
             ..Default::default()
         },
     ];

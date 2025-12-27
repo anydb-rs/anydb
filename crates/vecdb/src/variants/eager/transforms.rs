@@ -1,5 +1,3 @@
-//! Transform computation methods for EagerVec.
-
 use crate::{
     AnyVec, Exit, GenericStoredVec, IterableVec, Result, StoredVec, VecIndex, VecValue, Version,
 };

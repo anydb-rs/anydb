@@ -51,10 +51,6 @@ where
     /// The size of T in bytes.
     pub const SIZE_OF_T: usize = size_of::<T>();
 
-    // ============================================================================
-    // Zerocopy-specific read methods (return references directly from mmap)
-    // ============================================================================
-
     /// Returns a reference to the value directly from the memory-mapped file without copying.
     /// Very efficient for large types or frequent reads.
     ///

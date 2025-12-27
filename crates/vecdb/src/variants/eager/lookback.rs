@@ -1,5 +1,3 @@
-//! Lookback computation methods for EagerVec (change, percentage change, CAGR).
-
 use crate::{
     AnyVec, Error, Exit, GenericStoredVec, IterableVec, Result, StoredVec, VecValue, Version,
 };

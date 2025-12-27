@@ -33,7 +33,6 @@ pub struct CleanCompressedVecIterator<'a, I, T, S> {
     index: usize,
     end_index: usize,
     _region_lock: RwLockReadGuard<'a, RegionMetadata>,
-    // _strategy: PhantomData<S>,
 }
 
 impl<'a, I, T, S> CleanCompressedVecIterator<'a, I, T, S>

@@ -15,12 +15,10 @@ pub const NUM_ITERATIONS: usize = 10;
 pub enum Database {
     PcoVec,
     BytesVec,
-    // ZeroCopyVecOld,
     Fjall2,
     Fjall3,
     Redb,
     Lmdb,
-    // RocksDb,
 }
 
 impl Database {
@@ -32,7 +30,6 @@ impl Database {
             Database::Fjall2,
             Database::Redb,
             Database::Lmdb,
-            // Database::RocksDb,
         ]
     }
 }

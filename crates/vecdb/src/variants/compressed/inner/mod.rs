@@ -191,18 +191,10 @@ where
         Ok(())
     }
 
-    // ============================================================================
-    // Accessors for iterators
-    // ============================================================================
-
     #[inline]
     pub(crate) fn pages(&self) -> &Arc<RwLock<Pages>> {
         &self.pages
     }
-
-    // ====================
-    // Iterators
-    // ====================
 
     #[inline]
     pub fn iter(&self) -> Result<CompressedVecIterator<'_, I, T, S>> {
@@ -358,10 +350,11 @@ where
             .map(|chunk| Ok((Self::compress_page(chunk)?, chunk.len())))
             .collect::<Result<Vec<_>>>()?;
 
-        let buf = compressed
-            .iter()
-            .flat_map(|(v, _)| v.clone())
-            .collect::<Vec<_>>();
+        let total_size: usize = compressed.iter().map(|(v, _)| v.len()).sum();
+        let mut buf = Vec::with_capacity(total_size);
+        for (v, _) in &compressed {
+            buf.extend_from_slice(v);
+        }
 
         // Phase 3: Write with pages.write() held
         let mut pages = self.pages.write();
@@ -436,7 +429,7 @@ where
     }
 
     fn write_value_to(&self, value: &T, buf: &mut Vec<u8>) {
-        S::write_to(value, buf);
+        S::write_to_vec(value, buf);
     }
 
     #[inline]

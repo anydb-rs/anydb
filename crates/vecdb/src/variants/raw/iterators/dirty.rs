@@ -5,7 +5,7 @@ use crate::{
     likely, unlikely,
 };
 
-use super::{CleanRawVecIterator, RawVecInner, RawStrategy};
+use super::{CleanRawVecIterator, RawStrategy, RawVecInner};
 
 /// Dirty raw vec iterator, full-featured with holes/updates/pushed support
 pub struct DirtyRawVecIterator<'a, I, T, S> {
@@ -89,34 +89,36 @@ where
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        let index = self.index;
-        self.index += 1;
+        loop {
+            let index = self.index;
+            self.index += 1;
 
-        if unlikely(self.holes) && self.inner._vec.holes().contains(&index) {
-            if index < self.stored_len {
-                self.skip_stored_element();
+            if unlikely(self.holes) && self.inner._vec.holes().contains(&index) {
+                if index < self.stored_len {
+                    self.skip_stored_element();
+                }
+                continue;
             }
-            return self.next();
-        }
 
-        if index >= self.stored_len {
-            return self
-                .inner
-                ._vec
-                .get_pushed_at(index, self.stored_len)
-                .cloned();
-        }
-
-        if unlikely(self.updated)
-            && let Some(updated) = self.inner._vec.updated().get(&index)
-        {
-            if index < self.stored_len {
-                self.skip_stored_element();
+            if index >= self.stored_len {
+                return self
+                    .inner
+                    ._vec
+                    .get_pushed_at(index, self.stored_len)
+                    .cloned();
             }
-            return Some(updated.clone());
-        }
 
-        self.inner.next()
+            if unlikely(self.updated)
+                && let Some(updated) = self.inner._vec.updated().get(&index)
+            {
+                if index < self.stored_len {
+                    self.skip_stored_element();
+                }
+                return Some(updated.clone());
+            }
+
+            return self.inner.next();
+        }
     }
 
     #[inline]
@@ -179,7 +181,8 @@ where
 
     fn last(mut self) -> Option<T> {
         let last_index = self.vec_len().checked_sub(1)?;
-        self.nth(last_index - self.index)
+        let skip = last_index.checked_sub(self.index)?;
+        self.nth(skip)
     }
 }
 

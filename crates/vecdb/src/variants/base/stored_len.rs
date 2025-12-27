@@ -1,5 +1,3 @@
-//! Stored length with rollback support.
-
 use super::SharedLen;
 
 /// Stored length with rollback support.

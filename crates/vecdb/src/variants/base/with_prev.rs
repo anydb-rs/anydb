@@ -1,5 +1,3 @@
-//! Wrapper that tracks current and previous values for rollback support.
-
 /// Wrapper that tracks both current and previous values for rollback support.
 ///
 /// Used for types where both current and previous are the same type and cloneable.

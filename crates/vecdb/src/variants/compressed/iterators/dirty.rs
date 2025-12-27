@@ -2,8 +2,7 @@ use std::iter::FusedIterator;
 
 use crate::{GenericStoredVec, Result, TypedVecIterator, VecIndex, VecIterator, VecValue, likely};
 
-use super::super::inner::{CompressedVecInner, CompressionStrategy};
-use super::CleanCompressedVecIterator;
+use super::{super::inner::{CompressedVecInner, CompressionStrategy}, CleanCompressedVecIterator};
 
 /// Dirty compressed vec iterator, handles pushed values on top of stored data
 pub struct DirtyCompressedVecIterator<'a, I, T, S> {

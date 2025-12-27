@@ -9,6 +9,7 @@ target
 
 # Ignored
 _*
+/*.md
 
 # Editors
 .vscode

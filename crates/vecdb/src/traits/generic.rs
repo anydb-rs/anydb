@@ -4,7 +4,8 @@ use log::info;
 use rawdb::{Reader, unlikely};
 
 use crate::{
-    AnyStoredVec, Bytes, Error, Result, SIZE_OF_U64, Stamp, Version, likely, vec_region_name_with,
+    AnyStoredVec, Bytes, Error, Result, SIZE_OF_U64, Stamp, VecIndex, VecValue, Version, likely,
+    vec_region_name_with,
 };
 
 const ONE_KIB: usize = 1024;
@@ -15,8 +16,6 @@ const ONE_GIB: usize = ONE_KIB * ONE_MIB;
 /// Prevents unbounded memory growth when pushing many values without flushing.
 const MAX_CACHE_SIZE: usize = ONE_GIB;
 
-use super::{VecIndex, VecValue};
-
 pub trait GenericStoredVec<I, T>: AnyStoredVec
 where
     I: VecIndex,
@@ -24,19 +23,11 @@ where
 {
     const SIZE_OF_T: usize = size_of::<T>();
 
-    // ============================================================================
-    // Reader Creation
-    // ============================================================================
-
     /// Creates a reader to the underlying region.
     /// Be careful with deadlocks - drop the reader before mutable ops.
     fn create_reader(&'_ self) -> Reader {
         self.region().create_reader()
     }
-
-    // ============================================================================
-    // Read Operations (Result-returning)
-    // ============================================================================
 
     /// Reads value at index using provided reader.
     #[inline(always)]
@@ -72,10 +63,6 @@ where
     /// Reads value at usize index using provided reader without checking the upper bound.
     #[doc(hidden)]
     fn unchecked_read_at(&self, index: usize, reader: &Reader) -> Result<T>;
-
-    // ============================================================================
-    // Serialization Methods (abstract - implementors must provide)
-    // ============================================================================
 
     /// Deserializes a value from bytes. Implementors use their strategy.
     fn read_value_from_bytes(&self, bytes: &[u8]) -> Result<T>;
@@ -123,10 +110,6 @@ where
     fn read_at_unwrap_once(&self, index: usize) -> T {
         self.read_at_unwrap(index, &self.create_reader())
     }
-
-    // ============================================================================
-    // Get Pushed or Read Operations
-    // ============================================================================
 
     /// Gets value from pushed layer or storage using provided reader.
     #[inline(always)]
@@ -205,12 +188,6 @@ where
         pushed.get(offset)
     }
 
-    // ============================================================================
-    // Length Operations
-    // ============================================================================
-    // Vectors maintain two layers: "stored" (on disk) and "pushed" (in memory).
-    // This allows buffering writes before flushing, improving performance.
-
     /// Returns the length including both stored and pushed (uncommitted) values.
     ///
     /// Named `len_` to avoid conflict with `AnyVec::len`.
@@ -243,10 +220,6 @@ where
     fn has_at(&self, index: usize) -> bool {
         index < self.len_()
     }
-
-    // ============================================================================
-    // Pushed Layer Access
-    // ============================================================================
 
     #[doc(hidden)]
     fn prev_pushed(&self) -> &[T];
@@ -318,9 +291,22 @@ where
         self.pushed_len() * Self::SIZE_OF_T >= MAX_CACHE_SIZE
     }
 
-    // ============================================================================
-    // Storage Length Management
-    // ============================================================================
+    /// Extends the vector to `target_len`, filling with `value`.
+    /// Batches writes in ~1GB chunks to avoid memory explosion.
+    fn fill_to(&mut self, target_len: usize, value: T) -> Result<()>
+    where
+        T: Copy,
+    {
+        let batch_count = MAX_CACHE_SIZE / Self::SIZE_OF_T;
+
+        while self.len() < target_len {
+            let count = (target_len - self.len()).min(batch_count);
+            let new_len = self.pushed_len() + count;
+            self.mut_pushed().resize(new_len, value);
+            self.write()?;
+        }
+        Ok(())
+    }
 
     #[doc(hidden)]
     fn prev_stored_len(&self) -> usize;
@@ -328,10 +314,6 @@ where
     fn mut_prev_stored_len(&mut self) -> &mut usize;
     #[doc(hidden)]
     fn update_stored_len(&self, val: usize);
-
-    // ============================================================================
-    // Truncate Operations
-    // ============================================================================
 
     /// Truncates the vector to the given index if the current length exceeds it.
     fn truncate_if_needed(&mut self, index: I) -> Result<()> {
@@ -374,10 +356,6 @@ where
         self.update_stamp(stamp);
         self.truncate_if_needed(index)
     }
-
-    // ============================================================================
-    // Reset and Clear Operations
-    // ============================================================================
 
     /// Resets the vector state.
     fn reset(&mut self) -> Result<()>;
@@ -442,18 +420,10 @@ where
         Ok(())
     }
 
-    // ============================================================================
-    // Dirty State Checking
-    // ============================================================================
-
     /// Returns true if there are uncommitted changes (pushed values).
     fn is_dirty(&self) -> bool {
         !self.is_pushed_empty()
     }
-
-    // ============================================================================
-    // Changes and Rollback Operations
-    // ============================================================================
 
     /// Returns the path to the changes directory for this vector.
     fn changes_path(&self) -> PathBuf {
@@ -669,10 +639,6 @@ where
         Ok(())
     }
 
-    // ============================================================================
-    // Serialization
-    // ============================================================================
-
     /// Gets a stored value for serialization purposes.
     /// Default implementation reads directly from disk.
     /// RawVecInner overrides to check prev_updated first.
@@ -716,10 +682,6 @@ where
 
         Ok(bytes)
     }
-
-    // ============================================================================
-    // Names
-    // ============================================================================
 
     /// Returns the region name for this vector.
     fn vec_region_name(&self) -> String {

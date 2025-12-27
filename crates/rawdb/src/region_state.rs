@@ -3,7 +3,7 @@ use std::sync::{
     atomic::{AtomicU8, Ordering},
 };
 
-/// Metadata tracking a region's location, size, and identity.
+/// Tracks the dirty/clean state of a region's metadata.
 #[derive(Debug, Clone)]
 pub struct RegionState(Arc<AtomicU8>);
 
@@ -12,8 +12,15 @@ impl RegionState {
     pub const NEEDS_FLUSH: u8 = 1;
     pub const NEEDS_WRITE: u8 = 2;
 
+    /// Creates a dirty state for a newly created region (needs write).
     #[inline(always)]
-    pub fn new() -> Self {
+    pub fn new_dirty() -> Self {
+        Self(Arc::new(AtomicU8::new(Self::NEEDS_WRITE)))
+    }
+
+    /// Creates a clean state for a region loaded from disk.
+    #[inline(always)]
+    pub fn new_clean() -> Self {
         Self(Arc::new(AtomicU8::new(Self::IS_CLEAN)))
     }
 

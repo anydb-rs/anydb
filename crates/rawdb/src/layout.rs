@@ -91,13 +91,13 @@ impl Layout {
             len = start + reserved;
         }
         if let Some((hole_start, gap)) = self.get_last_hole()
-            && hole_start > start
+            && hole_start >= start
         {
             start = hole_start;
             len = start + gap;
         }
         if let Some((region_start, region)) = self.get_last_region()
-            && region_start > start
+            && region_start >= start
         {
             len = region_start + region.meta().reserved();
         }

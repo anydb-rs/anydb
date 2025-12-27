@@ -1,5 +1,3 @@
-//! Schema trait for vecs with JsonSchema-implementing value types.
-
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 
 use crate::TypedVec;

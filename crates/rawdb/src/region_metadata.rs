@@ -46,7 +46,7 @@ impl RegionMetadata {
             len,
             reserved,
             start,
-            state: RegionState::new(), // New regions are dirty
+            state: RegionState::new_dirty(), // New region needs write
         }
     }
 
@@ -131,11 +131,24 @@ impl RegionMetadata {
         } else if state.needs_write() {
             return Err(Error::RegionMetadataUnwritten);
         }
-        state.set_is_clean();
+        // Flush first, then mark clean (if flush fails, retry will still see needs_flush)
         regions
             .mmap()
             .flush_range(index * SIZE_OF_REGION_METADATA, SIZE_OF_REGION_METADATA)?;
+        state.set_is_clean();
         Ok(true)
+    }
+
+    /// Returns true if metadata needs to be flushed (written but not synced).
+    #[inline]
+    pub(crate) fn needs_flush(&self) -> bool {
+        self.state.needs_flush()
+    }
+
+    /// Marks metadata as clean.
+    #[inline]
+    pub(crate) fn mark_clean(&self) {
+        self.state.set_is_clean();
     }
 
     /// Serialize to bytes using little endian encoding
@@ -188,7 +201,7 @@ impl RegionMetadata {
             start,
             len,
             reserved,
-            state: RegionState::new(), // Loaded from disk
+            state: RegionState::new_clean(), // Loaded from disk
         })
     }
 }

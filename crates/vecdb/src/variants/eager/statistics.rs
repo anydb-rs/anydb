@@ -1,5 +1,3 @@
-//! Statistical computation methods for EagerVec (moving averages, windowed operations).
-
 use std::{
     collections::VecDeque,
     iter::Sum,

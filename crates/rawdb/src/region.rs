@@ -1,4 +1,4 @@
-use std::{fs::File, sync::Arc};
+use std::{fs::File, mem, sync::Arc};
 
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -11,14 +11,16 @@ use crate::{Database, Error, Reader, RegionMetadata, Result, WeakDatabase};
 #[derive(Debug, Clone)]
 #[must_use = "Region should be stored to access the data"]
 pub struct Region(Arc<RegionInner>);
+
 #[derive(Debug)]
 pub struct RegionInner {
     db: WeakDatabase,
     index: usize,
     meta: RwLock<RegionMetadata>,
-    /// Dirty range (start_offset, end_offset) relative to region start.
+    /// Dirty ranges (start_offset, end_offset) relative to region start.
+    /// Merged at flush time to reduce syscalls.
     /// Separate from meta to allow flush without blocking iterators.
-    dirty_range: Mutex<Option<(usize, usize)>>,
+    dirty_ranges: Mutex<Vec<(usize, usize)>>,
 }
 
 impl Region {
@@ -34,7 +36,7 @@ impl Region {
             db: db.weak_clone(),
             index,
             meta: RwLock::new(RegionMetadata::new(id, start, len, reserved)),
-            dirty_range: Mutex::new(None),
+            dirty_ranges: Mutex::new(Vec::new()),
         }))
     }
 
@@ -43,7 +45,7 @@ impl Region {
             db: db.weak_clone(),
             index,
             meta: RwLock::new(meta),
-            dirty_range: Mutex::new(None),
+            dirty_ranges: Mutex::new(Vec::new()),
         }))
     }
 
@@ -80,14 +82,46 @@ impl Region {
         self.write_with(data, Some(at), false)
     }
 
+    /// Writes values directly to the mmap with dirty range tracking.
+    ///
+    /// All writes must be within the current region length (no extension).
+    /// Tracks dirty ranges to avoid flushing unchanged data.
+    ///
+    /// - `iter`: Iterator yielding (offset, value) pairs where offset is relative to region start
+    /// - `value_len`: The byte size of each value
+    /// - `write_fn`: Called for each (value, slice) to serialize the value into the slice
+    #[inline]
+    pub fn batch_write_each<T, F>(
+        &self,
+        iter: impl Iterator<Item = (usize, T)>,
+        value_len: usize,
+        mut write_fn: F,
+    ) where
+        F: FnMut(&T, &mut [u8]),
+    {
+        let region_start = self.meta().start();
+        let db = self.db();
+        let mmap = db.mmap();
+        let ptr = mmap.as_ptr() as *mut u8;
+
+        let mut ranges = self.0.dirty_ranges.lock();
+
+        for (offset, value) in iter {
+            let abs_offset = region_start + offset;
+            let slice = unsafe { std::slice::from_raw_parts_mut(ptr.add(abs_offset), value_len) };
+            write_fn(&value, slice);
+            ranges.push((offset, offset + value_len));
+        }
+    }
+
     /// Truncates the region to the specified length.
     ///
     /// This reduces the logical length but doesn't modify existing data bytes.
     /// The truncated data becomes inaccessible even though the bytes remain in the mmap.
     /// Changes are not durable until `flush()` is called.
     pub fn truncate(&self, from: usize) -> Result<()> {
-        let mut meta = self.meta_mut();
-        let len = meta.len();
+        // Check current length first (quick read, guard dropped immediately)
+        let len = self.meta().len();
         if from == len {
             return Ok(());
         } else if from > len {
@@ -96,8 +130,13 @@ impl Region {
                 current_len: len,
             });
         }
+
+        let db = self.db();
+        // Lock order: regions -> metadata (top-to-bottom)
+        let regions = db.regions();
+        let mut meta = self.meta_mut();
         meta.set_len(from);
-        meta.write_if_dirty(self.index(), &self.db().regions());
+        meta.write_if_dirty(self.index(), &regions);
         Ok(())
     }
 
@@ -142,25 +181,17 @@ impl Region {
 
         // Write to reserved space if possible
         if new_len <= reserved {
-            // info!(
-            //     "Write {data_len} bytes to {region_index} reserved space at {write_start} (start = {start}, at = {at:?}, len = {len})"
-            // );
+            // Write before acquiring meta to avoid deadlock with punch_holes.
+            // Lock order: mmap (via db.write) must come before meta.
+            db.write(write_start, data);
 
-            // For appends (at.is_none()), write data before acquiring meta lock to reduce lock time.
-            // For positioned writes (at.is_some()), acquire meta lock first to ensure atomicity.
-            if at.is_none() {
-                db.write(write_start, data);
-            }
-
+            // Lock order: regions → meta
+            let regions = db.regions();
             let mut meta = self.meta_mut();
 
-            if at.is_some() {
-                db.write(write_start, data);
-            }
-
-            self.extend_dirty_abs(start, write_start, data_len);
+            self.mark_dirty_abs(start, write_start, data_len);
             meta.set_len(new_len);
-            meta.write_if_dirty(index, &db.regions());
+            meta.write_if_dirty(index, &regions);
 
             return Ok(());
         }
@@ -179,8 +210,6 @@ impl Region {
 
         // If is last continue writing
         if layout.is_last_anything(self) {
-            // info!("{region_index} Append to file at {write_start}");
-
             db.set_min_len(start + new_reserved)?;
             let mut meta = self.meta_mut();
             meta.set_reserved(new_reserved);
@@ -189,10 +218,12 @@ impl Region {
 
             db.write(write_start, data);
 
-            self.extend_dirty_abs(start, write_start, data_len);
+            self.mark_dirty_abs(start, write_start, data_len);
+            // Acquire regions READ lock BEFORE metadata WRITE lock to prevent deadlock.
+            let regions = db.regions();
             let mut meta = self.meta_mut();
             meta.set_len(new_len);
-            meta.write_if_dirty(index, &db.regions());
+            meta.write_if_dirty(index, &regions);
 
             return Ok(());
         }
@@ -203,8 +234,6 @@ impl Region {
             .get_hole(hole_start)
             .is_some_and(|gap| gap >= added_reserve)
         {
-            // info!("Expand {region_index} to hole");
-
             layout.remove_or_compress_hole(hole_start, added_reserve)?;
             let mut meta = self.meta_mut();
             meta.set_reserved(new_reserved);
@@ -213,19 +242,20 @@ impl Region {
 
             db.write(write_start, data);
 
-            self.extend_dirty_abs(start, write_start, data_len);
+            self.mark_dirty_abs(start, write_start, data_len);
+            // Acquire regions READ lock BEFORE metadata WRITE lock to prevent deadlock.
+            let regions = db.regions();
             let mut meta = self.meta_mut();
             meta.set_len(new_len);
-            meta.write_if_dirty(index, &db.regions());
+            meta.write_if_dirty(index, &regions);
 
             return Ok(());
         }
 
         // Find hole big enough to move the region
         if let Some(hole_start) = layout.find_smallest_adequate_hole(new_reserved) {
-            // info!("Move {region_index} to hole at {hole_start}");
-
             layout.remove_or_compress_hole(hole_start, new_reserved)?;
+            layout.reserve(hole_start, new_reserved);
             drop(layout);
 
             db.copy(start, hole_start, write_start - start);
@@ -233,25 +263,22 @@ impl Region {
 
             let mut layout = db.layout_mut();
             layout.move_region(hole_start, self)?;
+            assert!(layout.take_reserved(hole_start) == Some(new_reserved));
 
             // Region moved, mark all data as dirty (relative to new start)
-            self.extend_dirty(0, new_len);
+            self.mark_dirty(0, new_len);
+            // Lock order: layout (held) → regions → meta
+            let regions = db.regions();
             let mut meta = self.meta_mut();
             meta.set_start(hole_start);
             meta.set_reserved(new_reserved);
             meta.set_len(new_len);
-            meta.write_if_dirty(index, &db.regions());
+            meta.write_if_dirty(index, &regions);
 
             return Ok(());
         }
 
         let new_start = layout.len();
-        // Write at the end
-        // info!(
-        //     "Move {region_index} to the end, from {start}..{} to {new_start}..{}",
-        //     start + reserved,
-        //     new_start + new_reserved
-        // );
         db.set_min_len(new_start + new_reserved)?;
         layout.reserve(new_start, new_reserved);
         drop(layout);
@@ -264,12 +291,14 @@ impl Region {
         assert!(layout.take_reserved(new_start) == Some(new_reserved));
 
         // Region moved, mark all data as dirty (relative to new start)
-        self.extend_dirty(0, new_len);
+        self.mark_dirty(0, new_len);
+        // Lock order: layout (held) → regions → meta
+        let regions = db.regions();
         let mut meta = self.meta_mut();
         meta.set_start(new_start);
         meta.set_reserved(new_reserved);
         meta.set_len(new_len);
-        meta.write_if_dirty(index, &db.regions());
+        meta.write_if_dirty(index, &regions);
 
         Ok(())
     }
@@ -296,8 +325,9 @@ impl Region {
     /// the next `flush()`. This consumes the region to prevent use-after-free.
     pub fn remove(self) -> Result<()> {
         let db = self.db();
-        let mut regions = db.regions_mut();
+        // Lock order: layout → regions
         let mut layout = db.layout_mut();
+        let mut regions = db.regions_mut();
         layout.remove_region(&self)?;
         regions.remove(&self)?;
         Ok(())
@@ -305,22 +335,30 @@ impl Region {
 
     /// Flushes this region's dirty data and metadata to disk.
     ///
-    /// Only flushes the dirty range if any writes have been made since the last flush.
-    /// Returns `Ok(true)` if data was flushed, `Ok(false)` if nothing was dirty.
+    /// Flushes if any data writes or metadata-only changes (truncate, rename) were made.
+    /// Returns `Ok(true)` if anything was flushed, `Ok(false)` if nothing was dirty.
     pub fn flush(&self) -> Result<bool> {
-        let Some((dirty_start, dirty_end)) = self.take_dirty_range() else {
-            return Ok(false);
+        let db = self.db();
+        let dirty_ranges = self.take_dirty_ranges();
+
+        let data_flushed = if !dirty_ranges.is_empty() {
+            // Lock order: mmap before meta, so release meta before acquiring mmap
+            let region_start = self.meta().start();
+            let mmap = db.mmap();
+            for (dirty_start, dirty_end) in &dirty_ranges {
+                mmap.flush_range(region_start + dirty_start, dirty_end - dirty_start)?;
+            }
+            true
+        } else {
+            false
         };
 
-        let db = self.db();
+        // Lock order: regions → meta
+        let regions = db.regions();
         let meta = self.meta();
-        let start = meta.start();
-        let abs_start = start + dirty_start;
-        let dirty_len = dirty_end - dirty_start;
+        let meta_flushed = meta.flush(self.index(), &regions)?;
 
-        db.mmap().flush_range(abs_start, dirty_len)?;
-        meta.flush(self.index(), &db.regions())?;
-        Ok(true)
+        Ok(data_flushed || meta_flushed)
     }
 
     #[inline(always)]
@@ -348,29 +386,25 @@ impl Region {
         self.0.db.upgrade()
     }
 
-    /// Extends the dirty range to include the given write.
+    /// Marks a range as dirty (needing flush).
     /// `offset` is relative to region start.
     #[inline]
-    fn extend_dirty(&self, offset: usize, len: usize) {
-        let end = offset + len;
-        let mut dirty = self.0.dirty_range.lock();
-        *dirty = Some(match *dirty {
-            None => (offset, end),
-            Some((s, e)) => (s.min(offset), e.max(end)),
-        });
+    pub fn mark_dirty(&self, offset: usize, len: usize) {
+        self.0.dirty_ranges.lock().push((offset, offset + len));
     }
 
-    /// Extends the dirty range using absolute file positions.
+    /// Marks a range as dirty using absolute file positions.
     /// Converts to relative offsets internally.
     #[inline]
-    fn extend_dirty_abs(&self, region_start: usize, abs_start: usize, len: usize) {
+    fn mark_dirty_abs(&self, region_start: usize, abs_start: usize, len: usize) {
         let offset = abs_start - region_start;
-        self.extend_dirty(offset, len);
+        self.mark_dirty(offset, len);
     }
 
-    /// Takes and clears the dirty range, returning it if any.
+    /// Takes and returns dirty ranges, clearing the internal Vec and releasing memory.
+    /// Concurrent writes after this call will create new ranges for next flush.
     #[inline]
-    fn take_dirty_range(&self) -> Option<(usize, usize)> {
-        self.0.dirty_range.lock().take()
+    pub(crate) fn take_dirty_ranges(&self) -> Vec<(usize, usize)> {
+        mem::take(&mut *self.0.dirty_ranges.lock())
     }
 }

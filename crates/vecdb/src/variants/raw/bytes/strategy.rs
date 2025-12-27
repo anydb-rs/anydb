@@ -15,7 +15,12 @@ impl<T: BytesVecValue> RawStrategy<T> for BytesStrategy<T> {
     }
 
     #[inline(always)]
-    fn write_to(value: &T, buf: &mut Vec<u8>) {
+    fn write_to_vec(value: &T, buf: &mut Vec<u8>) {
         buf.extend_from_slice(value.to_bytes().as_ref());
+    }
+
+    #[inline(always)]
+    fn write_to_slice(value: &T, dst: &mut [u8]) {
+        dst.copy_from_slice(value.to_bytes().as_ref());
     }
 }

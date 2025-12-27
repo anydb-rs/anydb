@@ -7,23 +7,19 @@ mod fjall2_impl;
 mod fjall3_impl;
 mod lmdb_impl;
 mod redb_impl;
-// mod rocksdb_impl;
 mod bytesvec_impl;
 mod pcovec_impl;
 mod runner;
-// mod vecdb_raw_old_impl;
 
 use database::DatabaseBenchmark;
 use fjall2_impl::*;
 use fjall3_impl::*;
 use lmdb_impl::*;
 use redb_impl::*;
-// use rocksdb_impl::*;
 use bytesvec_impl::*;
 use pcovec_impl::*;
 use runner::*;
 pub use runner::{BenchConfig, Database};
-// use vecdb_raw_old_impl::*;
 
 struct AccumulatedTimes {
     open: Vec<Duration>,
@@ -230,9 +226,6 @@ pub fn run(configs: &[BenchConfig]) -> Result<()> {
                 Database::BytesVec => {
                     db_benchmarks.push(Box::new(DbBenchmark::<BytesVecBench>::new(&runner)?));
                 }
-                // Database::ZeroCopyVecOld => {
-                //     db_benchmarks.push(Box::new(DbBenchmark::<ZeroCopyVecOldBench>::new(&runner)?));
-                // }
                 Database::Fjall3 => {
                     db_benchmarks.push(Box::new(DbBenchmark::<Fjall3Bench>::new(&runner)?));
                 }
@@ -242,9 +235,6 @@ pub fn run(configs: &[BenchConfig]) -> Result<()> {
                 Database::Redb => {
                     db_benchmarks.push(Box::new(DbBenchmark::<RedbBench>::new(&runner)?));
                 }
-                // Database::RocksDb => {
-                //     db_benchmarks.push(Box::new(DbBenchmark::<RocksDbBench>::new(&runner)?));
-                // }
                 Database::Lmdb => {
                     db_benchmarks.push(Box::new(DbBenchmark::<LmdbBench>::new(&runner)?));
                 }

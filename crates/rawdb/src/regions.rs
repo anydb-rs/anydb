@@ -5,11 +5,11 @@ use std::{
     sync::Arc,
 };
 
-use memmap2::{MmapMut, MmapOptions};
+use memmap2::MmapMut;
 
 use crate::{
-    Database, Error, PAGE_SIZE, RegionMetadata, Result, SIZE_OF_REGION_METADATA, region::Region,
-    write_to_mmap,
+    Database, Error, PAGE_SIZE, RegionMetadata, Result, SIZE_OF_REGION_METADATA, create_mmap,
+    region::Region, write_to_mmap,
 };
 
 #[derive(Debug)]
@@ -32,7 +32,7 @@ impl Regions {
             .open(parent.join("regions"))?;
         file.try_lock()?;
 
-        let mmap = Self::create_mmap(&file)?;
+        let mmap = create_mmap(&file)?;
 
         Ok(Self {
             id_to_index: HashMap::new(),
@@ -40,11 +40,6 @@ impl Regions {
             file,
             mmap,
         })
-    }
-
-    #[inline]
-    fn create_mmap(file: &File) -> Result<MmapMut> {
-        Ok(unsafe { MmapOptions::new().map_mut(file)? })
     }
 
     fn file_len(&self) -> Result<usize> {
@@ -87,8 +82,7 @@ impl Regions {
         let file_len = self.file_len()?;
         if file_len < len {
             self.file.set_len(len as u64)?;
-            // self.file.sync_all()?;
-            self.mmap = Self::create_mmap(&self.file)?;
+            self.mmap = create_mmap(&self.file)?;
         }
         Ok(())
     }

@@ -1,5 +1,3 @@
-//! Atomic length counter shared across clones.
-
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},

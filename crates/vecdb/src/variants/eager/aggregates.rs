@@ -1,5 +1,3 @@
-//! Aggregate computation methods for EagerVec (sum/min/max of multiple sources).
-
 use std::ops::Add;
 
 use crate::{

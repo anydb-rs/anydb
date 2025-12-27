@@ -4,8 +4,7 @@ use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 
 use crate::{RawStrategy, Result};
 
-use super::super::inner::CompressionStrategy;
-use super::value::LZ4VecValue;
+use super::{super::inner::CompressionStrategy, value::LZ4VecValue};
 
 /// LZ4 compression strategy for fast compression/decompression.
 #[derive(Debug, Clone, Copy)]
@@ -21,8 +20,13 @@ where
     }
 
     #[inline(always)]
-    fn write_to(value: &T, buf: &mut Vec<u8>) {
+    fn write_to_vec(value: &T, buf: &mut Vec<u8>) {
         buf.extend_from_slice(value.to_bytes().as_ref());
+    }
+
+    #[inline(always)]
+    fn write_to_slice(value: &T, dst: &mut [u8]) {
+        dst.copy_from_slice(value.to_bytes().as_ref());
     }
 }
 
