@@ -1,11 +1,13 @@
 use crate::{
-    AnyVec, BoxedVecIterator, IterableBoxedVec, IterableVec, TypedVec, TypedVecIterator, VecIndex,
-    VecValue, Version, short_type_name,
+    AnyVec, BoxedVecIterator, Error, IterableBoxedVec, IterableVec, Result, TypedVec,
+    TypedVecIterator, VecIndex, VecValue, Version, short_type_name,
 };
 
 mod iterator;
+mod transform;
 
 pub use iterator::*;
+pub use transform::*;
 
 pub type ComputeFrom1<I, T, S1I, S1T> =
     for<'a> fn(I, &mut dyn TypedVecIterator<I = S1I, T = S1T, Item = S1T>) -> Option<T>;
@@ -61,6 +63,18 @@ where
 
     fn version(&self) -> Version {
         self.version
+    }
+
+    /// Read a single value at the given index.
+    /// Creates an iterator internally, so prefer `into_iter()` for multiple reads.
+    #[inline]
+    pub fn read_once(&self, index: I) -> Result<T> {
+        self.into_iter()
+            .get(index)
+            .ok_or(Error::IndexTooHigh {
+                index: index.to_usize(),
+                len: self.len(),
+            })
     }
 }
 
@@ -139,4 +153,21 @@ where
 {
     type I = I;
     type T = T;
+}
+
+impl<I, T, S1T> LazyVecFrom1<I, T, I, S1T>
+where
+    I: VecIndex,
+    T: VecValue,
+    S1T: VecValue,
+{
+    /// Create a lazy vec with a generic transform.
+    /// Usage: `LazyVecFrom1::transformed::<Negate>(name, v, source)`
+    pub fn transformed<F: UnaryTransform<S1T, T>>(
+        name: &str,
+        version: Version,
+        source: IterableBoxedVec<I, S1T>,
+    ) -> Self {
+        Self::init(name, version, source, |i, iter| iter.get(i).map(F::apply))
+    }
 }

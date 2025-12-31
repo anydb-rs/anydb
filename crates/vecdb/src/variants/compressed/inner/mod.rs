@@ -356,11 +356,13 @@ where
             buf.extend_from_slice(v);
         }
 
-        // Phase 3: Write with pages.write() held
-        let mut pages = self.pages.write();
-
+        // Phase 3: Write to region first (without holding pages lock to avoid deadlock)
+        // Deadlock scenario: Iterator holds region.meta() then waits for pages.read()
+        // Writer holds pages.write() then calls truncate_write which needs region.meta()
         self.region().truncate_write(truncate_at as usize, &buf)?;
 
+        // Now acquire pages lock and update page metadata
+        let mut pages = self.pages.write();
         pages.truncate(starting_page_index);
 
         compressed.iter().enumerate().for_each(|(i, (bytes, len))| {
