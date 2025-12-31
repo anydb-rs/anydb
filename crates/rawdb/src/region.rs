@@ -197,6 +197,11 @@ impl Region {
         }
 
         assert!(new_len > reserved);
+        if reserved == 0 {
+            panic!(
+                "reserved is 0 which would cause infinite loop! start={start}, len={len}, index={index}, new_len={new_len}"
+            );
+        }
         let mut new_reserved = reserved;
         while new_len > new_reserved {
             new_reserved = new_reserved
@@ -210,11 +215,27 @@ impl Region {
 
         // If is last continue writing
         if layout.is_last_anything(self) {
-            db.set_min_len(start + new_reserved)?;
+            // Release layout BEFORE calling set_min_len to avoid deadlock.
+            // set_min_len needs mmap_mut, and another thread may hold mmap read
+            // while waiting for layout_mut, causing deadlock if we hold layout here.
+            let target_len = start + new_reserved;
+            drop(layout);
+
+            db.set_min_len(target_len)?;
+
+            // Re-acquire layout and verify we're still last
+            let layout = db.layout();
+            if !layout.is_last_anything(self) {
+                // Another region was appended while we didn't hold the lock.
+                // Fall through to the other code paths by restarting.
+                drop(layout);
+                return self.write_with(data, at, truncate);
+            }
+            drop(layout);
+
             let mut meta = self.meta_mut();
             meta.set_reserved(new_reserved);
             drop(meta);
-            drop(layout);
 
             db.write(write_start, data);
 
@@ -278,8 +299,23 @@ impl Region {
             return Ok(());
         }
 
+        // Allocate at end of file
         let new_start = layout.len();
-        db.set_min_len(new_start + new_reserved)?;
+        let target_len = new_start + new_reserved;
+        // Release layout BEFORE calling set_min_len to avoid deadlock.
+        drop(layout);
+
+        db.set_min_len(target_len)?;
+
+        // Re-acquire layout and reserve space
+        let mut layout = db.layout_mut();
+        // Verify new_start is still valid (another thread may have appended)
+        let current_len = layout.len();
+        if current_len != new_start {
+            // State changed, restart to pick the right path
+            drop(layout);
+            return self.write_with(data, at, truncate);
+        }
         layout.reserve(new_start, new_reserved);
         drop(layout);
 

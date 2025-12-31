@@ -96,6 +96,13 @@ impl Layout {
             start = hole_start;
             len = start + gap;
         }
+        // Include pending holes (from recently deleted regions, not yet promoted)
+        if let Some((&pending_start, &pending_size)) = self.pending_holes.last_key_value()
+            && pending_start >= start
+        {
+            start = pending_start;
+            len = start + pending_size;
+        }
         if let Some((region_start, region)) = self.get_last_region()
             && region_start >= start
         {
@@ -134,6 +141,10 @@ impl Layout {
             && self
                 .get_last_reserved()
                 .is_none_or(|(reserved_start, _)| last_start > reserved_start)
+            && self
+                .pending_holes
+                .last_key_value()
+                .is_none_or(|(&pending_start, _)| last_start > pending_start)
     }
 
     pub fn insert_region(&mut self, start: usize, region: &Region) {
@@ -149,7 +160,7 @@ impl Layout {
     pub fn remove_region(&mut self, region: &Region) -> Result<()> {
         let region_meta = region.meta();
         let start = region_meta.start();
-        let mut reserved = region_meta.reserved();
+        let reserved = region_meta.reserved();
 
         let removed = self.start_to_region.remove(&start);
 
@@ -160,19 +171,7 @@ impl Layout {
             return Err(Error::RegionIndexMismatch);
         }
 
-        // Coalesce with adjacent hole (remove it from indexes)
-        if let Some(adjacent_size) = self.remove_hole(start + reserved) {
-            reserved += adjacent_size;
-        }
-
-        // Mark as pending hole (can't reuse until flush)
-        if let Some((&hole_start, gap)) = self.pending_holes.range_mut(..start).next_back()
-            && hole_start + *gap == start
-        {
-            *gap += reserved;
-        } else {
-            self.pending_holes.insert(start, reserved);
-        }
+        self.pending_holes.insert(start, reserved);
 
         Ok(())
     }
@@ -230,17 +229,24 @@ impl Layout {
     /// Promote pending holes to real holes after flush.
     /// Safe to reuse now that metadata changes are durable.
     pub fn promote_pending_holes(&mut self) {
-        for (start, size) in mem::take(&mut self.pending_holes) {
-            // Try to coalesce with adjacent hole before this one
+        for (start, mut size) in mem::take(&mut self.pending_holes) {
+            let mut final_start = start;
+
+            // Coalesce with adjacent real hole BEFORE
             if let Some((&hole_start, &hole_size)) = self.start_to_hole.range(..start).next_back()
                 && hole_start + hole_size == start
             {
-                // Remove old hole and insert coalesced one
                 self.remove_hole(hole_start);
-                self.insert_hole(hole_start, hole_size + size);
-            } else {
-                self.insert_hole(start, size);
+                final_start = hole_start;
+                size += hole_size;
             }
+
+            // Coalesce with adjacent real hole AFTER
+            if let Some(hole_after_size) = self.remove_hole(final_start + size) {
+                size += hole_after_size;
+            }
+
+            self.insert_hole(final_start, size);
         }
     }
 }

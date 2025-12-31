@@ -425,6 +425,17 @@ impl Database {
         assert!(start.is_multiple_of(PAGE_SIZE));
         assert!(len.is_multiple_of(PAGE_SIZE));
 
+        // Validate bounds before accessing mmap to prevent hangs from corrupted metadata
+        if start + len > mmap.len() {
+            debug!(
+                "approx_has_punchable_data: out of bounds - start={}, len={}, mmap_len={}",
+                start,
+                len,
+                mmap.len()
+            );
+            return false;
+        }
+
         let min = start;
         let max = start + len;
         let check = |start, end| {
