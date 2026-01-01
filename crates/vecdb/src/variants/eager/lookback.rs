@@ -1,6 +1,4 @@
-use crate::{
-    AnyVec, Error, Exit, GenericStoredVec, IterableVec, Result, StoredVec, VecValue, Version,
-};
+use crate::{AnyVec, Error, Exit, GenericStoredVec, IterableVec, Result, StoredVec, VecValue};
 
 use super::{CheckedSub, EagerVec};
 
@@ -21,9 +19,7 @@ where
         A: VecValue + Default,
         F: Fn(usize, A, A) -> V::T,
     {
-        self.validate_computed_version_or_reset(
-            Version::ZERO + self.inner_version() + source.version(),
-        )?;
+        self.validate_computed_version_or_reset(source.version())?;
 
         self.truncate_if_needed(max_from)?;
 

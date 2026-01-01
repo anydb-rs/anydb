@@ -3,7 +3,7 @@
 use rawdb::Database;
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, EagerVec, Exit, GenericStoredVec, ImportableVec, IterableVec, StoredVec, Version,
+    AnyStoredVec, EagerVec, GenericStoredVec, ImportableVec, IterableVec, StoredVec, Version,
 };
 
 // ============================================================================
@@ -17,7 +17,6 @@ where
 {
     let temp_dir = TempDir::new().unwrap();
     let db = Database::open(&temp_dir.path().join("test.db")).unwrap();
-    let exit = Exit::new();
 
     // Create a vec (which uses mmap for writes)
     let mut vec: EagerVec<V> = EagerVec::forced_import(&db, "test_vec", Version::ONE).unwrap();
@@ -28,7 +27,7 @@ where
     }
 
     // Flush the vec (writes to mmap)
-    vec.safe_flush(&exit).unwrap();
+    vec.flush().unwrap();
 
     println!("After flush, checking data consistency...");
 
@@ -58,7 +57,6 @@ where
 {
     let temp_dir = TempDir::new().unwrap();
     let db = Database::open(&temp_dir.path().join("test2.db")).unwrap();
-    let exit = Exit::new();
 
     let mut vec: EagerVec<V> = EagerVec::forced_import(&db, "test_vec", Version::ONE).unwrap();
 
@@ -73,7 +71,7 @@ where
         }
 
         // Flush
-        vec.safe_flush(&exit).unwrap();
+        vec.flush().unwrap();
 
         // Immediately read back using read_at_unwrap_once
         for i in 0..100usize {

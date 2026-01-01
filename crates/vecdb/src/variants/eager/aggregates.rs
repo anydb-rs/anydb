@@ -2,7 +2,6 @@ use std::ops::Add;
 
 use crate::{
     AnyVec, Error, Exit, GenericStoredVec, IterableVec, Result, StoredVec, VecIndex, VecValue,
-    Version,
 };
 
 use super::{CheckedSub, EagerVec, SaturatingAdd};
@@ -22,9 +21,7 @@ where
         O: IterableVec<V::I, V::T>,
         F: Fn(Box<dyn Iterator<Item = V::T> + '_>) -> V::T,
     {
-        self.validate_computed_version_or_reset(
-            Version::ZERO + self.inner_version() + others.iter().map(|v| v.version()).sum(),
-        )?;
+        self.validate_computed_version_or_reset(others.iter().map(|v| v.version()).sum())?;
 
         if others.is_empty() {
             return Err(Error::InvalidArgument(
@@ -136,11 +133,7 @@ where
         usize: From<B>,
     {
         self.validate_computed_version_or_reset(
-            Version::ZERO
-                + self.inner_version()
-                + first_indexes.version()
-                + indexes_count.version()
-                + source.version(),
+            first_indexes.version() + indexes_count.version() + source.version(),
         )?;
 
         self.truncate_if_needed(max_from)?;
@@ -220,12 +213,7 @@ where
         B: VecValue,
         <A as TryInto<V::T>>::Error: core::error::Error + 'static,
     {
-        self.validate_computed_version_or_reset(
-            Version::ZERO
-                + self.inner_version()
-                + first_indexes.version()
-                + other_to_else.version(),
-        )?;
+        self.validate_computed_version_or_reset(first_indexes.version() + other_to_else.version())?;
 
         self.truncate_if_needed(max_from)?;
 

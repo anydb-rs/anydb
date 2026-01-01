@@ -81,7 +81,8 @@ where
                 info!("Batch limit reached, saving to disk...");
             }
             if self.is_dirty() {
-                self.safe_write(exit)?;
+                let _lock = exit.lock();
+                self.write()?;
             }
             if !batch_limit_reached {
                 break;

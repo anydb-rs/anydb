@@ -19,7 +19,7 @@ where
     where
         F: FnMut(V::I) -> (V::I, V::T),
     {
-        self.validate_computed_version_or_reset(Version::ZERO + self.inner_version() + version)?;
+        self.validate_computed_version_or_reset(version)?;
 
         self.truncate_if_needed(max_from)?;
 
@@ -86,9 +86,7 @@ where
         A: VecValue,
         F: FnMut((V::I, A, &Self)) -> (V::I, V::T),
     {
-        self.validate_computed_version_or_reset(
-            Version::ZERO + self.inner_version() + other.version(),
-        )?;
+        self.validate_computed_version_or_reset(other.version())?;
 
         self.truncate_if_needed(max_from)?;
 
@@ -123,9 +121,7 @@ where
         B: VecValue,
         F: FnMut((V::I, A, B, &Self)) -> (V::I, V::T),
     {
-        self.validate_computed_version_or_reset(
-            Version::ZERO + self.inner_version() + other1.version() + other2.version(),
-        )?;
+        self.validate_computed_version_or_reset(other1.version() + other2.version())?;
 
         self.truncate_if_needed(max_from)?;
 
@@ -162,11 +158,7 @@ where
         F: FnMut((V::I, A, B, C, &Self)) -> (V::I, V::T),
     {
         self.validate_computed_version_or_reset(
-            Version::ZERO
-                + self.inner_version()
-                + other1.version()
-                + other2.version()
-                + other3.version(),
+            other1.version() + other2.version() + other3.version(),
         )?;
 
         self.truncate_if_needed(max_from)?;
@@ -214,12 +206,7 @@ where
         F: FnMut((V::I, A, B, C, D, &Self)) -> (V::I, V::T),
     {
         self.validate_computed_version_or_reset(
-            Version::ZERO
-                + self.inner_version()
-                + other1.version()
-                + other2.version()
-                + other3.version()
-                + other4.version(),
+            other1.version() + other2.version() + other3.version() + other4.version(),
         )?;
 
         self.truncate_if_needed(max_from)?;
@@ -260,9 +247,7 @@ where
         V::I: VecValue + VecIndex,
         V::T: VecIndex,
     {
-        self.validate_computed_version_or_reset(
-            Version::ZERO + self.inner_version() + other.version(),
-        )?;
+        self.validate_computed_version_or_reset(other.version())?;
 
         self.repeat_until_complete(exit, |this| {
             let skip = this

@@ -28,9 +28,7 @@ where
         V::T: From<A>,
         F: Fn(&A, &A) -> bool,
     {
-        self.validate_computed_version_or_reset(
-            Version::ZERO + self.inner_version() + source.version(),
-        )?;
+        self.validate_computed_version_or_reset(source.version())?;
 
         self.truncate_if_needed(max_from)?;
 
@@ -118,9 +116,7 @@ where
         V::T: std::ops::Add<V::T, Output = V::T> + From<A> + Default + CheckedSub,
         A: VecValue,
     {
-        self.validate_computed_version_or_reset(
-            Version::ONE + self.inner_version() + source.version(),
-        )?;
+        self.validate_computed_version_or_reset(Version::ONE + source.version())?;
 
         self.truncate_if_needed(max_from)?;
 
@@ -209,9 +205,7 @@ where
         A: VecValue,
         f32: From<V::T> + From<A>,
     {
-        self.validate_computed_version_or_reset(
-            Version::ONE + self.inner_version() + source.version(),
-        )?;
+        self.validate_computed_version_or_reset(Version::ONE + source.version())?;
 
         self.truncate_if_needed(max_from)?;
 
@@ -311,9 +305,7 @@ where
         A: VecValue + Sum,
         f32: From<A> + From<V::T>,
     {
-        self.validate_computed_version_or_reset(
-            Version::new(3) + self.inner_version() + source.version(),
-        )?;
+        self.validate_computed_version_or_reset(Version::new(3) + source.version())?;
 
         self.truncate_if_needed(max_from)?;
 

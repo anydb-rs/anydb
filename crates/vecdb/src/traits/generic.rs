@@ -401,7 +401,9 @@ where
     }
 
     /// Validates the computed version against the stored version, resetting if they don't match.
-    fn validate_computed_version_or_reset(&mut self, version: Version) -> Result<()> {
+    /// Automatically includes the vec's own version - only pass dependency versions.
+    fn validate_computed_version_or_reset(&mut self, dep_version: Version) -> Result<()> {
+        let version = self.header().vec_version() + dep_version;
         if version != self.header().computed_version() {
             self.mut_header().update_computed_version(version);
             if !self.is_empty() {

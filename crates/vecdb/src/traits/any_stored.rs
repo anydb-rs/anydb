@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use rawdb::{Database, Region};
 
-use crate::{AnyVec, Exit, Header, Result, Stamp};
+use crate::{AnyVec, Header, Result, Stamp};
 
 /// Trait for stored vectors that persist data to disk (as opposed to lazy computed vectors).
 pub trait AnyStoredVec: AnyVec {
@@ -30,24 +30,6 @@ pub trait AnyStoredVec: AnyVec {
         if self.write()? {
             self.region().flush()?;
         }
-        Ok(())
-    }
-
-    /// Flushes while holding the exit lock to ensure consistency during shutdown.
-    #[inline]
-    fn safe_flush(&mut self, exit: &Exit) -> Result<()> {
-        let _lock = exit.lock();
-        self.flush()?;
-        Ok(())
-    }
-
-    /// Writes to mmap without fsync, holding the exit lock.
-    /// Data is visible to readers immediately but not durable until sync.
-    /// Use this for performance when durability can be deferred.
-    #[inline]
-    fn safe_write(&mut self, exit: &Exit) -> Result<()> {
-        let _lock = exit.lock();
-        self.write()?;
         Ok(())
     }
 
