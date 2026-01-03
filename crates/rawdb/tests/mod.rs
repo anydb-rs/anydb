@@ -1398,7 +1398,7 @@ fn test_comprehensive_db_operations() -> Result<()> {
         assert!(
             regions
                 .get_from_id("region1")
-                .is_some_and(|r| Arc::ptr_eq(r.arc(), region1.arc()))
+                .is_some_and(|r| r.ptr_eq(&region1))
         );
 
         let region1_meta = region1.meta();
@@ -1562,18 +1562,9 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 3);
 
-        assert!(Arc::ptr_eq(
-            start_to_index.get(&0).unwrap().arc(),
-            region1.arc()
-        ));
-        assert!(Arc::ptr_eq(
-            start_to_index.get(&PAGE_SIZE).unwrap().arc(),
-            region2.arc()
-        ));
-        assert!(Arc::ptr_eq(
-            start_to_index.get(&(PAGE_SIZE * 2)).unwrap().arc(),
-            region3.arc()
-        ));
+        assert!(start_to_index.get(&0).unwrap().ptr_eq(&region1));
+        assert!(start_to_index.get(&PAGE_SIZE).unwrap().ptr_eq(&region2));
+        assert!(start_to_index.get(&(PAGE_SIZE * 2)).unwrap().ptr_eq(&region3));
         assert!(layout.start_to_hole().is_empty());
     }
 
@@ -1604,14 +1595,8 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let layout = db.layout();
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 2);
-        assert!(Arc::ptr_eq(
-            start_to_index.get(&0).unwrap().arc(),
-            region1.arc()
-        ));
-        assert!(Arc::ptr_eq(
-            start_to_index.get(&(PAGE_SIZE * 2)).unwrap().arc(),
-            region3.arc()
-        ));
+        assert!(start_to_index.get(&0).unwrap().ptr_eq(&region1));
+        assert!(start_to_index.get(&(PAGE_SIZE * 2)).unwrap().ptr_eq(&region3));
         let start_to_hole = layout.start_to_hole();
         assert!(start_to_hole.len() == 1);
         assert!(start_to_hole.get(&PAGE_SIZE) == Some(&PAGE_SIZE));
@@ -1653,14 +1638,8 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let layout = db.layout();
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 2);
-        assert!(Arc::ptr_eq(
-            start_to_index.get(&0).unwrap().arc(),
-            region1.arc()
-        ));
-        assert!(Arc::ptr_eq(
-            start_to_index.get(&(PAGE_SIZE * 2)).unwrap().arc(),
-            region3.arc()
-        ));
+        assert!(start_to_index.get(&0).unwrap().ptr_eq(&region1));
+        assert!(start_to_index.get(&(PAGE_SIZE * 2)).unwrap().ptr_eq(&region3));
 
         let start_to_hole = layout.start_to_hole();
         assert!(start_to_hole.len() == 1);
@@ -1697,14 +1676,8 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let layout = db.layout();
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 2);
-        assert!(Arc::ptr_eq(
-            start_to_index.get(&0).unwrap().arc(),
-            region1.arc()
-        ));
-        assert!(Arc::ptr_eq(
-            start_to_index.get(&(PAGE_SIZE * 2)).unwrap().arc(),
-            region3.arc()
-        ));
+        assert!(start_to_index.get(&0).unwrap().ptr_eq(&region1));
+        assert!(start_to_index.get(&(PAGE_SIZE * 2)).unwrap().ptr_eq(&region3));
         let start_to_hole = layout.start_to_hole();
         assert!(start_to_hole.is_empty());
     }
@@ -1739,18 +1712,9 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let layout = db.layout();
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 3);
-        assert!(Arc::ptr_eq(
-            start_to_index.get(&0).unwrap().arc(),
-            region1.arc()
-        ));
-        assert!(Arc::ptr_eq(
-            start_to_index.get(&(PAGE_SIZE * 2)).unwrap().arc(),
-            region3.arc()
-        ));
-        assert!(Arc::ptr_eq(
-            start_to_index.get(&(PAGE_SIZE * 3)).unwrap().arc(),
-            region2.arc()
-        ));
+        assert!(start_to_index.get(&0).unwrap().ptr_eq(&region1));
+        assert!(start_to_index.get(&(PAGE_SIZE * 2)).unwrap().ptr_eq(&region3));
+        assert!(start_to_index.get(&(PAGE_SIZE * 3)).unwrap().ptr_eq(&region2));
         let start_to_hole = layout.start_to_hole();
         assert!(start_to_hole.is_empty());
     }
@@ -1782,14 +1746,8 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let layout = db.layout();
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 2);
-        assert!(Arc::ptr_eq(
-            start_to_index.get(&0).unwrap().arc(),
-            region1.arc()
-        ));
-        assert!(Arc::ptr_eq(
-            start_to_index.get(&(PAGE_SIZE * 3)).unwrap().arc(),
-            region2.arc()
-        ));
+        assert!(start_to_index.get(&0).unwrap().ptr_eq(&region1));
+        assert!(start_to_index.get(&(PAGE_SIZE * 3)).unwrap().ptr_eq(&region2));
         let start_to_hole = layout.start_to_hole();
         assert!(start_to_hole.get(&(PAGE_SIZE * 2)) == Some(&PAGE_SIZE));
     }
@@ -1821,14 +1779,8 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let layout = db.layout();
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 2);
-        assert!(Arc::ptr_eq(
-            start_to_index.get(&(PAGE_SIZE * 4)).unwrap().arc(),
-            region1.arc()
-        ));
-        assert!(Arc::ptr_eq(
-            start_to_index.get(&(PAGE_SIZE * 3)).unwrap().arc(),
-            region2.arc()
-        ));
+        assert!(start_to_index.get(&(PAGE_SIZE * 4)).unwrap().ptr_eq(&region1));
+        assert!(start_to_index.get(&(PAGE_SIZE * 3)).unwrap().ptr_eq(&region2));
         let start_to_hole = layout.start_to_hole();
         assert!(start_to_hole.get(&0) == Some(&(PAGE_SIZE * 3)));
     }

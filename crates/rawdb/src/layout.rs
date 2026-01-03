@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, mem};
 
+use log::debug;
 use smallvec::SmallVec;
 
 use crate::{Error, Region, Regions, Result};
@@ -229,6 +230,10 @@ impl Layout {
     /// Promote pending holes to real holes after flush.
     /// Safe to reuse now that metadata changes are durable.
     pub fn promote_pending_holes(&mut self) {
+        let count = self.pending_holes.len();
+        if count > 0 {
+            debug!("promote_pending_holes: {} pending", count);
+        }
         for (start, mut size) in mem::take(&mut self.pending_holes) {
             let mut final_start = start;
 

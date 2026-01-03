@@ -1,5 +1,6 @@
-use std::{fs::File, mem, sync::Arc};
+use std::{fs::File, mem, sync::Arc, thread};
 
+use log::debug;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::{Database, Error, Reader, RegionMetadata, Result, WeakDatabase};
@@ -13,7 +14,7 @@ use crate::{Database, Error, Reader, RegionMetadata, Result, WeakDatabase};
 pub struct Region(Arc<RegionInner>);
 
 #[derive(Debug)]
-pub struct RegionInner {
+pub(crate) struct RegionInner {
     db: WeakDatabase,
     index: usize,
     meta: RwLock<RegionMetadata>,
@@ -24,7 +25,10 @@ pub struct RegionInner {
 }
 
 impl Region {
-    pub fn new(
+    /// Maximum number of retries for write operations under contention
+    const MAX_WRITE_RETRIES: usize = 1000;
+
+    pub(crate) fn new(
         db: &Database,
         id: String,
         index: usize,
@@ -40,7 +44,7 @@ impl Region {
         }))
     }
 
-    pub fn from(db: &Database, index: usize, meta: RegionMetadata) -> Self {
+    pub(crate) fn from(db: &Database, index: usize, meta: RegionMetadata) -> Self {
         Self(Arc::new(RegionInner {
             db: db.weak_clone(),
             index,
@@ -90,6 +94,9 @@ impl Region {
     /// - `iter`: Iterator yielding (offset, value) pairs where offset is relative to region start
     /// - `value_len`: The byte size of each value
     /// - `write_fn`: Called for each (value, slice) to serialize the value into the slice
+    ///
+    /// # Panics
+    /// Panics if any write would exceed the region length or mmap bounds.
     #[inline]
     pub fn batch_write_each<T, F>(
         &self,
@@ -99,18 +106,44 @@ impl Region {
     ) where
         F: FnMut(&T, &mut [u8]),
     {
-        let region_start = self.meta().start();
+        let meta = self.meta();
+        let region_start = meta.start();
+        let region_len = meta.len();
+        drop(meta);
+
         let db = self.db();
         let mmap = db.mmap();
+        let mmap_len = mmap.len();
         let ptr = mmap.as_ptr() as *mut u8;
 
         let mut ranges = self.0.dirty_ranges.lock();
 
         for (offset, value) in iter {
-            let abs_offset = region_start + offset;
+            // Bounds check: ensure write is within region
+            let end_offset = offset
+                .checked_add(value_len)
+                .expect("offset + value_len overflow");
+            assert!(
+                end_offset <= region_len,
+                "batch_write_each: write at offset {offset} with len {value_len} exceeds region length {region_len}"
+            );
+
+            // Bounds check: ensure absolute position is within mmap
+            let abs_offset = region_start
+                .checked_add(offset)
+                .expect("region_start + offset overflow");
+            let abs_end = abs_offset
+                .checked_add(value_len)
+                .expect("abs_offset + value_len overflow");
+            assert!(
+                abs_end <= mmap_len,
+                "batch_write_each: absolute write at {abs_offset} with len {value_len} exceeds mmap length {mmap_len}"
+            );
+
+            // SAFETY: We've verified bounds above
             let slice = unsafe { std::slice::from_raw_parts_mut(ptr.add(abs_offset), value_len) };
             write_fn(&value, slice);
-            ranges.push((offset, offset + value_len));
+            ranges.push((offset, end_offset));
         }
     }
 
@@ -150,7 +183,23 @@ impl Region {
         self.write_with(data, Some(at), true)
     }
 
+    #[inline]
     fn write_with(&self, data: &[u8], at: Option<usize>, truncate: bool) -> Result<()> {
+        self.write_with_retries(data, at, truncate, 0)
+    }
+
+    #[inline]
+    fn write_with_retries(
+        &self,
+        data: &[u8],
+        at: Option<usize>,
+        truncate: bool,
+        retries: usize,
+    ) -> Result<()> {
+        if retries >= Self::MAX_WRITE_RETRIES {
+            return Err(Error::WriteRetryLimitExceeded { retries });
+        }
+
         let db = self.db();
         let index = self.index();
         let meta = self.meta();
@@ -173,11 +222,13 @@ impl Region {
             });
         }
 
+        // Offset within region where write starts (append position if at=None)
+        let write_offset = at.unwrap_or(len);
         let new_len = at.map_or(len + data_len, |at| {
             let new_len = at + data_len;
             if truncate { new_len } else { new_len.max(len) }
         });
-        let write_start = start + at.unwrap_or(len);
+        let write_start = start + write_offset;
 
         // Write to reserved space if possible
         if new_len <= reserved {
@@ -196,21 +247,35 @@ impl Region {
             return Ok(());
         }
 
-        assert!(new_len > reserved);
+        // Need to grow: validate reserved is non-zero to avoid infinite loop
         if reserved == 0 {
-            panic!(
+            return Err(Error::InvariantViolation(format!(
                 "reserved is 0 which would cause infinite loop! start={start}, len={len}, index={index}, new_len={new_len}"
-            );
+            )));
         }
+
+        // Double reserved until it fits new_len
         let mut new_reserved = reserved;
         while new_len > new_reserved {
             new_reserved = new_reserved
                 .checked_mul(2)
-                .expect("Region size would overflow usize");
+                .ok_or(Error::RegionSizeOverflow {
+                    current: new_reserved,
+                    requested: new_len,
+                })?;
         }
-        assert!(new_len <= new_reserved);
         let added_reserve = new_reserved - reserved;
 
+        // Amount of existing data to copy when relocating:
+        // - truncate=true: only copy up to write position (discard rest)
+        // - truncate=false: copy all existing data to preserve bytes after write
+        let copy_len = if truncate { write_offset } else { len };
+
+        debug!(
+            "{}: '{}' write_with acquiring layout_mut (need to grow)",
+            db,
+            self.meta().id()
+        );
         let mut layout = db.layout_mut();
 
         // If is last continue writing
@@ -228,8 +293,14 @@ impl Region {
             if !layout.is_last_anything(self) {
                 // Another region was appended while we didn't hold the lock.
                 // Fall through to the other code paths by restarting.
+                debug!(
+                    "{}: '{}' write retry (no longer last)",
+                    db,
+                    self.meta().id()
+                );
                 drop(layout);
-                return self.write_with(data, at, truncate);
+                thread::yield_now();
+                return self.write_with_retries(data, at, truncate, retries + 1);
             }
             drop(layout);
 
@@ -275,13 +346,25 @@ impl Region {
 
         // Find hole big enough to move the region
         if let Some(hole_start) = layout.find_smallest_adequate_hole(new_reserved) {
+            debug!(
+                "{}: '{}' relocating to hole at {} (need {})",
+                db,
+                self.meta().id(),
+                hole_start,
+                new_reserved
+            );
             layout.remove_or_compress_hole(hole_start, new_reserved)?;
             layout.reserve(hole_start, new_reserved);
             drop(layout);
 
-            db.copy(start, hole_start, write_start - start);
-            db.write(hole_start + at.unwrap_or(len), data);
+            db.copy(start, hole_start, copy_len)?;
+            db.write(hole_start + write_offset, data);
 
+            debug!(
+                "{}: '{}' write_with re-acquiring layout_mut (after hole relocation)",
+                db,
+                self.meta().id()
+            );
             let mut layout = db.layout_mut();
             layout.move_region(hole_start, self)?;
             assert!(layout.take_reserved(hole_start) == Some(new_reserved));
@@ -302,26 +385,51 @@ impl Region {
         // Allocate at end of file
         let new_start = layout.len();
         let target_len = new_start + new_reserved;
+        debug!(
+            "{}: '{}' allocating at end {} (need {})",
+            db,
+            self.meta().id(),
+            new_start,
+            new_reserved
+        );
         // Release layout BEFORE calling set_min_len to avoid deadlock.
         drop(layout);
 
         db.set_min_len(target_len)?;
 
         // Re-acquire layout and reserve space
+        debug!(
+            "{}: '{}' write_with re-acquiring layout_mut (after set_min_len)",
+            db,
+            self.meta().id()
+        );
         let mut layout = db.layout_mut();
         // Verify new_start is still valid (another thread may have appended)
         let current_len = layout.len();
         if current_len != new_start {
             // State changed, restart to pick the right path
+            debug!(
+                "{}: '{}' write retry (layout.len changed {} -> {})",
+                db,
+                self.meta().id(),
+                new_start,
+                current_len
+            );
             drop(layout);
-            return self.write_with(data, at, truncate);
+            thread::yield_now();
+            return self.write_with_retries(data, at, truncate, retries + 1);
         }
         layout.reserve(new_start, new_reserved);
         drop(layout);
 
-        db.copy(start, new_start, write_start - start);
-        db.write(new_start + at.unwrap_or(len), data);
+        db.copy(start, new_start, copy_len)?;
+        db.write(new_start + write_offset, data);
 
+        debug!(
+            "{}: '{}' write_with re-acquiring layout_mut (after end-of-file relocation)",
+            db,
+            self.meta().id()
+        );
         let mut layout = db.layout_mut();
         layout.move_region(new_start, self)?;
         assert!(layout.take_reserved(new_start) == Some(new_reserved));
@@ -346,6 +454,10 @@ impl Region {
     pub fn rename(&self, new_id: &str) -> Result<()> {
         let old_id = self.meta().id().to_string();
         let db = self.db();
+        debug!(
+            "{}: rename '{}' -> '{}' acquiring regions_mut",
+            db, old_id, new_id
+        );
         let mut regions = db.regions_mut();
         let mut meta = self.meta_mut();
         let index = self.index();
@@ -361,9 +473,13 @@ impl Region {
     /// the next `flush()`. This consumes the region to prevent use-after-free.
     pub fn remove(self) -> Result<()> {
         let db = self.db();
+        let id = self.meta().id().to_string();
+        debug!("{}: '{}' remove acquiring layout_mut", db, id);
         // Lock order: layout → regions
         let mut layout = db.layout_mut();
+        debug!("{}: '{}' remove acquiring regions_mut", db, id);
         let mut regions = db.regions_mut();
+        debug!("{}: '{}' remove got locks, removing", db, id);
         layout.remove_region(&self)?;
         regions.remove(&self)?;
         Ok(())
@@ -377,28 +493,39 @@ impl Region {
         let db = self.db();
         let dirty_ranges = self.take_dirty_ranges();
 
+        // Lock order: regions → mmap → meta
+        // Must acquire regions before mmap to avoid deadlock with punch_holes
+        let regions = db.regions();
+
         let data_flushed = if !dirty_ranges.is_empty() {
-            // Lock order: mmap before meta, so release meta before acquiring mmap
             let region_start = self.meta().start();
-            let mmap = db.mmap();
-            for (dirty_start, dirty_end) in &dirty_ranges {
-                mmap.flush_range(region_start + dirty_start, dirty_end - dirty_start)?;
+            let abs: Vec<_> = dirty_ranges
+                .iter()
+                .map(|(s, e)| (region_start + s, region_start + e))
+                .collect();
+            if let Err(e) = db.flush_ranges(abs) {
+                self.restore_dirty_ranges(dirty_ranges);
+                return Err(e);
             }
             true
         } else {
             false
         };
 
-        // Lock order: regions → meta
-        let regions = db.regions();
         let meta = self.meta();
         let meta_flushed = meta.flush(self.index(), &regions)?;
 
         Ok(data_flushed || meta_flushed)
     }
 
+    /// Returns true if two Region handles point to the same underlying region.
     #[inline(always)]
-    pub fn arc(&self) -> &Arc<RegionInner> {
+    pub fn ptr_eq(&self, other: &Region) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
+    #[inline(always)]
+    pub(crate) fn arc(&self) -> &Arc<RegionInner> {
         &self.0
     }
 
@@ -413,7 +540,7 @@ impl Region {
     }
 
     #[inline(always)]
-    fn meta_mut(&self) -> RwLockWriteGuard<'_, RegionMetadata> {
+    pub(crate) fn meta_mut(&self) -> RwLockWriteGuard<'_, RegionMetadata> {
         self.0.meta.write()
     }
 
@@ -442,5 +569,11 @@ impl Region {
     #[inline]
     pub(crate) fn take_dirty_ranges(&self) -> Vec<(usize, usize)> {
         mem::take(&mut *self.0.dirty_ranges.lock())
+    }
+
+    /// Restores dirty ranges (used when flush fails to allow retry).
+    #[inline]
+    pub(crate) fn restore_dirty_ranges(&self, ranges: Vec<(usize, usize)>) {
+        self.0.dirty_ranges.lock().extend(ranges);
     }
 }

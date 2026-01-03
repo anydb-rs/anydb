@@ -2,8 +2,8 @@
 
 use std::{
     collections::HashSet,
+    fmt,
     fs::{self, File, OpenOptions},
-    os::unix::io::AsRawFd,
     path::{Path, PathBuf},
     sync::{Arc, Weak},
 };
@@ -69,6 +69,7 @@ pub struct Database(Arc<DatabaseInner>);
 #[derive(Debug)]
 struct DatabaseInner {
     path: PathBuf,
+    name: String,
     // Lock order: layout → regions → mmap → file
     layout: RwLock<Layout>,
     regions: RwLock<Regions>,
@@ -84,6 +85,12 @@ impl Database {
 
     /// Opens or creates a database with a minimum initial file size.
     pub fn open_with_min_len(path: &Path, min_len: usize) -> Result<Self> {
+        let name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
         fs::create_dir_all(path)?;
 
         let file = OpenOptions::new()
@@ -92,24 +99,21 @@ impl Database {
             .write(true)
             .truncate(false)
             .open(Self::data_path_from(path))?;
-        debug!("File opened.");
 
         file.try_lock()?;
-        debug!("File locked.");
 
         let file_len = file.metadata()?.len() as usize;
         if file_len < min_len {
             file.set_len(min_len as u64)?;
-            debug!("File extended.");
             file.sync_all()?;
         }
 
         let regions = Regions::open(path)?;
         let mmap = create_mmap(&file)?;
-        debug!("Mmap created.");
 
         let db = Self(Arc::new(DatabaseInner {
             path: path.to_owned(),
+            name,
             layout: RwLock::new(Layout::default()),
             regions: RwLock::new(regions),
             mmap: RwLock::new(mmap),
@@ -117,9 +121,9 @@ impl Database {
         }));
 
         db.regions_mut().fill(&db)?;
-        debug!("Filled regions.");
         *db.layout_mut() = Layout::from(&*db.regions());
-        debug!("Layout created.");
+
+        debug!("{}: opened with {} regions", db, db.regions().len());
 
         Ok(db)
     }
@@ -141,8 +145,11 @@ impl Database {
             return Ok(());
         }
 
+        debug!("{}: set_min_len({}) acquiring mmap_mut", self, len);
         let mut mmap = self.mmap_mut();
+        debug!("{}: set_min_len acquiring file_mut", self);
         let file = self.file_mut();
+        debug!("{}: set_min_len extending file", self);
         file.set_len(len as u64)?;
         *mmap = create_mmap(&file)?;
         Ok(())
@@ -179,7 +186,9 @@ impl Database {
         }
 
         // Lock order: layout → regions
+        debug!("{}: create_region_if_needed '{}' acquiring layout_mut", self, id);
         let mut layout = self.layout_mut();
+        debug!("{}: create_region_if_needed '{}' acquiring regions_mut", self, id);
         let mut regions = self.regions_mut();
 
         // Double-check after lock (another thread may have created it)
@@ -204,8 +213,26 @@ impl Database {
         write_to_mmap(&self.mmap(), start, data);
     }
 
-    /// Copy data within the mmap, chunked to avoid excessive memory pressure
-    pub(crate) fn copy(&self, src: usize, dst: usize, len: usize) {
+    /// Copy data within the mmap, chunked to avoid excessive memory pressure.
+    ///
+    /// Returns an error if source and destination ranges overlap.
+    pub(crate) fn copy(&self, src: usize, dst: usize, len: usize) -> Result<()> {
+        if len == 0 {
+            return Ok(());
+        }
+
+        // Check for overlapping ranges
+        let src_end = src + len;
+        let dst_end = dst + len;
+        if !(src_end <= dst || dst_end <= src) {
+            return Err(Error::OverlappingCopyRanges {
+                src,
+                src_end,
+                dst,
+                dst_end,
+            });
+        }
+
         const CHUNK_SIZE: usize = GiB; // 1GB chunks
         let mmap = self.mmap();
         for offset in (0..len).step_by(CHUNK_SIZE) {
@@ -214,6 +241,16 @@ impl Database {
             let dst_start = dst + offset;
             write_to_mmap(&mmap, dst_start, &mmap[src_start..src_start + chunk_len]);
         }
+        Ok(())
+    }
+
+    /// Flushes dirty ranges to disk.
+    pub(crate) fn flush_ranges(&self, ranges: Vec<(usize, usize)>) -> Result<()> {
+        let mmap = self.mmap();
+        for (start, end) in ranges {
+            mmap.flush_range(start, end - start)?;
+        }
+        Ok(())
     }
 
     /// Removes a region by ID if it exists, otherwise does nothing.
@@ -251,10 +288,20 @@ impl Database {
             .filter_map(|id| self.get_region(id))
             .collect();
 
+        if !regions_to_remove.is_empty() {
+            debug!(
+                "{}: retain_regions removing {} regions",
+                self,
+                regions_to_remove.len()
+            );
+        }
+
         // Now remove them (read lock is released)
-        regions_to_remove
-            .into_iter()
-            .try_for_each(|region| region.remove())
+        for region in regions_to_remove {
+            debug!("{}: removing {}", self, region.meta());
+            region.remove()?;
+        }
+        Ok(())
     }
 
     /// Open a dedicated file handle for sequential reading
@@ -295,6 +342,7 @@ impl Database {
             .collect();
 
         if dirty_regions.is_empty() {
+            debug!("{}: flush (no dirty) promoting pending holes", self);
             self.layout_mut().promote_pending_holes();
             return Ok(0);
         }
@@ -334,9 +382,12 @@ impl Database {
                         acc
                     });
 
-            let mmap = self.mmap();
-            for (start, end) in merged {
-                mmap.flush_range(start, end - start)?;
+            if let Err(e) = self.flush_ranges(merged) {
+                // Restore all original ranges to their regions
+                for (region, ranges) in dirty_regions {
+                    region.restore_dirty_ranges(ranges);
+                }
+                return Err(e);
             }
         }
 
@@ -346,6 +397,11 @@ impl Database {
             region.meta().mark_clean();
         }
 
+        debug!(
+            "{}: flush ({} dirty) promoting pending holes",
+            self,
+            dirty_regions.len()
+        );
         self.layout_mut().promote_pending_holes();
         Ok(dirty_regions.len())
     }
@@ -358,114 +414,153 @@ impl Database {
         use std::time::Instant;
         let i = Instant::now();
         self.flush()?;
-        debug!("compact flush: {:?}", i.elapsed());
+        let flush_time = i.elapsed();
         let i = Instant::now();
         let r = self.punch_holes();
-        debug!("compact punch_holes: {:?}", i.elapsed());
+        let punch_time = i.elapsed();
+        debug!(
+            "{}: compact in {:?} (flush: {:?}, punch_holes: {:?})",
+            self,
+            flush_time + punch_time,
+            flush_time,
+            punch_time
+        );
         r
     }
 
     fn punch_holes(&self) -> Result<()> {
-        // Lock order: layout → regions → mmap → file
+        // Hold layout READ throughout to prevent write_with from allocating in holes.
+        debug!("{}: punch_holes acquiring layout", self);
         let layout = self.layout();
-        let regions = self.regions();
-        let mut mmap = self.mmap_mut();
-        let file = self.file_mut();
 
-        let mut punched = regions
-            .index_to_region()
-            .par_iter()
-            .flatten()
-            .map(|region| -> Result<usize> {
-                let region_meta = region.meta();
-                let rstart = region_meta.start();
-                let len = region_meta.len();
-                let reserved = region_meta.reserved();
-                let ceil_len = Self::ceil_number_to_page_size_multiple(len);
-                if unlikely(ceil_len > reserved) {
-                    return Err(Error::InvariantViolation(format!(
-                        "ceil_len ({}) > reserved ({})",
-                        ceil_len, reserved
-                    )));
-                } else if ceil_len < reserved {
-                    let start = rstart + ceil_len;
-                    let hole = reserved - ceil_len;
-                    if Self::approx_has_punchable_data(&mmap, start, hole) {
-                        HolePunch::punch(&file, start, hole)?;
-                        return Ok(1);
-                    }
-                }
-                Ok(0)
-            })
-            .sum::<Result<usize>>()?;
+        // Collect regions that may have punchable reserved space
+        let regions_to_check: Vec<Region> = {
+            let regions = self.regions();
+            regions
+                .index_to_region()
+                .iter()
+                .flatten()
+                .cloned()
+                .collect()
+        };
 
-        punched += layout
+        // Collect layout holes (protected by layout READ - can punch in parallel)
+        let layout_holes: Vec<(usize, usize)> = layout
             .start_to_hole()
-            .par_iter()
-            .map(|(&start, &hole)| -> Result<usize> {
-                if Self::approx_has_punchable_data(&mmap, start, hole) {
-                    HolePunch::punch(&file, start, hole)?;
-                    return Ok(1);
-                }
-                Ok(0)
-            })
-            .sum::<Result<usize>>()?;
+            .iter()
+            .map(|(&start, &hole)| (start, hole))
+            .collect();
 
-        if punched > 0 {
-            unsafe {
-                libc::fsync(file.as_raw_fd());
+        let file = self.file();
+        let mut punched = 0usize;
+
+        // Punch region reserved space. We MUST hold meta WRITE before checking,
+        // because write_with does db.write() BEFORE updating meta. If we only
+        // acquire WRITE after checking, a concurrent write could be in progress.
+        for region in &regions_to_check {
+            let meta = region.meta_mut();
+            let rstart = meta.start();
+            let len = meta.len();
+            let reserved = meta.reserved();
+            let ceil_len = Self::ceil_number_to_page_size_multiple(len);
+
+            if ceil_len < reserved {
+                let start = rstart + ceil_len;
+                let hole = reserved - ceil_len;
+                if Self::approx_has_punchable_data(&file, start, hole) {
+                    HolePunch::punch(&file, start, hole)?;
+                    punched += 1;
+                }
             }
+        }
+
+        // Punch layout holes in parallel (safe - layout READ prevents allocation)
+        // No per-region lock needed since these are unallocated holes.
+        let layout_punched: usize = layout_holes
+            .par_iter()
+            .filter_map(|&(start, hole)| {
+                if Self::approx_has_punchable_data(&file, start, hole) {
+                    HolePunch::punch(&file, start, hole).ok()?;
+                    Some(1)
+                } else {
+                    None
+                }
+            })
+            .sum();
+        punched += layout_punched;
+
+        drop(file);
+        drop(layout);
+
+        // Sync and recreate mmap if we punched anything
+        if punched > 0 {
+            debug!("{}: punch_holes syncing after {} punches", self, punched);
+            let mut mmap = self.mmap_mut();
+            let file = self.file_mut();
+            // sync_all syncs both data and metadata (block allocation), which is
+            // necessary for hole punching since it modifies sparse file metadata
+            file.sync_all()?;
             *mmap = create_mmap(&file)?;
         }
 
         Ok(())
     }
 
-    fn approx_has_punchable_data(mmap: &MmapMut, start: usize, len: usize) -> bool {
+    /// Check if a hole region likely contains non-zero data worth punching.
+    /// Uses pread to avoid holding mmap lock.
+    fn approx_has_punchable_data(file: &File, start: usize, len: usize) -> bool {
+        use std::os::unix::io::AsRawFd;
+
         assert!(start.is_multiple_of(PAGE_SIZE));
         assert!(len.is_multiple_of(PAGE_SIZE));
 
-        // Validate bounds before accessing mmap to prevent hangs from corrupted metadata
-        if start + len > mmap.len() {
-            debug!(
-                "approx_has_punchable_data: out of bounds - start={}, len={}, mmap_len={}",
-                start,
-                len,
-                mmap.len()
-            );
-            return false;
-        }
+        let fd = file.as_raw_fd();
+        let mut buf = [0u8; 1];
 
-        let min = start;
-        let max = start + len;
-        let check = |start, end| {
-            assert!(start >= min);
-            assert!(end < max);
-            let start_is_some = mmap[start] != 0;
-            let end_is_some = mmap[end] != 0;
-            start_is_some || end_is_some
+        let mut check_page = |page_start: usize| -> bool {
+            // Check first byte
+            let n = unsafe {
+                libc::pread(
+                    fd,
+                    buf.as_mut_ptr() as *mut libc::c_void,
+                    1,
+                    page_start as libc::off_t,
+                )
+            };
+            if n == 1 && buf[0] != 0 {
+                return true;
+            }
+
+            // Check last byte
+            let page_end = page_start + PAGE_SIZE - 1;
+            let n = unsafe {
+                libc::pread(
+                    fd,
+                    buf.as_mut_ptr() as *mut libc::c_void,
+                    1,
+                    page_end as libc::off_t,
+                )
+            };
+            n == 1 && buf[0] != 0
         };
 
-        let first_page_start = start;
-        let first_page_end = start + PAGE_SIZE - 1;
-        if check(first_page_start, first_page_end) {
+        // Check first page
+        if check_page(start) {
             return true;
         }
 
+        // Check last page
         let last_page_start = start + len - PAGE_SIZE;
-        let last_page_end = start + len - 1;
-        if check(last_page_start, last_page_end) {
+        if last_page_start != start && check_page(last_page_start) {
             return true;
         }
 
+        // For very large holes, also check at GB boundaries
         if len > GiB {
             let num_gb_checks = len / GiB;
             for i in 1..num_gb_checks {
                 let gb_boundary = start + i * GiB;
-                let page_start = gb_boundary;
-                let page_end = gb_boundary + PAGE_SIZE - 1;
-
-                if check(page_start, page_end) {
+                if check_page(gb_boundary) {
                     return true;
                 }
             }
@@ -536,6 +631,18 @@ impl Database {
     #[inline]
     pub fn weak_clone(&self) -> WeakDatabase {
         WeakDatabase(Arc::downgrade(&self.0))
+    }
+
+    /// Returns the database name (last path component) for logging.
+    #[inline]
+    pub fn name(&self) -> &str {
+        &self.0.name
+    }
+}
+
+impl fmt::Display for Database {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name())
     }
 }
 

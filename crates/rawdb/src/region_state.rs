@@ -4,6 +4,9 @@ use std::sync::{
 };
 
 /// Tracks the dirty/clean state of a region's metadata.
+///
+/// State transitions: NEEDS_WRITE -> NEEDS_FLUSH -> IS_CLEAN
+/// Uses Release/Acquire ordering to ensure proper synchronization across threads.
 #[derive(Debug, Clone)]
 pub struct RegionState(Arc<AtomicU8>);
 
@@ -26,7 +29,7 @@ impl RegionState {
 
     #[inline(always)]
     fn load(&self) -> u8 {
-        self.0.load(Ordering::Relaxed)
+        self.0.load(Ordering::Acquire)
     }
 
     #[inline(always)]
@@ -36,7 +39,7 @@ impl RegionState {
 
     #[inline(always)]
     pub fn set_is_clean(&self) {
-        self.0.store(Self::IS_CLEAN, Ordering::Relaxed);
+        self.0.store(Self::IS_CLEAN, Ordering::Release);
     }
 
     #[inline(always)]
@@ -47,7 +50,7 @@ impl RegionState {
 
     #[inline(always)]
     pub fn set_needs_flush(&self) {
-        self.0.store(Self::NEEDS_FLUSH, Ordering::Relaxed);
+        self.0.store(Self::NEEDS_FLUSH, Ordering::Release);
     }
 
     #[inline(always)]
@@ -57,6 +60,6 @@ impl RegionState {
 
     #[inline(always)]
     pub fn set_needs_write(&self) {
-        self.0.store(Self::NEEDS_WRITE, Ordering::Relaxed);
+        self.0.store(Self::NEEDS_WRITE, Ordering::Release);
     }
 }

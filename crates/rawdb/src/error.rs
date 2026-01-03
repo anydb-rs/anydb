@@ -17,7 +17,7 @@ pub enum Error {
     #[error("Region not found")]
     RegionNotFound,
 
-    #[error("Region metadata is has unwritten data")]
+    #[error("Region metadata has unwritten data")]
     RegionMetadataUnwritten,
 
     #[error("Region already exists")]
@@ -57,6 +57,20 @@ pub enum Error {
 
     #[error("Corrupted metadata: {0}")]
     CorruptedMetadata(String),
+
+    #[error("Write retry limit exceeded after {retries} attempts")]
+    WriteRetryLimitExceeded { retries: usize },
+
+    #[error("Region size would overflow: current={current}, requested={requested}")]
+    RegionSizeOverflow { current: usize, requested: usize },
+
+    #[error("Overlapping copy ranges not supported (src={src}..{src_end}, dst={dst}..{dst_end})")]
+    OverlappingCopyRanges {
+        src: usize,
+        src_end: usize,
+        dst: usize,
+        dst_end: usize,
+    },
 
     // Hole punching errors
     #[error("Failed to punch hole at offset {start} (length {len}): {source}")]

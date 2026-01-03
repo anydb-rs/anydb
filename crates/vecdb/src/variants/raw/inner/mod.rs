@@ -7,7 +7,7 @@ use std::{
     path::PathBuf,
 };
 
-use log::info;
+use log::{debug, info};
 use rawdb::{Database, Reader, Region, unlikely};
 
 use crate::{
@@ -473,7 +473,11 @@ where
 
     #[inline]
     fn region_names(&self) -> Vec<String> {
-        vec![self.index_to_name()]
+        let mut names = vec![self.index_to_name()];
+        if self.has_stored_holes {
+            names.push(self.holes_region_name());
+        }
+        names
     }
 }
 
@@ -589,9 +593,10 @@ where
             holes_region.truncate_write(0, &bytes)?;
         } else if had_holes {
             self.has_stored_holes = false;
-            self.region()
-                .db()
-                .remove_region(&self.holes_region_name())?;
+            let db = self.region().db();
+            let holes_name = self.holes_region_name();
+            debug!("{}: removing holes region '{}'", db, holes_name);
+            db.remove_region(&holes_name)?;
         }
 
         Ok(true)

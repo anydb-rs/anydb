@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::{Error, GiB, PAGE_SIZE, RegionState, Regions, Result};
 
 pub const SIZE_OF_REGION_METADATA: usize = PAGE_SIZE; // 4096 bytes for atomic writes
@@ -189,11 +191,54 @@ impl RegionMetadata {
         let reserved = u64::from_le_bytes(bytes[16..24].try_into().unwrap()) as usize;
         let id_len = u64::from_le_bytes(bytes[24..32].try_into().unwrap()) as usize;
 
+        // Check for empty/uninitialized metadata first
+        if start == 0 && len == 0 && reserved == 0 && id_len == 0 {
+            return Err(Error::EmptyMetadata);
+        }
+
+        // Validate id_len before slicing to prevent out-of-bounds access
+        if id_len > MAX_REGION_ID_LEN {
+            return Err(Error::CorruptedMetadata(format!(
+                "id_len {} exceeds maximum {}",
+                id_len, MAX_REGION_ID_LEN
+            )));
+        }
+
+        // Validate id_len fits in remaining bytes (32 bytes header + id)
+        if 32 + id_len > SIZE_OF_REGION_METADATA {
+            return Err(Error::CorruptedMetadata(format!(
+                "id_len {} would exceed metadata size",
+                id_len
+            )));
+        }
+
         let id = String::from_utf8(bytes[32..32 + id_len].to_vec())
             .map_err(|_| Error::InvalidRegionId)?;
 
-        if start == 0 && len == 0 && reserved == 0 && id_len == 0 {
-            return Err(Error::EmptyMetadata);
+        // Validate invariants that must hold for metadata
+        if !start.is_multiple_of(PAGE_SIZE) {
+            return Err(Error::CorruptedMetadata(format!(
+                "start {} is not page-aligned",
+                start
+            )));
+        }
+        if reserved < PAGE_SIZE {
+            return Err(Error::CorruptedMetadata(format!(
+                "reserved {} is less than PAGE_SIZE",
+                reserved
+            )));
+        }
+        if !reserved.is_multiple_of(PAGE_SIZE) {
+            return Err(Error::CorruptedMetadata(format!(
+                "reserved {} is not page-aligned",
+                reserved
+            )));
+        }
+        if len > reserved {
+            return Err(Error::CorruptedMetadata(format!(
+                "len {} exceeds reserved {}",
+                len, reserved
+            )));
         }
 
         Ok(Self {
@@ -203,5 +248,15 @@ impl RegionMetadata {
             reserved,
             state: RegionState::new_clean(), // Loaded from disk
         })
+    }
+}
+
+impl fmt::Display for RegionMetadata {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "'{}' (start={}, len={}, reserved={})",
+            self.id, self.start, self.len, self.reserved
+        )
     }
 }

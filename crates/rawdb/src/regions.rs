@@ -5,6 +5,7 @@ use std::{
     sync::Arc,
 };
 
+use log::debug;
 use memmap2::MmapMut;
 
 use crate::{
@@ -150,10 +151,14 @@ impl Regions {
         // We check 2, because:
         // 1. Is the passed region
         // 2. Is in self.index_to_region
-        if Arc::strong_count(region.arc()) > 2 {
-            return Err(Error::RegionStillReferenced {
-                ref_count: Arc::strong_count(region.arc()),
-            });
+        let ref_count = Arc::strong_count(region.arc());
+        debug!(
+            "regions.remove '{}': arc count = {} (expected <= 2)",
+            region.meta().id(),
+            ref_count
+        );
+        if ref_count > 2 {
+            return Err(Error::RegionStillReferenced { ref_count });
         }
 
         if self
@@ -191,6 +196,11 @@ impl Regions {
     #[inline]
     pub fn id_to_index(&self) -> &HashMap<String, usize> {
         &self.id_to_index
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.id_to_index.len()
     }
 
     #[inline]

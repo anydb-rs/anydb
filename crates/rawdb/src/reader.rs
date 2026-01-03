@@ -9,20 +9,27 @@ use crate::{Database, Region, RegionMetadata};
 /// The metadata is cloned at reader creation time, providing snapshot isolation
 /// and avoiding lock ordering deadlocks with writers.
 ///
-/// Should be dropped as soon as reading is complete to avoid blocking
-/// other mmap operations.
+/// # Important: Lock Duration
+///
+/// **Drop this reader as soon as possible.** While held, this blocks:
+/// - `set_min_len` (file growth)
+/// - `compact` / `punch_holes` (final sync phase)
+///
+/// Long-lived readers can cause other operations to hang waiting for the lock.
+/// If you need to keep data around, copy it out of the reader first.
 ///
 /// The Reader owns references to the Database and Region to ensure the
 /// underlying data structures remain valid for the lifetime of the guards.
 #[must_use = "Reader holds locks and should be used for reading"]
 pub struct Reader {
-    // These fields keep the Arc-wrapped structures alive, ensuring the guards remain valid.
-    // They must be declared AFTER the guards so they are dropped AFTER the guards.
-    // (Rust drops fields in declaration order)
-    mmap: RwLockReadGuard<'static, MmapMut>,
-    meta: RegionMetadata,
+    // SAFETY: Field order is critical! Rust drops fields in declaration order (first field first).
+    // The Arc-wrapped structures (_db, _region) MUST be declared BEFORE the guards so they are
+    // dropped AFTER the guards. This ensures the RwLock remains valid while the guard exists.
+    // DO NOT REORDER these fields without understanding the safety implications.
     _db: Database,
     _region: Region,
+    meta: RegionMetadata,
+    mmap: RwLockReadGuard<'static, MmapMut>,
 }
 
 impl Reader {
@@ -49,16 +56,17 @@ impl Reader {
         let meta = region.meta().clone();
 
         // SAFETY: The guard borrows from a RwLock inside the Arc-wrapped Database.
-        // We store a clone of this Arc in the Reader struct, and Rust drops fields in
-        // declaration order, so the guard is dropped before the Arc. This guarantees
-        // the RwLock remains valid for the entire lifetime of the guard.
+        // We store a clone of this Arc in the Reader struct. Rust drops fields in
+        // declaration order (first field first), and _db is declared BEFORE mmap,
+        // so _db is dropped AFTER mmap. This guarantees the RwLock remains valid
+        // for the entire lifetime of the guard.
         let mmap: RwLockReadGuard<'static, MmapMut> = unsafe { std::mem::transmute(db.mmap()) };
 
         Self {
-            mmap,
-            meta,
             _db: db,
             _region: region,
+            meta,
+            mmap,
         }
     }
 
