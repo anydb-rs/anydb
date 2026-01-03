@@ -362,6 +362,65 @@ where
         })
     }
 
+    /// Compute Wilder's Running Moving Average (RMA).
+    /// Uses alpha = 1/period instead of EMA's 2/(period+1).
+    /// This is the standard smoothing method for RSI.
+    pub fn compute_rma<A>(
+        &mut self,
+        max_from: V::I,
+        source: &impl CollectableVec<V::I, A>,
+        period: usize,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        V::T: From<A> + From<f32>,
+        A: VecValue + Sum,
+        f32: From<A> + From<V::T>,
+    {
+        self.validate_computed_version_or_reset(Version::new(4) + source.version())?;
+
+        self.truncate_if_needed(max_from)?;
+
+        // Wilder's smoothing: alpha = 1/period
+        let k = 1.0 / period as f32;
+        let _1_minus_k = 1.0 - k;
+
+        self.repeat_until_complete(exit, |this| {
+            let skip = this.len();
+
+            let mut prev = skip
+                .checked_sub(1)
+                .and_then(|prev_i| this.iter().get(V::I::from(prev_i)))
+                .or(Some(V::T::from(0.0)));
+
+            for (index, value) in source.iter().enumerate().skip(skip) {
+                let processed_values_count = index + 1;
+                let value = f32::from(value);
+
+                let rma = if processed_values_count > period {
+                    // After initial period: RMA = prev * (1 - 1/period) + current * (1/period)
+                    let prev = f32::from(prev.as_ref().unwrap().clone());
+                    let prev = if prev.is_nan() { 0.0 } else { prev };
+                    V::T::from((value * k) + (prev * _1_minus_k))
+                } else {
+                    // Initial period: use SMA (cumulative average)
+                    let len = processed_values_count.min(period);
+                    let prev = f32::from(prev.as_ref().unwrap().clone());
+                    V::T::from((prev * (len - 1) as f32 + value) / len as f32)
+                };
+
+                prev.replace(rma.clone());
+                this.checked_push_at(index, rma)?;
+
+                if this.batch_limit_reached() {
+                    break;
+                }
+            }
+
+            Ok(())
+        })
+    }
+
     fn compute_all_time_extreme<A, F>(
         &mut self,
         max_from: V::I,
