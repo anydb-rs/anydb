@@ -68,7 +68,7 @@ where
 
         Self {
             name: name.to_string(),
-            version,
+            version: version + source1.version() + source2.version() + source3.version(),
             source1,
             source2,
             source3,

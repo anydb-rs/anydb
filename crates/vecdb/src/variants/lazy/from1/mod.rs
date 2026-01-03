@@ -55,7 +55,7 @@ where
 
         Self {
             name: name.to_string(),
-            version,
+            version: version + source.version(),
             source,
             compute,
         }
