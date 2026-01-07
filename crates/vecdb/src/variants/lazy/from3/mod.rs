@@ -26,7 +26,7 @@ where
     S3T: Clone,
 {
     name: String,
-    version: Version,
+    base_version: Version,
     source1: IterableBoxedVec<S1I, S1T>,
     source2: IterableBoxedVec<S2I, S2T>,
     source3: IterableBoxedVec<S3I, S3T>,
@@ -68,7 +68,7 @@ where
 
         Self {
             name: name.to_string(),
-            version: version + source1.version() + source2.version() + source3.version(),
+            base_version: version,
             source1,
             source2,
             source3,
@@ -77,7 +77,7 @@ where
     }
 
     fn version(&self) -> Version {
-        self.version
+        self.base_version + self.source1.version() + self.source2.version() + self.source3.version()
     }
 }
 

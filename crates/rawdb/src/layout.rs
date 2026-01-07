@@ -229,10 +229,10 @@ impl Layout {
 
     /// Promote pending holes to real holes after flush.
     /// Safe to reuse now that metadata changes are durable.
-    pub fn promote_pending_holes(&mut self) {
+    pub fn promote_pending_holes(&mut self, name: &str) {
         let count = self.pending_holes.len();
         if count > 0 {
-            debug!("promote_pending_holes: {} pending", count);
+            debug!("{}: promoted {} pending holes", name, count);
         }
         for (start, mut size) in mem::take(&mut self.pending_holes) {
             let mut final_start = start;

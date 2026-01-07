@@ -1,6 +1,6 @@
 use std::{fs::File, mem, sync::Arc, thread};
 
-use log::debug;
+use log::{debug, trace};
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::{Database, Error, Reader, RegionMetadata, Result, WeakDatabase};
@@ -271,7 +271,7 @@ impl Region {
         // - truncate=false: copy all existing data to preserve bytes after write
         let copy_len = if truncate { write_offset } else { len };
 
-        debug!(
+        trace!(
             "{}: '{}' write_with acquiring layout_mut (need to grow)",
             db,
             self.meta().id()
@@ -360,7 +360,7 @@ impl Region {
             db.copy(start, hole_start, copy_len)?;
             db.write(hole_start + write_offset, data);
 
-            debug!(
+            trace!(
                 "{}: '{}' write_with re-acquiring layout_mut (after hole relocation)",
                 db,
                 self.meta().id()
@@ -398,7 +398,7 @@ impl Region {
         db.set_min_len(target_len)?;
 
         // Re-acquire layout and reserve space
-        debug!(
+        trace!(
             "{}: '{}' write_with re-acquiring layout_mut (after set_min_len)",
             db,
             self.meta().id()
@@ -425,7 +425,7 @@ impl Region {
         db.copy(start, new_start, copy_len)?;
         db.write(new_start + write_offset, data);
 
-        debug!(
+        trace!(
             "{}: '{}' write_with re-acquiring layout_mut (after end-of-file relocation)",
             db,
             self.meta().id()
@@ -454,7 +454,8 @@ impl Region {
     pub fn rename(&self, new_id: &str) -> Result<()> {
         let old_id = self.meta().id().to_string();
         let db = self.db();
-        debug!(
+        debug!("{}: rename '{}' -> '{}'", db, old_id, new_id);
+        trace!(
             "{}: rename '{}' -> '{}' acquiring regions_mut",
             db, old_id, new_id
         );
@@ -474,12 +475,13 @@ impl Region {
     pub fn remove(self) -> Result<()> {
         let db = self.db();
         let id = self.meta().id().to_string();
-        debug!("{}: '{}' remove acquiring layout_mut", db, id);
+        debug!("{}: '{}' remove", db, id);
+        trace!("{}: '{}' remove acquiring layout_mut", db, id);
         // Lock order: layout → regions
         let mut layout = db.layout_mut();
-        debug!("{}: '{}' remove acquiring regions_mut", db, id);
+        trace!("{}: '{}' remove acquiring regions_mut", db, id);
         let mut regions = db.regions_mut();
-        debug!("{}: '{}' remove got locks, removing", db, id);
+        trace!("{}: '{}' remove got locks", db, id);
         layout.remove_region(&self)?;
         regions.remove(&self)?;
         Ok(())

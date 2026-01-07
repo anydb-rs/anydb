@@ -8,7 +8,7 @@ use std::{
     sync::{Arc, Weak},
 };
 
-use log::debug;
+use log::{debug, trace};
 use memmap2::MmapMut;
 use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -145,11 +145,12 @@ impl Database {
             return Ok(());
         }
 
-        debug!("{}: set_min_len({}) acquiring mmap_mut", self, len);
+        debug!("{}: set_min_len({})", self, len);
+        trace!("{}: set_min_len acquiring mmap_mut", self);
         let mut mmap = self.mmap_mut();
-        debug!("{}: set_min_len acquiring file_mut", self);
+        trace!("{}: set_min_len acquiring file_mut", self);
         let file = self.file_mut();
-        debug!("{}: set_min_len extending file", self);
+        trace!("{}: set_min_len extending file", self);
         file.set_len(len as u64)?;
         *mmap = create_mmap(&file)?;
         Ok(())
@@ -186,9 +187,10 @@ impl Database {
         }
 
         // Lock order: layout → regions
-        debug!("{}: create_region_if_needed '{}' acquiring layout_mut", self, id);
+        debug!("{}: create_region_if_needed '{}'", self, id);
+        trace!("{}: create_region_if_needed '{}' acquiring layout_mut", self, id);
         let mut layout = self.layout_mut();
-        debug!("{}: create_region_if_needed '{}' acquiring regions_mut", self, id);
+        trace!("{}: create_region_if_needed '{}' acquiring regions_mut", self, id);
         let mut regions = self.regions_mut();
 
         // Double-check after lock (another thread may have created it)
@@ -342,8 +344,8 @@ impl Database {
             .collect();
 
         if dirty_regions.is_empty() {
-            debug!("{}: flush (no dirty) promoting pending holes", self);
-            self.layout_mut().promote_pending_holes();
+            debug!("{}: flush (no dirty)", self);
+            self.layout_mut().promote_pending_holes(self.name());
             return Ok(0);
         }
 
@@ -397,12 +399,8 @@ impl Database {
             region.meta().mark_clean();
         }
 
-        debug!(
-            "{}: flush ({} dirty) promoting pending holes",
-            self,
-            dirty_regions.len()
-        );
-        self.layout_mut().promote_pending_holes();
+        debug!("{}: flushed {} regions", self, dirty_regions.len());
+        self.layout_mut().promote_pending_holes(self.name());
         Ok(dirty_regions.len())
     }
 
@@ -430,7 +428,7 @@ impl Database {
 
     fn punch_holes(&self) -> Result<()> {
         // Hold layout READ throughout to prevent write_with from allocating in holes.
-        debug!("{}: punch_holes acquiring layout", self);
+        trace!("{}: punch_holes acquiring layout", self);
         let layout = self.layout();
 
         // Collect regions that may have punchable reserved space

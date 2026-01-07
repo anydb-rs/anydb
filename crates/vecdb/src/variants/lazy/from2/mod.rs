@@ -26,7 +26,7 @@ where
     S2T: Clone,
 {
     name: String,
-    version: Version,
+    base_version: Version,
     source1: IterableBoxedVec<S1I, S1T>,
     source2: IterableBoxedVec<S2I, S2T>,
     compute: ComputeFrom2<I, T, S1I, S1T, S2I, S2T>,
@@ -62,7 +62,7 @@ where
 
         Self {
             name: name.to_string(),
-            version: version + source1.version() + source2.version(),
+            base_version: version,
             source1,
             source2,
             compute,
@@ -70,7 +70,7 @@ where
     }
 
     fn version(&self) -> Version {
-        self.version
+        self.base_version + self.source1.version() + self.source2.version()
     }
 
     /// Read a single value at the given index.
