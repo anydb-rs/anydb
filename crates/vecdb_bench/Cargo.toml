@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 fjall2 = { version = "2.11.2", package = "fjall" }
-fjall3 = { version = "3.0.0-rc.6", package = "fjall" }
+fjall3 = { version = "3.0.1", package = "fjall" }
 heed = "0.22.0"
 redb = "3.1.0"
 vecdb = { workspace = true, features = ["pco"] }

@@ -6,7 +6,7 @@ package.edition = "2024"
 package.version = "0.5.5"
 package.homepage = "https://github.com/anydb-rs/anydb"
 package.repository = "https://github.com/anydb-rs/anydb"
-package.readme = "README.md"
+package.readme = "docs/README.md"
 package.keywords = ["vec", "disk", "database"]
 package.categories = ["database"]
 
