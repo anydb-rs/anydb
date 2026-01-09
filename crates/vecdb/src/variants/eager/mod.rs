@@ -199,6 +199,10 @@ where
     fn remove(self) -> Result<()> {
         self.0.remove()
     }
+
+    fn any_reset(&mut self) -> Result<()> {
+        self.reset()
+    }
 }
 
 impl<V> GenericStoredVec<V::I, V::T> for EagerVec<V>

@@ -406,6 +406,10 @@ where
     fn remove(self) -> Result<()> {
         Self::remove(self)
     }
+
+    fn any_reset(&mut self) -> Result<()> {
+        <Self as GenericStoredVec<I, T>>::reset(self)
+    }
 }
 
 impl<I, T, S> GenericStoredVec<I, T> for CompressedVecInner<I, T, S>

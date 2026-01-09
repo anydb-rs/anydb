@@ -185,6 +185,10 @@ macro_rules! impl_vec_wrapper {
             fn remove(self) -> $crate::Result<()> {
                 self.0.remove()
             }
+
+            fn any_reset(&mut self) -> $crate::Result<()> {
+                $crate::GenericStoredVec::reset(self)
+            }
         }
 
         impl<I, T> $crate::GenericStoredVec<I, T> for $wrapper<I, T>

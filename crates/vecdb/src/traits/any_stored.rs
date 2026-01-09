@@ -75,4 +75,7 @@ pub trait AnyStoredVec: AnyVec {
 
     /// Removes this vector's region from the database.
     fn remove(self) -> Result<()>;
+
+    /// Resets the vector state, clearing all data.
+    fn any_reset(&mut self) -> Result<()>;
 }

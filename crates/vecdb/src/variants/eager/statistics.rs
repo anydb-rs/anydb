@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     iter::Sum,
-    ops::{Div, Sub},
+    ops::{AddAssign, Div, Sub, SubAssign},
 };
 
 use crate::{
@@ -167,6 +167,64 @@ where
 
                 prev.replace(sum.clone());
                 this.checked_push_at(i, sum)?;
+
+                if this.batch_limit_reached() {
+                    break;
+                }
+            }
+
+            Ok(())
+        })
+    }
+
+    /// Compute rolling sum with variable window starts.
+    /// For each index i, computes sum of values from window_starts[i] to i (inclusive).
+    pub fn compute_rolling_sum<A>(
+        &mut self,
+        max_from: V::I,
+        window_starts: &impl IterableVec<V::I, V::I>,
+        values: &impl IterableVec<V::I, A>,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        A: VecValue,
+        V::T: From<A> + Default + AddAssign + SubAssign,
+    {
+        self.validate_computed_version_or_reset(window_starts.version() + values.version())?;
+
+        self.truncate_if_needed(max_from)?;
+
+        self.repeat_until_complete(exit, |this| {
+            let skip = this.len();
+
+            // Initialize running sum and prev_start from previous state
+            let mut values_iter = values.iter();
+
+            let (mut running_sum, mut prev_start) = if skip > 0 {
+                let prev_idx = V::I::from(skip - 1);
+                let prev_start = window_starts.iter().get_unwrap(prev_idx);
+                let sum = this.iter().get_unwrap(prev_idx);
+                (sum, prev_start)
+            } else {
+                (V::T::default(), V::I::from(0))
+            };
+
+            for (i, (start, value)) in window_starts
+                .iter()
+                .zip(values.iter())
+                .enumerate()
+                .skip(skip)
+            {
+                // Add current value to sum
+                running_sum += V::T::from(value);
+
+                // Subtract values that fell out of the window
+                while prev_start < start {
+                    running_sum -= V::T::from(values_iter.get_unwrap(prev_start));
+                    prev_start = V::I::from(prev_start.to_usize() + 1);
+                }
+
+                this.checked_push_at(i, running_sum.clone())?;
 
                 if this.batch_limit_reached() {
                     break;
