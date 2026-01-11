@@ -93,6 +93,11 @@ where
     }
 
     #[inline]
+    pub fn reserve_pushed(&mut self, additional: usize) {
+        self.pushed.current_mut().reserve(additional);
+    }
+
+    #[inline]
     pub fn prev_pushed(&self) -> &[T] {
         self.pushed.previous()
     }

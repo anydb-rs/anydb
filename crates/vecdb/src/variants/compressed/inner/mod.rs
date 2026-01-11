@@ -192,6 +192,11 @@ where
     }
 
     #[inline]
+    pub fn reserve_pushed(&mut self, additional: usize) {
+        self.base.reserve_pushed(additional);
+    }
+
+    #[inline]
     pub(crate) fn pages(&self) -> &Arc<RwLock<Pages>> {
         &self.pages
     }

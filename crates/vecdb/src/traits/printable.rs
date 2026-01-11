@@ -14,10 +14,61 @@ pub fn short_type_name<T: 'static>() -> &'static str {
         return short;
     }
 
-    let short_owned = full.rsplit("::").next().unwrap_or(full).to_string();
+    let short_owned = shorten_type_name(full);
+
     let short: &'static str = Box::leak(short_owned.into_boxed_str());
     guard.insert(full, short);
     short
+}
+
+/// Shortens a type name by removing path prefixes, including inside generics.
+/// `some::module::Close<another::path::Dollars>` -> `Close<Dollars>`
+fn shorten_type_name(full: &str) -> String {
+    // Find where generic params start (if any)
+    let generic_start = full.find('<');
+
+    let (base, generics) = match generic_start {
+        Some(pos) => (&full[..pos], Some(&full[pos + 1..full.len() - 1])),
+        None => (full, None),
+    };
+
+    // Shorten the base type (take last segment after ::)
+    let short_base = base.rsplit("::").next().unwrap_or(base);
+
+    match generics {
+        Some(params) => {
+            // Recursively shorten each generic parameter
+            let shortened_params = split_generic_params(params)
+                .into_iter()
+                .map(|p| shorten_type_name(p.trim()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{}<{}>", short_base, shortened_params)
+        }
+        None => short_base.to_string(),
+    }
+}
+
+/// Split generic parameters respecting nested angle brackets.
+/// `A, B<C, D>, E` -> ["A", "B<C, D>", "E"]
+fn split_generic_params(params: &str) -> Vec<&str> {
+    let mut result = Vec::new();
+    let mut depth = 0;
+    let mut start = 0;
+
+    for (i, c) in params.char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' => depth -= 1,
+            ',' if depth == 0 => {
+                result.push(&params[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    result.push(&params[start..]);
+    result
 }
 
 /// Provides string representations of index types for display and region naming.

@@ -410,6 +410,11 @@ where
     }
 
     #[inline]
+    pub fn reserve_pushed(&mut self, additional: usize) {
+        self.base.reserve_pushed(additional);
+    }
+
+    #[inline]
     pub fn index_to_name(&self) -> String {
         vec_region_name_with::<I>(self.name())
     }
