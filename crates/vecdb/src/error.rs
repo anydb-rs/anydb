@@ -79,6 +79,30 @@ pub enum Error {
     Underflow,
 }
 
+impl Error {
+    /// Returns true if this error is due to a file lock (another process has the database open).
+    /// Lock errors are transient and should not trigger data deletion.
+    pub fn is_lock_error(&self) -> bool {
+        matches!(self, Error::TryLockError(_))
+    }
+
+    /// Returns true if this error indicates data corruption or version incompatibility.
+    /// These errors may require resetting/deleting the data to recover.
+    pub fn is_data_error(&self) -> bool {
+        matches!(
+            self,
+            Error::DifferentVersion { .. }
+                | Error::DifferentFormat { .. }
+                | Error::StampMismatch { .. }
+                | Error::CorruptedRegion { .. }
+                | Error::DecompressionMismatch { .. }
+                | Error::WrongEndian
+                | Error::WrongLength { .. }
+                | Error::InvalidFormat(_)
+        )
+    }
+}
+
 #[cfg(feature = "zerocopy")]
 impl<A, B, C> From<zerocopy::error::ConvertError<A, B, C>> for Error {
     fn from(_: zerocopy::error::ConvertError<A, B, C>) -> Self {

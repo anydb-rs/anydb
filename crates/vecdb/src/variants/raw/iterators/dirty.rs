@@ -155,16 +155,8 @@ where
             }
         }
 
-        // Slow path: need to check each element for holes/updates
-        for _ in 0..n {
-            if self.index >= self.vec_len() {
-                self.index = self.vec_len();
-                return None;
-            } else if self.index < self.stored_len {
-                self.skip_stored_element();
-            }
-            self.index += 1;
-        }
+        // With holes/updates: use set_position_to for O(1) seek
+        self.set_position_to(new_index);
         self.next()
     }
 
