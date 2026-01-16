@@ -89,18 +89,30 @@ impl Error {
     /// Returns true if this error indicates data corruption or version incompatibility.
     /// These errors may require resetting/deleting the data to recover.
     pub fn is_data_error(&self) -> bool {
-        matches!(
-            self,
+        match self {
+            Error::IO(io_err) => is_io_data_error(io_err),
+            Error::RawDB(rawdb::Error::IO(io_err)) => is_io_data_error(io_err),
+            Error::RawDB(rawdb::Error::CorruptedMetadata(_)) => true,
+            Error::RawDB(rawdb::Error::InvalidMetadataSize { .. }) => true,
+            Error::RawDB(rawdb::Error::EmptyMetadata) => true,
             Error::DifferentVersion { .. }
-                | Error::DifferentFormat { .. }
-                | Error::StampMismatch { .. }
-                | Error::CorruptedRegion { .. }
-                | Error::DecompressionMismatch { .. }
-                | Error::WrongEndian
-                | Error::WrongLength { .. }
-                | Error::InvalidFormat(_)
-        )
+            | Error::DifferentFormat { .. }
+            | Error::StampMismatch { .. }
+            | Error::CorruptedRegion { .. }
+            | Error::DecompressionMismatch { .. }
+            | Error::WrongEndian
+            | Error::WrongLength { .. }
+            | Error::InvalidFormat(_) => true,
+            _ => false,
+        }
     }
+}
+
+fn is_io_data_error(io_err: &io::Error) -> bool {
+    matches!(
+        io_err.kind(),
+        io::ErrorKind::IsADirectory | io::ErrorKind::NotADirectory
+    )
 }
 
 #[cfg(feature = "zerocopy")]
