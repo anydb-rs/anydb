@@ -6,6 +6,7 @@ use rawdb::{Database, Reader, Region};
 mod aggregates;
 mod arithmetic;
 mod checked_sub;
+mod cumulative;
 mod lookback;
 mod saturating_add;
 mod statistics;
