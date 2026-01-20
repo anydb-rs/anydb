@@ -10,6 +10,15 @@ pub trait CompressionStrategy<T>: RawStrategy<T> {
     /// Decompress bytes into a vector of values.
     fn decompress(bytes: &[u8], expected_len: usize) -> Result<Vec<T>>;
 
+    /// Decompress bytes into an existing buffer, avoiding allocation.
+    /// The buffer will be cleared and filled with decompressed values.
+    /// Default implementation falls back to `decompress`.
+    #[inline]
+    fn decompress_into(bytes: &[u8], expected_len: usize, dst: &mut Vec<T>) -> Result<()> {
+        *dst = Self::decompress(bytes, expected_len)?;
+        Ok(())
+    }
+
     /// Serializes a slice of values to bytes.
     #[inline]
     fn values_to_bytes(values: &[T]) -> Vec<u8> {

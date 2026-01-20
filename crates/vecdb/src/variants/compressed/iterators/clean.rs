@@ -158,7 +158,7 @@ where
         let in_buffer_offset = (compressed_offset - buffer_start_offset) as usize;
         let compressed_data = &self.buffer[in_buffer_offset..in_buffer_offset + compressed_size];
 
-        self.decoded_values = S::decompress(compressed_data, values_count).ok()?;
+        S::decompress_into(compressed_data, values_count, &mut self.decoded_values).ok()?;
         self.decoded_page_index = page_index;
 
         Some(())

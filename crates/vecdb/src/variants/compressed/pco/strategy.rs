@@ -1,14 +1,19 @@
 use std::marker::PhantomData;
 
-use pco::standalone::{simple_decompress, simpler_compress};
+use pco::ChunkConfig;
+use pco::standalone::{simple_compress, simple_decompress, simple_decompress_into};
 
 use crate::{Error, RawStrategy, Result, likely};
 
-use super::{super::inner::CompressionStrategy, value::{AsInnerSlice, FromInnerSlice, PcoVecValue}};
+use super::{
+    super::inner::CompressionStrategy,
+    value::{AsInnerSlice, FromInnerSlice, PcoVecValue},
+};
 
-/// Pcodec compression level (0-12). Level 4 provides good compression
-/// for most numeric data while maintaining reasonable compression speed.
-const PCO_COMPRESSION_LEVEL: usize = 4;
+/// Returns the default ChunkConfig for pcodec compression.
+fn chunk_config() -> ChunkConfig {
+    ChunkConfig::default().with_enable_8_bit(true)
+}
 
 /// Pcodec compression strategy for numerical data.
 #[derive(Debug, Clone, Copy)]
@@ -39,7 +44,7 @@ where
     T: PcoVecValue,
 {
     fn compress(values: &[T]) -> Result<Vec<u8>> {
-        Ok(simpler_compress(values.as_inner_slice(), PCO_COMPRESSION_LEVEL)?)
+        Ok(simple_compress(values.as_inner_slice(), &chunk_config())?)
     }
 
     fn decompress(bytes: &[u8], expected_len: usize) -> Result<Vec<T>> {
@@ -53,6 +58,35 @@ where
         Err(Error::DecompressionMismatch {
             expected_len,
             actual_len: vec.len(),
+        })
+    }
+
+    fn decompress_into(bytes: &[u8], expected_len: usize, dst: &mut Vec<T>) -> Result<()> {
+        dst.clear();
+        dst.reserve(expected_len);
+
+        // SAFETY: MaybeUninit<T::NumberType> has the same layout as T::NumberType.
+        // simple_decompress_into will initialize the memory, and we only set_len
+        // after initialization succeeds.
+        let spare = dst.spare_capacity_mut();
+        let slice = unsafe {
+            std::slice::from_raw_parts_mut(spare.as_mut_ptr().cast::<T::NumberType>(), expected_len)
+        };
+
+        let progress = simple_decompress_into(bytes, slice)?;
+
+        // SAFETY: simple_decompress_into initialized progress.n_processed elements.
+        unsafe {
+            dst.set_len(progress.n_processed);
+        }
+
+        if likely(progress.n_processed == expected_len) {
+            return Ok(());
+        }
+
+        Err(Error::DecompressionMismatch {
+            expected_len,
+            actual_len: progress.n_processed,
         })
     }
 }

@@ -25,7 +25,7 @@ pub use strategy::*;
 /// 16 KiB balances these trade-offs for typical workloads.
 pub(crate) const MAX_UNCOMPRESSED_PAGE_SIZE: usize = 16 * 1024;
 
-const VERSION: Version = Version::TWO;
+const VERSION: Version = Version::new(3);
 
 /// Inner implementation for compressed storage vectors.
 /// Parameterized by compression strategy to support different compression algorithms.

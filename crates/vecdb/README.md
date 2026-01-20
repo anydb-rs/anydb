@@ -305,3 +305,24 @@ cargo run --example pcodec --features pco
 See [vecdb_bench](../vecdb_bench/README.md) for detailed benchmarks.
 
 vecdb is significantly faster than general-purpose embedded databases for fixed-size data workloads.
+
+### PcoVec SIMD Optimization
+
+For best `PcoVec` decompression performance on x86_64, compile with BMI and AVX2 instructions enabled:
+
+```toml
+# .cargo/config.toml
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-feature=+bmi1,+bmi2,+avx2"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "target-feature=+bmi1,+bmi2,+avx2"]
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+bmi1,+bmi2,+avx2"]
+```
+
+Or build with:
+```bash
+RUSTFLAGS="-C target-feature=+bmi1,+bmi2,+avx2" cargo build --release
+```

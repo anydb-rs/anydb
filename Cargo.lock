@@ -273,9 +273,9 @@ dependencies = [
 
 [[package]]
 name = "dtype_dispatch"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3a5ccdfd6c5e7e2fea9c5cf256f2a08216047fab19c621c3da64e9ae4a1462d"
+checksum = "63cb69518c750a905135325cb009ffb24e1dff48cfc7bee026cd8e7e90d14f26"
 
 [[package]]
 name = "dyn-clone"
@@ -855,9 +855,9 @@ dependencies = [
 
 [[package]]
 name = "pco"
-version = "0.4.9"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42382de9fb564e2d10cb4d5ca97cc06d928f0f9667bbef456b57e60827b6548b"
+checksum = "4acf50a078a796b341d327c18a0d3b2d2ca7dd630f04958558608169e2686e87"
 dependencies = [
  "better_io",
  "dtype_dispatch",
