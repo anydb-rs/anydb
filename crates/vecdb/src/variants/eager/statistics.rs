@@ -576,6 +576,78 @@ where
         )
     }
 
+    /// Computes the all time high starting from a specific index.
+    /// Values before `from` will be the default value (typically 0).
+    pub fn compute_all_time_high_from<A>(
+        &mut self,
+        max_from: V::I,
+        source: &impl IterableVec<V::I, A>,
+        from: V::I,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        V::T: From<A> + Ord + Default + Copy,
+        A: VecValue,
+    {
+        let from_usize = from.to_usize();
+        let mut prev: Option<V::T> = None;
+        self.compute_transform(
+            max_from,
+            source,
+            |(i, v, this)| {
+                let idx = i.to_usize();
+                if prev.is_none() {
+                    prev = Some(if idx > 0 {
+                        this.read_at_unwrap_once(idx - 1)
+                    } else {
+                        V::T::default()
+                    });
+                }
+                if idx >= from_usize {
+                    *prev.as_mut().unwrap() = prev.unwrap().max(V::T::from(v));
+                }
+                (i, prev.unwrap())
+            },
+            exit,
+        )
+    }
+
+    /// Computes the all time low starting from a specific index.
+    /// Values before `from` will be the default value (typically 0).
+    pub fn compute_all_time_low_from<A>(
+        &mut self,
+        max_from: V::I,
+        source: &impl IterableVec<V::I, A>,
+        from: V::I,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        V::T: From<A> + Ord + Default + Copy,
+        A: VecValue,
+    {
+        let from_usize = from.to_usize();
+        let mut prev: Option<V::T> = None;
+        self.compute_transform(
+            max_from,
+            source,
+            |(i, v, this)| {
+                let idx = i.to_usize();
+                if prev.is_none() {
+                    prev = Some(if idx > 0 {
+                        this.read_at_unwrap_once(idx - 1)
+                    } else {
+                        V::T::default()
+                    });
+                }
+                if idx >= from_usize {
+                    *prev.as_mut().unwrap() = prev.unwrap().min(V::T::from(v));
+                }
+                (i, prev.unwrap())
+            },
+            exit,
+        )
+    }
+
     pub fn compute_zscore<A, B, C>(
         &mut self,
         max_from: V::I,
