@@ -9,8 +9,7 @@ name = "vecdb_bench"
 path = "src/main.rs"
 
 [dependencies]
-fjall2 = { version = "2.11.2", package = "fjall" }
-fjall3 = { version = "3.0.1", package = "fjall" }
+fjall = "3.0.1"
 heed = "0.22.0"
 redb = "3.1.0"
 vecdb = { workspace = true, features = ["pco"] }

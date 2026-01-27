@@ -8,8 +8,7 @@ fn main() {
             databases: vec![
                 Database::PcoVec,
                 Database::BytesVec,
-                Database::Fjall3,
-                Database::Fjall2,
+                Database::Fjall,
                 Database::Redb,
                 Database::Lmdb,
             ],

@@ -15,8 +15,7 @@ pub const NUM_ITERATIONS: usize = 10;
 pub enum Database {
     PcoVec,
     BytesVec,
-    Fjall2,
-    Fjall3,
+    Fjall,
     Redb,
     Lmdb,
 }
@@ -26,8 +25,7 @@ impl Database {
         vec![
             Database::PcoVec,
             Database::BytesVec,
-            Database::Fjall3,
-            Database::Fjall2,
+            Database::Fjall,
             Database::Redb,
             Database::Lmdb,
         ]

@@ -1,19 +1,19 @@
 use std::path::Path;
 
 use anyhow::Result;
-use fjall3::{
+use fjall::{
     KeyspaceCreateOptions, PersistMode, Readable, SingleWriterTxDatabase, SingleWriterTxKeyspace,
 };
 use rayon::prelude::*;
 
 use crate::database::DatabaseBenchmark;
 
-pub struct Fjall3Bench {
+pub struct FjallBench {
     database: SingleWriterTxDatabase,
     keyspace: SingleWriterTxKeyspace,
 }
 
-impl DatabaseBenchmark for Fjall3Bench {
+impl DatabaseBenchmark for FjallBench {
     fn name() -> &'static str {
         "fjall3"
     }

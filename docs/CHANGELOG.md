@@ -7,6 +7,228 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.6.2](https://github.com/anydb-rs/anydb/releases/tag/v0.6.2) - 2026-01-26
+
+### New Features
+#### `vecdb`
+- Added `compute_cumulative_count()` method to `EagerVec` for counting values matching a predicate cumulatively ([source](https://github.com/anydb-rs/anydb/blob/v0.6.2/crates/vecdb/src/variants/eager/cumulative.rs))
+- Added `compute_rolling_count()` method to `EagerVec` for counting values matching a predicate within a rolling window using efficient ring buffer ([source](https://github.com/anydb-rs/anydb/blob/v0.6.2/crates/vecdb/src/variants/eager/cumulative.rs))
+- Added `compute_cumulative_count_from()` method to `EagerVec` for cumulative counting starting from a specific index, with zeros before the start index ([source](https://github.com/anydb-rs/anydb/blob/v0.6.2/crates/vecdb/src/variants/eager/cumulative.rs))
+- Added `compute_all_time_high_from()` method to `EagerVec` for computing all-time high starting from a specific index, with default values before the start index ([source](https://github.com/anydb-rs/anydb/blob/v0.6.2/crates/vecdb/src/variants/eager/statistics.rs))
+- Added `compute_all_time_low_from()` method to `EagerVec` for computing all-time low starting from a specific index, with default values before the start index ([source](https://github.com/anydb-rs/anydb/blob/v0.6.2/crates/vecdb/src/variants/eager/statistics.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.6.1...v0.6.2)
+
+## [v0.6.1](https://github.com/anydb-rs/anydb/releases/tag/v0.6.1) - 2026-01-21
+
+### New Features
+#### `vecdb`
+- Added `compute_cumulative()` method to `EagerVec` for computing cumulative sum where each value is the sum of all source values up to and including that index ([source](https://github.com/anydb-rs/anydb/blob/v0.6.1/crates/vecdb/src/variants/eager/cumulative.rs))
+- Added `compute_cumulative_binary()` method to `EagerVec` for computing cumulative sum from adding two source vecs element-wise ([source](https://github.com/anydb-rs/anydb/blob/v0.6.1/crates/vecdb/src/variants/eager/cumulative.rs))
+- Added `compute_cumulative_transformed_binary()` method to `EagerVec` for computing cumulative sum with a custom binary transform of two source vecs ([source](https://github.com/anydb-rs/anydb/blob/v0.6.1/crates/vecdb/src/variants/eager/cumulative.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.6.0...v0.6.1)
+
+## [v0.6.0](https://github.com/anydb-rs/anydb/releases/tag/v0.6.0) - 2026-01-20
+
+### Breaking Changes
+#### `vecdb`
+- Bumped compressed vec storage version from 2 to 3, existing pco-compressed data from v0.5.x must be regenerated ([source](https://github.com/anydb-rs/anydb/blob/v0.6.0/crates/vecdb/src/variants/compressed/inner/mod.rs))
+- Upgraded pco dependency from 0.4.9 to 1.0.0, changing compression API and default settings
+
+### New Features
+#### `vecdb`
+- Added `decompress_into()` method to `CompressionStrategy` trait for zero-allocation decompression with buffer reuse ([source](https://github.com/anydb-rs/anydb/blob/v0.6.0/crates/vecdb/src/variants/compressed/inner/strategy.rs))
+- Implemented optimized `decompress_into()` for `PcoStrategy` using pco's `simple_decompress_into` for direct buffer writes ([source](https://github.com/anydb-rs/anydb/blob/v0.6.0/crates/vecdb/src/variants/compressed/pco/strategy.rs))
+- Added `AsInnerSliceMut` trait for mutable slice conversion of pco values ([source](https://github.com/anydb-rs/anydb/blob/v0.6.0/crates/vecdb/src/variants/compressed/pco/value.rs))
+- Added `pco_bench` example for benchmarking different pco compression levels and buffer reuse speedup ([source](https://github.com/anydb-rs/anydb/blob/v0.6.0/crates/vecdb/examples/pco_bench.rs))
+- Added README documentation about SIMD optimization flags (BMI1, BMI2, AVX2) for best PcoVec decompression performance ([source](https://github.com/anydb-rs/anydb/blob/v0.6.0/crates/vecdb/README.md))
+
+### Internal Changes
+#### `vecdb`
+- Changed pco compression from `simpler_compress` with hardcoded level to `simple_compress` with `ChunkConfig` using `enable_8_bit(true)` ([source](https://github.com/anydb-rs/anydb/blob/v0.6.0/crates/vecdb/src/variants/compressed/pco/strategy.rs))
+- Changed clean iterator to use `decompress_into()` for buffer reuse instead of allocating via `decompress()` ([source](https://github.com/anydb-rs/anydb/blob/v0.6.0/crates/vecdb/src/variants/compressed/iterators/clean.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.5.11...v0.6.0)
+
+## [v0.5.11](https://github.com/anydb-rs/anydb/releases/tag/v0.5.11) - 2026-01-16
+
+### Bug Fixes
+#### `vecdb`
+- Expanded `Error::is_data_error()` to detect nested rawdb errors (`CorruptedMetadata`, `InvalidMetadataSize`, `EmptyMetadata`) and directory-related IO errors (`IsADirectory`, `NotADirectory`) as data errors ([source](https://github.com/anydb-rs/anydb/blob/v0.5.11/crates/vecdb/src/error.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.5.10...v0.5.11)
+
+## [v0.5.10](https://github.com/anydb-rs/anydb/releases/tag/v0.5.10) - 2026-01-14
+
+### Breaking Changes
+#### `workspace`
+- Removed build scripts that set `target-cpu=native` and x86_64-specific features (bmi1, bmi2, avx2) in release mode, making binaries portable across different CPUs instead of optimized for the build machine
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.5.9...v0.5.10)
+
+## [v0.5.9](https://github.com/anydb-rs/anydb/releases/tag/v0.5.9) - 2026-01-12
+
+### New Features
+#### `vecdb`
+- Added `Error::is_lock_error()` method returning true for `TryLockError`, allowing callers to distinguish transient lock errors from data errors ([source](https://github.com/anydb-rs/anydb/blob/v0.5.9/crates/vecdb/src/error.rs))
+- Added `Error::is_data_error()` method returning true for corruption and version incompatibility errors that may require resetting the data ([source](https://github.com/anydb-rs/anydb/blob/v0.5.9/crates/vecdb/src/error.rs))
+
+### Bug Fixes
+#### `vecdb`
+- Fixed `DirtyIterator::nth()` to use O(1) `set_position_to()` instead of O(n) loop for skipping elements ([source](https://github.com/anydb-rs/anydb/blob/v0.5.9/crates/vecdb/src/variants/raw/iterators/dirty.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.5.8...v0.5.9)
+
+## [v0.5.8](https://github.com/anydb-rs/anydb/releases/tag/v0.5.8) - 2026-01-11
+
+### New Features
+#### `vecdb`
+- Added `reserve_pushed()` method to `VecBase`, `CompressedVecInner`, and `RawVecInner` for pre-allocating push buffer capacity to reduce reallocations ([source](https://github.com/anydb-rs/anydb/blob/v0.5.8/crates/vecdb/src/variants/base/mod.rs))
+
+### Bug Fixes
+#### `vecdb`
+- Fixed `short_type_name()` to recursively shorten type names inside generic parameters, so `some::module::Close<another::path::Dollars>` now correctly becomes `Close<Dollars>` instead of `Close<another::path::Dollars>` ([source](https://github.com/anydb-rs/anydb/blob/v0.5.8/crates/vecdb/src/traits/printable.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.5.7...v0.5.8)
+
+## [v0.5.7](https://github.com/anydb-rs/anydb/releases/tag/v0.5.7) - 2026-01-09
+
+### New Features
+#### `vecdb`
+- Added `any_reset()` method to `AnyStoredVec` trait for resetting vector state through trait objects ([source](https://github.com/anydb-rs/anydb/blob/v0.5.7/crates/vecdb/src/traits/any_stored.rs))
+- Added `compute_rolling_sum()` method to `EagerVec` for computing rolling sums with variable window starts, where each index can have a different window start position ([source](https://github.com/anydb-rs/anydb/blob/v0.5.7/crates/vecdb/src/variants/eager/statistics.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.5.6...v0.5.7)
+
+## [v0.5.6](https://github.com/anydb-rs/anydb/releases/tag/v0.5.6) - 2026-01-08
+
+### Internal Changes
+#### `workspace`
+- Changed workspace README path from "README.md" to "docs/README.md"
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.5.5...v0.5.6)
+
+## [v0.5.5](https://github.com/anydb-rs/anydb/releases/tag/v0.5.5) - 2026-01-07
+
+### Bug Fixes
+#### `vecdb`
+- Fixed `LazyVecFrom1`, `LazyVecFrom2`, and `LazyVecFrom3` to dynamically compute version from current source versions instead of caching at construction time, ensuring version updates when sources change ([source](https://github.com/anydb-rs/anydb/blob/v0.5.5/crates/vecdb/src/variants/lazy/from1/mod.rs))
+
+### Internal Changes
+#### `rawdb`
+- Demoted lock acquisition logging from `debug!` to `trace!` level across `Database` and `Region` operations to reduce log noise while keeping important operation logs at `debug!` level ([source](https://github.com/anydb-rs/anydb/blob/v0.5.5/crates/rawdb/src/lib.rs))
+- Changed `Layout::promote_pending_holes()` to take database name parameter for consistent logging format ([source](https://github.com/anydb-rs/anydb/blob/v0.5.5/crates/rawdb/src/layout.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.5.4...v0.5.5)
+
+## [v0.5.4](https://github.com/anydb-rs/anydb/releases/tag/v0.5.4) - 2026-01-03
+
+### Breaking Changes
+#### `vecdb`
+- Changed `LazyVecFrom1::init()` to automatically add source version to the provided version, callers should no longer manually add source versions ([source](https://github.com/anydb-rs/anydb/blob/v0.5.4/crates/vecdb/src/variants/lazy/from1/mod.rs))
+- Changed `LazyVecFrom2::init()` to automatically add both source versions to the provided version ([source](https://github.com/anydb-rs/anydb/blob/v0.5.4/crates/vecdb/src/variants/lazy/from2/mod.rs))
+- Changed `LazyVecFrom3::init()` to automatically add all three source versions to the provided version ([source](https://github.com/anydb-rs/anydb/blob/v0.5.4/crates/vecdb/src/variants/lazy/from3/mod.rs))
+
+### New Features
+#### `vecdb`
+- Added `compute_rma()` method to `EagerVec` for computing Wilder's Running Moving Average using alpha = 1/period (standard smoothing method for RSI indicator), with SMA fallback during initial period ([source](https://github.com/anydb-rs/anydb/blob/v0.5.4/crates/vecdb/src/variants/eager/statistics.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.5.3...v0.5.4)
+
+## [v0.5.3](https://github.com/anydb-rs/anydb/releases/tag/v0.5.3) - 2026-01-03
+
+### Breaking Changes
+#### `rawdb`
+- Changed `Database::copy()` to return `Result<()>` instead of `()`, now validates for overlapping source/destination ranges ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/lib.rs))
+- Changed `Region::arc()` visibility from `pub` to `pub(crate)`, use `Region::ptr_eq()` for comparisons instead ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/region.rs))
+
+### New Features
+#### `rawdb`
+- Added `Database::name()` method returning the database name (last path component) for logging ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/lib.rs))
+- Implemented `Display` trait for `Database` that outputs the database name ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/lib.rs))
+- Added `Database::flush_ranges()` method for flushing specific byte ranges to disk ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/lib.rs))
+- Added `Region::ptr_eq()` method for comparing whether two Region handles point to the same underlying region ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/region.rs))
+- Added `Region::restore_dirty_ranges()` for restoring dirty ranges after flush failure to enable retry ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/region.rs))
+- Added `Regions::len()` method returning the count of regions ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/regions.rs))
+- Implemented `Display` trait for `RegionMetadata` showing id, start, len, and reserved values ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/region_metadata.rs))
+- Added `Error::WriteRetryLimitExceeded` returned when write operations exceed 1000 retry attempts ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/error.rs))
+- Added `Error::RegionSizeOverflow` returned when region size calculation would overflow ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/error.rs))
+- Added `Error::OverlappingCopyRanges` returned when copy source and destination ranges overlap ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/error.rs))
+
+### Bug Fixes
+#### `rawdb`
+- Fixed critical memory safety issue in `Reader` struct by reordering fields so `_db` and `_region` are dropped AFTER the `mmap` guard, preventing use-after-free ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/reader.rs))
+- Fixed `RegionState` atomic ordering from `Relaxed` to `Acquire`/`Release` for proper cross-thread synchronization ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/region_state.rs))
+- Fixed `write_to_mmap` to use `checked_add` for overflow detection and changed from `debug_assert!` to `assert!` for bounds checking ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/mmap.rs))
+- Fixed region relocation to copy correct amount of data when truncating (was copying too much data in truncate mode) ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/region.rs))
+- Changed `reserved == 0` condition from panic to returning `Error::InvariantViolation` for better error handling ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/region.rs))
+- Changed region size overflow from `expect()` panic to returning `Error::RegionSizeOverflow` ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/region.rs))
+- Fixed typo in `RegionMetadataUnwritten` error message ("is has" → "has") ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/error.rs))
+
+### Internal Changes
+#### `rawdb`
+- Added write retry mechanism with `MAX_WRITE_RETRIES` (1000) limit and `thread::yield_now()` between retries to reduce contention ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/region.rs))
+- Changed `approx_has_punchable_data()` to use `pread` on file descriptor instead of mmap access, avoiding mmap lock contention ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/lib.rs))
+- Refactored `punch_holes()` to hold layout READ lock throughout (preventing write_with from allocating in holes), acquire meta WRITE per-region before checking, and use `file.sync_all()` for proper sparse file metadata sync ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/lib.rs))
+- Added flush failure recovery: if `flush_ranges()` fails, dirty ranges are restored to regions via `restore_dirty_ranges()` ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/lib.rs))
+- Added metadata validation during deserialization: validates id_len bounds, start page alignment, reserved >= PAGE_SIZE, reserved page alignment, len <= reserved ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/region_metadata.rs))
+- Added bounds checking to `batch_write_each()` validating all offsets fit within region and mmap before writing ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/region.rs))
+- Added comprehensive debug logging throughout database operations (open, set_min_len, create_region, remove, rename, flush, compact, punch_holes, write_with) ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/lib.rs))
+- Added documentation to `Reader` warning about lock duration and that long-lived readers can cause other operations to hang ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/reader.rs))
+- Changed lock ordering in `Region::region_flush()` to: regions → mmap → meta to prevent deadlock with punch_holes ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/rawdb/src/region.rs))
+
+#### `vecdb`
+- Added debug logging when removing holes region ([source](https://github.com/anydb-rs/anydb/blob/v0.5.3/crates/vecdb/src/variants/raw/inner/mod.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.5.2...v0.5.3)
+
+## [v0.5.2](https://github.com/anydb-rs/anydb/releases/tag/v0.5.2) - 2026-01-01
+
+### New Features
+#### `vecdb`
+- Added `safe_flush()` method to `AnyStoredVec` trait that acquires exit lock before flushing, ensuring consistency during shutdown ([source](https://github.com/anydb-rs/anydb/blob/v0.5.2/crates/vecdb/src/traits/any_stored.rs))
+- Added `safe_write()` method to `AnyStoredVec` trait that writes to mmap without fsync while holding exit lock, allowing durability to be deferred for performance ([source](https://github.com/anydb-rs/anydb/blob/v0.5.2/crates/vecdb/src/traits/any_stored.rs))
+
+### Internal Changes
+#### `vecdb`
+- Changed `validate_computed_version_or_reset()` to automatically include the vec's own version via `self.header().vec_version()`, so callers only need to pass dependency versions ([source](https://github.com/anydb-rs/anydb/blob/v0.5.2/crates/vecdb/src/traits/generic.rs))
+- Simplified version validation calls in all `EagerVec` compute methods (aggregates, lookback, statistics, transforms) by removing explicit `self.inner_version()` additions ([source](https://github.com/anydb-rs/anydb/blob/v0.5.2/crates/vecdb/src/variants/eager/aggregates.rs))
+- Changed `EagerVec::repeat_until_complete()` to explicitly acquire exit lock and call `write()` instead of delegating to internal method ([source](https://github.com/anydb-rs/anydb/blob/v0.5.2/crates/vecdb/src/variants/eager/mod.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.5.1...v0.5.2)
+
+## [v0.5.1](https://github.com/anydb-rs/anydb/releases/tag/v0.5.1) - 2026-01-01
+
+### New Features
+#### `vecdb`
+- Added `read_once()` method to `LazyVecFrom1` for reading a single value at a given index without manual iterator creation ([source](https://github.com/anydb-rs/anydb/blob/v0.5.1/crates/vecdb/src/variants/lazy/from1/mod.rs))
+- Added `transformed()` constructor to `LazyVecFrom1` for creating lazy vectors with generic unary transforms using zero-cost monomorphization ([source](https://github.com/anydb-rs/anydb/blob/v0.5.1/crates/vecdb/src/variants/lazy/from1/mod.rs))
+- Added `UnaryTransform` trait for defining type-erased unary transforms with zero runtime overhead ([source](https://github.com/anydb-rs/anydb/blob/v0.5.1/crates/vecdb/src/variants/lazy/from1/transform.rs))
+- Added `Ident` (identity), `Negate` (negation), and `Halve` (divide by 2) unary transform implementations ([source](https://github.com/anydb-rs/anydb/blob/v0.5.1/crates/vecdb/src/variants/lazy/from1/transform.rs))
+- Added `read_once()` method to `LazyVecFrom2` for reading a single computed value from two sources ([source](https://github.com/anydb-rs/anydb/blob/v0.5.1/crates/vecdb/src/variants/lazy/from2/mod.rs))
+- Added `transformed()` constructor to `LazyVecFrom2` for creating lazy vectors with generic binary transforms ([source](https://github.com/anydb-rs/anydb/blob/v0.5.1/crates/vecdb/src/variants/lazy/from2/mod.rs))
+- Added `BinaryTransform` trait for zero-cost binary operations during lazy iteration ([source](https://github.com/anydb-rs/anydb/blob/v0.5.1/crates/vecdb/src/variants/lazy/from2/transform.rs))
+- Added `Divide`, `Plus`, `Minus`, and `Times` binary transform implementations ([source](https://github.com/anydb-rs/anydb/blob/v0.5.1/crates/vecdb/src/variants/lazy/from2/transform.rs))
+
+### Bug Fixes
+#### `rawdb`
+- Fixed deadlock in `Region::write_with()` by releasing layout lock before calling `set_min_len()`, then re-acquiring and verifying state to avoid contention with threads holding mmap read locks ([source](https://github.com/anydb-rs/anydb/blob/v0.5.1/crates/rawdb/src/region.rs))
+- Added panic guard in `Region::write_with()` when reserved size is 0 to prevent infinite loop during capacity expansion ([source](https://github.com/anydb-rs/anydb/blob/v0.5.1/crates/rawdb/src/region.rs))
+- Fixed `approx_has_punchable_data()` to validate bounds before accessing mmap, preventing hangs from corrupted metadata where start+len exceeds mmap length ([source](https://github.com/anydb-rs/anydb/blob/v0.5.1/crates/rawdb/src/lib.rs))
+- Fixed `Layout::len()` to include pending holes in length calculation, ensuring accurate file length when regions are deleted but not yet promoted ([source](https://github.com/anydb-rs/anydb/blob/v0.5.1/crates/rawdb/src/layout.rs))
+- Fixed `Layout::is_last_anything()` to check pending_holes, preventing incorrect "is last" determination after region deletion ([source](https://github.com/anydb-rs/anydb/blob/v0.5.1/crates/rawdb/src/layout.rs))
+- Fixed `Layout::promote_pending_holes()` to coalesce with adjacent real holes both before AND after the pending hole, not just before ([source](https://github.com/anydb-rs/anydb/blob/v0.5.1/crates/rawdb/src/layout.rs))
+
+#### `vecdb`
+- Fixed deadlock in `CompressedVecInner::write()` by writing to region before acquiring pages lock, preventing iterator-vs-writer lock order inversion ([source](https://github.com/anydb-rs/anydb/blob/v0.5.1/crates/vecdb/src/variants/compressed/inner/mod.rs))
+
+### Internal Changes
+#### `rawdb`
+- Simplified `Layout::remove_region()` to only add deleted regions to pending_holes without immediate coalescing, deferring coalescing to `promote_pending_holes()` ([source](https://github.com/anydb-rs/anydb/blob/v0.5.1/crates/rawdb/src/layout.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.5.0...v0.5.1)
+
 ## [v0.5.0](https://github.com/anydb-rs/anydb/releases/tag/v0.5.0) - 2025-12-27
 
 ### Breaking Changes

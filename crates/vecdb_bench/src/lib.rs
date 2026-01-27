@@ -2,22 +2,20 @@ use std::{fs, time::Duration};
 
 use anyhow::Result;
 
-mod database;
-mod fjall2_impl;
-mod fjall3_impl;
-mod lmdb_impl;
-mod redb_impl;
 mod bytesvec_impl;
+mod database;
+mod fjall_impl;
+mod lmdb_impl;
 mod pcovec_impl;
+mod redb_impl;
 mod runner;
 
-use database::DatabaseBenchmark;
-use fjall2_impl::*;
-use fjall3_impl::*;
-use lmdb_impl::*;
-use redb_impl::*;
 use bytesvec_impl::*;
+use database::DatabaseBenchmark;
+use fjall_impl::*;
+use lmdb_impl::*;
 use pcovec_impl::*;
+use redb_impl::*;
 use runner::*;
 pub use runner::{BenchConfig, Database};
 
@@ -226,11 +224,8 @@ pub fn run(configs: &[BenchConfig]) -> Result<()> {
                 Database::BytesVec => {
                     db_benchmarks.push(Box::new(DbBenchmark::<BytesVecBench>::new(&runner)?));
                 }
-                Database::Fjall3 => {
-                    db_benchmarks.push(Box::new(DbBenchmark::<Fjall3Bench>::new(&runner)?));
-                }
-                Database::Fjall2 => {
-                    db_benchmarks.push(Box::new(DbBenchmark::<Fjall2Bench>::new(&runner)?));
+                Database::Fjall => {
+                    db_benchmarks.push(Box::new(DbBenchmark::<FjallBench>::new(&runner)?));
                 }
                 Database::Redb => {
                     db_benchmarks.push(Box::new(DbBenchmark::<RedbBench>::new(&runner)?));
