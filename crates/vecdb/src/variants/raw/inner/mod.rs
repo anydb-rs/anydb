@@ -241,6 +241,24 @@ where
         self.get_any_or_read_at(index, &self.create_reader())
     }
 
+    /// Gets value checking all layers, unwrapping the result.
+    /// Panics if the read fails or if the value doesn't exist.
+    #[inline]
+    pub fn get_any_or_read_unwrap(&self, index: I, reader: &Reader) -> T {
+        self.get_any_or_read(index, reader)
+            .expect("Failed to read value")
+            .expect("Value doesn't exist")
+    }
+
+    /// Gets value from any layer at usize index, unwrapping the result.
+    /// Panics if the read fails or if the value doesn't exist.
+    #[inline]
+    pub fn get_any_or_read_at_unwrap(&self, index: usize, reader: &Reader) -> T {
+        self.get_any_or_read_at(index, reader)
+            .expect("Failed to read value")
+            .expect("Value doesn't exist")
+    }
+
     /// Updates the value at the given index.
     #[inline]
     pub fn update(&mut self, index: I, value: T) -> Result<()> {
