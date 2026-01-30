@@ -16,15 +16,24 @@ where
     fn max_from_(coarser: T) -> usize;
 
     /// Returns the maximum fine-grained index, bounded by the data length.
+    /// Returns 0 if len is 0 (empty data).
     fn max_from(coarser: T, len: usize) -> usize {
+        if len == 0 {
+            return 0;
+        }
         Self::max_from_(coarser).min(len - 1)
     }
 
     /// Returns the inclusive range of fine-grained indices for the coarse index.
+    /// Returns an empty range (1..=0) if len is 0.
     fn inclusive_range_from(coarser: T, len: usize) -> RangeInclusive<usize>
     where
         T: Clone,
     {
+        if len == 0 {
+            #[allow(clippy::reversed_empty_ranges)]
+            return 1..=0; // Empty range
+        }
         Self::min_from(coarser.clone())..=Self::max_from(coarser, len)
     }
 }

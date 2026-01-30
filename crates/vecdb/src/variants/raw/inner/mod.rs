@@ -278,6 +278,7 @@ where
                 return Err(Error::IndexTooHigh {
                     index,
                     len: stored_len,
+                    name: self.name().to_string(),
                 });
             }
         }
@@ -300,6 +301,7 @@ where
             Ordering::Less => Err(Error::IndexTooHigh {
                 index: index_usize,
                 len,
+                name: self.name().to_string(),
             }),
             Ordering::Equal => {
                 self.push(value);

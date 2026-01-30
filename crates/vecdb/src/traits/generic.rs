@@ -49,7 +49,7 @@ where
         if likely(index < len) {
             self.unchecked_read_at(index, reader)
         } else {
-            Err(Error::IndexTooHigh { index, len })
+            Err(Error::IndexTooHigh { index, len, name: self.name().to_string() })
         }
     }
 
@@ -272,7 +272,7 @@ where
         let len = self.len();
 
         if unlikely(len < index) {
-            return Err(Error::IndexTooHigh { index, len });
+            return Err(Error::IndexTooHigh { index, len, name: self.name().to_string() });
         } else if unlikely(len > index) {
             self.truncate_if_needed_at(index)?;
         }

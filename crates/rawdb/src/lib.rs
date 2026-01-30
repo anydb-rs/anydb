@@ -140,6 +140,7 @@ impl Database {
     pub fn set_min_len(&self, len: usize) -> Result<()> {
         let len = Self::ceil_number_to_page_size_multiple(len);
 
+        // Quick check without lock
         let file_len = self.file_len()?;
         if file_len >= len {
             return Ok(());
@@ -150,6 +151,14 @@ impl Database {
         let mut mmap = self.mmap_mut();
         trace!("{}: set_min_len acquiring file_mut", self);
         let file = self.file_mut();
+
+        // Re-check after acquiring lock - another thread may have extended the file
+        // while we were waiting. Without this check, we could TRUNCATE the file.
+        let current_len = file.metadata()?.len() as usize;
+        if current_len >= len {
+            return Ok(());
+        }
+
         trace!("{}: set_min_len extending file", self);
         file.set_len(len as u64)?;
         *mmap = create_mmap(&file)?;

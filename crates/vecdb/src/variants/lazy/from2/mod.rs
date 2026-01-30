@@ -82,6 +82,7 @@ where
             .ok_or(Error::IndexTooHigh {
                 index: index.to_usize(),
                 len: self.len(),
+                name: self.name.clone(),
             })
     }
 }

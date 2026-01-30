@@ -46,8 +46,8 @@ pub enum Error {
         received: Version,
         expected: Version,
     },
-    #[error("Index too high: index: {index}, len: {len}")]
-    IndexTooHigh { index: usize, len: usize },
+    #[error("Index too high: index: {index}, len: {len}, name: {name}")]
+    IndexTooHigh { index: usize, len: usize, name: String },
     #[error("Unexpected index: expected {expected}, got {got}")]
     UnexpectedIndex { expected: usize, got: usize },
     #[error("Expect vec to have index")]

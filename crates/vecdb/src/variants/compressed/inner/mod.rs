@@ -114,6 +114,7 @@ where
             return Err(Error::IndexTooHigh {
                 index,
                 len: stored_len,
+                name: "pcodec_page".to_string(),
             });
         } else if unlikely(page_index >= pages.len()) {
             return Err(Error::ExpectVecToHaveIndex);
