@@ -63,21 +63,25 @@ where
         })
     }
 
-    pub fn compute_change(
+    /// Compute N-period change. Converts source values to output type before subtraction
+    /// to properly handle negative changes (e.g., unsigned source to signed output).
+    pub fn compute_change<A>(
         &mut self,
         max_from: V::I,
-        source: &impl IterableVec<V::I, V::T>,
+        source: &impl IterableVec<V::I, A>,
         len: usize,
         exit: &Exit,
     ) -> Result<()>
     where
+        A: VecValue + Default + Into<V::T>,
         V::T: CheckedSub + Default,
     {
         self.compute_with_lookback(max_from, source, len, exit, |i, current, previous| {
-            // If there's no previous value (i < len), return 0 (no change)
             if i < len {
                 V::T::default()
             } else {
+                let current: V::T = current.into();
+                let previous: V::T = previous.into();
                 current.checked_sub(previous).unwrap()
             }
         })
