@@ -11,6 +11,82 @@ use crate::{
 
 use super::{CheckedSub, EagerVec};
 
+/// Helper for rolling window computations.
+struct RollingWindow {
+    values: VecDeque<f32>,
+    window: usize,
+}
+
+impl RollingWindow {
+    fn new(window: usize) -> Self {
+        Self {
+            values: VecDeque::with_capacity(window + 1),
+            window,
+        }
+    }
+
+    fn init_from_source<I, A>(
+        &mut self,
+        source: &impl IterableVec<I, A>,
+        skip: usize,
+        min_i: usize,
+    ) where
+        I: VecIndex,
+        A: VecValue,
+        f32: From<A>,
+    {
+        if skip > 0 {
+            let start = skip.saturating_sub(self.window).max(min_i);
+            source.iter().skip(start).take(skip - start).for_each(|v| {
+                self.values.push_back(f32::from(v));
+            });
+        }
+    }
+
+    fn push(&mut self, value: f32) {
+        self.values.push_back(value);
+        if self.values.len() > self.window {
+            self.values.pop_front();
+        }
+    }
+
+    fn push_and_pop(&mut self, value: f32) -> Option<f32> {
+        self.values.push_back(value);
+        if self.values.len() > self.window {
+            self.values.pop_front()
+        } else {
+            None
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    fn median(&self) -> f32 {
+        let mut sorted: Vec<f32> = self.values.iter().copied().collect();
+        sorted.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        if sorted.len() % 2 == 0 {
+            let mid = sorted.len() / 2;
+            (sorted[mid - 1] + sorted[mid]) / 2.0
+        } else {
+            sorted[sorted.len() / 2]
+        }
+    }
+
+    fn sma(&mut self, value: f32, prev_sma: f32) -> f32 {
+        let len = self.len();
+        let popped = self.push_and_pop(value);
+        match popped {
+            Some(old) => {
+                let prev_sum = prev_sma * len as f32;
+                (prev_sum - old + value) / len as f32
+            }
+            None => (prev_sma * len as f32 + value) / (len + 1) as f32,
+        }
+    }
+}
+
 impl<V> EagerVec<V>
 where
     V: StoredVec,
@@ -254,7 +330,7 @@ where
         &mut self,
         max_from: V::I,
         source: &impl IterableVec<V::I, A>,
-        sma: usize,
+        window: usize,
         exit: &Exit,
         min_i: Option<V::I>,
     ) -> Result<()>
@@ -272,59 +348,64 @@ where
             let min_i = min_i.map(|i| i.to_usize());
             let min_prev_i = min_i.unwrap_or_default();
 
-            let mut prev = skip
+            let mut prev_sma = skip
                 .checked_sub(1)
                 .and_then(|prev_i| {
                     if prev_i > min_prev_i {
-                        this.iter().get(V::I::from(prev_i))
+                        this.iter().get(V::I::from(prev_i)).map(|v| f32::from(v))
                     } else {
-                        Some(V::T::from(0.0))
+                        Some(0.0)
                     }
                 })
-                .or(Some(V::T::from(0.0)));
+                .unwrap_or(0.0);
 
-            // Initialize buffer for sliding window SMA
-            let mut window_values = if sma < usize::MAX {
-                VecDeque::with_capacity(sma + 1)
-            } else {
-                VecDeque::new()
-            };
-
-            if skip > 0 {
-                let start = skip.saturating_sub(sma).max(min_prev_i);
-                source.iter().skip(start).take(skip - start).for_each(|v| {
-                    window_values.push_back(f32::from(v));
-                });
-            }
+            let mut rolling = RollingWindow::new(window);
+            rolling.init_from_source(source, skip, min_prev_i);
 
             for (i, value) in source.iter().enumerate().skip(skip) {
                 if min_i.is_none() || min_i.is_some_and(|min_i| min_i <= i) {
-                    let processed_values_count = i.to_usize() - min_prev_i + 1;
-                    let len = (processed_values_count).min(sma);
-
-                    let value = f32::from(value);
-
-                    let sma_result = V::T::from(if processed_values_count > sma {
-                        let prev_sum = f32::from(prev.as_ref().unwrap().clone()) * len as f32;
-                        // Pop the oldest value from our window buffer
-                        let value_to_subtract = window_values.pop_front().unwrap();
-                        (prev_sum - value_to_subtract + value) / len as f32
-                    } else {
-                        (f32::from(prev.as_ref().unwrap().clone()) * (len - 1) as f32 + value)
-                            / len as f32
-                    });
-
-                    // Add current value to window buffer
-                    window_values.push_back(value);
-                    if window_values.len() > sma {
-                        window_values.pop_front();
-                    }
-
-                    prev.replace(sma_result.clone());
-                    this.checked_push_at(i, sma_result)?;
+                    let sma_result = rolling.sma(f32::from(value), prev_sma);
+                    prev_sma = sma_result;
+                    this.checked_push_at(i, V::T::from(sma_result))?;
                 } else {
                     this.checked_push_at(i, V::T::from(f32::NAN))?;
                 }
+
+                if this.batch_limit_reached() {
+                    break;
+                }
+            }
+
+            Ok(())
+        })
+    }
+
+    pub fn compute_rolling_median<A>(
+        &mut self,
+        max_from: V::I,
+        source: &impl IterableVec<V::I, A>,
+        window: usize,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        V::T: From<f32>,
+        A: VecValue,
+        f32: From<A>,
+    {
+        self.validate_computed_version_or_reset(Version::ONE + source.version())?;
+
+        self.truncate_if_needed(max_from)?;
+
+        self.repeat_until_complete(exit, |this| {
+            let skip = this.len();
+
+            let mut rolling = RollingWindow::new(window);
+            rolling.init_from_source(source, skip, 0);
+
+            for (i, value) in source.iter().enumerate().skip(skip) {
+                rolling.push(f32::from(value));
+
+                this.checked_push_at(i, V::T::from(rolling.median()))?;
 
                 if this.batch_limit_reached() {
                     break;
