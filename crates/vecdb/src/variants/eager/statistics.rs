@@ -12,12 +12,12 @@ use crate::{
 use super::{CheckedSub, EagerVec};
 
 /// Helper for rolling window computations.
-struct RollingWindow {
-    values: VecDeque<f32>,
+struct RollingWindow<T> {
+    values: VecDeque<T>,
     window: usize,
 }
 
-impl RollingWindow {
+impl<T: Clone> RollingWindow<T> {
     fn new(window: usize) -> Self {
         Self {
             values: VecDeque::with_capacity(window + 1),
@@ -25,32 +25,28 @@ impl RollingWindow {
         }
     }
 
-    fn init_from_source<I, A>(
-        &mut self,
-        source: &impl IterableVec<I, A>,
-        skip: usize,
-        min_i: usize,
-    ) where
+    fn init_from_source<I, A>(&mut self, source: &impl IterableVec<I, A>, skip: usize, min_i: usize)
+    where
         I: VecIndex,
         A: VecValue,
-        f32: From<A>,
+        T: From<A>,
     {
         if skip > 0 {
             let start = skip.saturating_sub(self.window).max(min_i);
             source.iter().skip(start).take(skip - start).for_each(|v| {
-                self.values.push_back(f32::from(v));
+                self.values.push_back(T::from(v));
             });
         }
     }
 
-    fn push(&mut self, value: f32) {
+    fn push(&mut self, value: T) {
         self.values.push_back(value);
         if self.values.len() > self.window {
             self.values.pop_front();
         }
     }
 
-    fn push_and_pop(&mut self, value: f32) -> Option<f32> {
+    fn push_and_pop(&mut self, value: T) -> Option<T> {
         self.values.push_back(value);
         if self.values.len() > self.window {
             self.values.pop_front()
@@ -62,11 +58,13 @@ impl RollingWindow {
     fn len(&self) -> usize {
         self.values.len()
     }
+}
 
+impl RollingWindow<f32> {
     fn median(&self) -> f32 {
         let mut sorted: Vec<f32> = self.values.iter().copied().collect();
         sorted.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        if sorted.len() % 2 == 0 {
+        if sorted.len().is_multiple_of(2) {
             let mid = sorted.len() / 2;
             (sorted[mid - 1] + sorted[mid]) / 2.0
         } else {
@@ -192,7 +190,7 @@ where
         V::T: std::ops::Add<V::T, Output = V::T> + From<A> + Default + CheckedSub,
         A: VecValue,
     {
-        self.validate_computed_version_or_reset(Version::ONE + source.version())?;
+        self.validate_computed_version_or_reset(Version::new(2) + source.version())?;
 
         self.truncate_if_needed(max_from)?;
 
@@ -203,43 +201,18 @@ where
                 .and_then(|prev_i| this.iter().get(V::I::from(prev_i)))
                 .or(Some(V::T::default()));
 
-            // Initialize buffer for sliding window sum
-            let mut window_values = if window < usize::MAX {
-                VecDeque::with_capacity(window + 1)
-            } else {
-                VecDeque::new()
-            };
-
-            if skip > 0 {
-                let start = skip.saturating_sub(window);
-                source.iter().skip(start).take(skip - start).for_each(|v| {
-                    window_values.push_back(V::T::from(v));
-                });
-            }
+            let mut rolling: RollingWindow<V::T> = RollingWindow::new(window);
+            rolling.init_from_source(source, skip, 0);
 
             for (i, value) in source.iter().enumerate().skip(skip) {
                 let value = V::T::from(value);
+                let prev_sum = prev.as_ref().unwrap().clone();
 
-                let processed_values_count = i.to_usize() + 1;
-                let len = (processed_values_count).min(window);
-
-                let sum = if processed_values_count > len {
-                    let prev_sum = prev.as_ref().unwrap().clone();
-                    // Pop the oldest value from our window buffer (we own it, no clone needed)
-                    let value_to_subtract = window_values.pop_front().unwrap();
-                    prev_sum
-                        .checked_sub(value_to_subtract)
-                        .ok_or(Error::Underflow)?
-                        + value.clone()
-                } else {
-                    prev.as_ref().unwrap().clone() + value.clone()
+                let popped = rolling.push_and_pop(value.clone());
+                let sum = match popped {
+                    Some(old) => prev_sum.checked_sub(old).ok_or(Error::Underflow)? + value,
+                    None => prev_sum + value,
                 };
-
-                // Add current value to window buffer
-                window_values.push_back(value);
-                if window_values.len() > window {
-                    window_values.pop_front();
-                }
 
                 prev.replace(sum.clone());
                 this.checked_push_at(i, sum)?;
@@ -339,7 +312,7 @@ where
         A: VecValue,
         f32: From<V::T> + From<A>,
     {
-        self.validate_computed_version_or_reset(Version::ONE + source.version())?;
+        self.validate_computed_version_or_reset(Version::new(2) + source.version())?;
 
         self.truncate_if_needed(max_from)?;
 
@@ -352,7 +325,7 @@ where
                 .checked_sub(1)
                 .and_then(|prev_i| {
                     if prev_i > min_prev_i {
-                        this.iter().get(V::I::from(prev_i)).map(|v| f32::from(v))
+                        this.iter().get(V::I::from(prev_i)).map(f32::from)
                     } else {
                         Some(0.0)
                     }
@@ -392,7 +365,7 @@ where
         A: VecValue,
         f32: From<A>,
     {
-        self.validate_computed_version_or_reset(Version::ONE + source.version())?;
+        self.validate_computed_version_or_reset(Version::new(2) + source.version())?;
 
         self.truncate_if_needed(max_from)?;
 
