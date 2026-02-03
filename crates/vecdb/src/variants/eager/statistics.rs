@@ -19,8 +19,10 @@ struct RollingWindow<T> {
 
 impl<T: Clone> RollingWindow<T> {
     fn new(window: usize) -> Self {
+        // Cap pre-allocation to avoid capacity overflow when window is very large (e.g., usize::MAX)
+        let capacity = window.saturating_add(1).min(1024);
         Self {
-            values: VecDeque::with_capacity(window + 1),
+            values: VecDeque::with_capacity(capacity),
             window,
         }
     }
