@@ -2,6 +2,7 @@ use std::ops::Add;
 
 use crate::{
     AnyVec, Error, Exit, GenericStoredVec, IterableVec, Result, StoredVec, VecIndex, VecValue,
+    Version,
 };
 
 use super::{CheckedSub, EagerVec, SaturatingAdd};
@@ -91,6 +92,88 @@ where
         V::T: Add<V::T, Output = V::T> + Ord,
     {
         self.compute_aggregate_of_others(max_from, others, exit, |values| values.max().unwrap())
+    }
+
+    /// Computes weighted average: sum(weight_i * value_i) / sum(weight_i)
+    ///
+    /// Takes parallel slices of weight and value vecs from multiple sources.
+    /// For each index, computes the weighted average across all sources.
+    /// Returns zero if total weight is zero.
+    pub fn compute_weighted_average_of_others<W, OW, OV>(
+        &mut self,
+        max_from: V::I,
+        weights: &[&OW],
+        values: &[&OV],
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        W: VecValue + Into<f64>,
+        OW: IterableVec<V::I, W>,
+        OV: IterableVec<V::I, V::T>,
+        V::T: Into<f64> + From<f64>,
+    {
+        if weights.len() != values.len() {
+            return Err(Error::InvalidArgument(
+                "weights and values must have same length",
+            ));
+        }
+
+        if weights.is_empty() {
+            return Err(Error::InvalidArgument(
+                "weights and values must have at least one element",
+            ));
+        }
+
+        self.validate_computed_version_or_reset(
+            weights.iter().map(|v| v.version()).sum::<Version>()
+                + values.iter().map(|v| v.version()).sum(),
+        )?;
+
+        self.truncate_if_needed(max_from)?;
+
+        self.repeat_until_complete(exit, |this| {
+            let skip = this.len();
+            let mut weight_iters: Vec<_> =
+                weights.iter().map(|v| v.iter().skip(skip)).collect();
+            let mut value_iters: Vec<_> =
+                values.iter().map(|v| v.iter().skip(skip)).collect();
+
+            let end = weights
+                .iter()
+                .map(|w| w.len())
+                .chain(values.iter().map(|v| v.len()))
+                .min()
+                .unwrap_or(0);
+
+            for i in skip..end {
+                let mut total_weight = 0.0_f64;
+                let mut weighted_sum = 0.0_f64;
+
+                for (w_iter, v_iter) in weight_iters.iter_mut().zip(value_iters.iter_mut()) {
+                    let weight: f64 = w_iter.next().unwrap().into();
+                    let value: f64 = v_iter.next().unwrap().into();
+
+                    if weight > 0.0 {
+                        total_weight += weight;
+                        weighted_sum += weight * value;
+                    }
+                }
+
+                let result = if total_weight > 0.0 {
+                    V::T::from(weighted_sum / total_weight)
+                } else {
+                    V::T::from(0.0)
+                };
+
+                this.checked_push_at(i, result)?;
+
+                if this.batch_limit_reached() {
+                    break;
+                }
+            }
+
+            Ok(())
+        })
     }
 
     pub fn compute_sum_from_indexes<A, B>(
