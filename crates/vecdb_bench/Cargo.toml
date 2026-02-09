@@ -15,7 +15,7 @@ redb = "3.1.0"
 vecdb = { workspace = true, features = ["pco"] }
 
 # Utilities
-rand = "0.9.2"
+rand = "0.10.0"
 rayon = "1.11"
 anyhow = "1.0"
 walkdir = "2.5"
