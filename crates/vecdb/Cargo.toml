@@ -21,7 +21,7 @@ zerocopy = ["dep:zerocopy"]
 zstd = ["dep:zstd"]
 
 [dependencies]
-ctrlc = { version = "3.5.1", features = ["termination"] }
+ctrlc = { version = "3.5.2", features = ["termination"] }
 log = { workspace = true }
 parking_lot = { workspace = true }
 rawdb = { workspace = true }
