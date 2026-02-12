@@ -1,6 +1,6 @@
 use crate::database::DatabaseBenchmark;
 use anyhow::Result;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
