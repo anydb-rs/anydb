@@ -1,5 +1,6 @@
 mod inner;
 mod iterators;
+mod view;
 #[cfg(feature = "lz4")]
 mod lz4;
 #[cfg(feature = "pco")]
@@ -9,6 +10,7 @@ mod zstd;
 
 pub(crate) use inner::*;
 pub use iterators::*;
+pub use view::*;
 #[cfg(feature = "lz4")]
 pub use lz4::*;
 #[cfg(feature = "pco")]

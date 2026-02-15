@@ -19,6 +19,9 @@ where
         let from_usize = from.map(|i| self.i64_to_usize(i));
         let to_usize = to.map(|i| self.i64_to_usize(i));
 
+        // Uses iterator-based streaming. For small ranges a view-based approach
+        // would avoid the iterator setup overhead, but CSV typically streams
+        // full datasets.
         Box::new(VecIteratorWriter {
             iter: Box::new(self.iter_range(from_usize, to_usize)),
             _phantom: PhantomData as PhantomData<V::T>,

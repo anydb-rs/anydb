@@ -322,6 +322,10 @@ macro_rules! impl_vec_wrapper {
             fn iter(&self) -> $crate::BoxedVecIterator<'_, I, T> {
                 Box::new(self.into_iter())
             }
+
+            fn iter_small_range(&self, from: usize, to: usize) -> $crate::BoxedVecIterator<'_, I, T> {
+                $crate::IterableVec::<I, T>::iter_small_range(&self.0, from, to)
+            }
         }
 
         impl<I, T> $wrapper<I, T>

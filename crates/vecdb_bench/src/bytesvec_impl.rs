@@ -44,20 +44,18 @@ impl DatabaseBenchmark for BytesVecBench {
 
     fn read_random(&self, indices: &[u64]) -> Result<u64> {
         let mut sum = 0u64;
-        let reader = self.vec.create_reader();
+        let view = self.vec.view();
         for &idx in indices {
-            if let Ok(value) = self.vec.read_at(idx as usize, &reader) {
-                sum = sum.wrapping_add(value);
-            }
+            sum = sum.wrapping_add(view.get(idx as usize));
         }
         Ok(sum)
     }
 
     fn read_random_rayon(&self, indices: &[u64]) -> Result<u64> {
-        let reader = self.vec.create_reader();
+        let view = self.vec.view();
         let sum = indices
             .par_iter()
-            .map(|&idx| self.vec.read_at(idx as usize, &reader).unwrap_or_default())
+            .map(|&idx| view.get(idx as usize))
             .reduce(|| 0, |a, b| a.wrapping_add(b));
 
         Ok(sum)

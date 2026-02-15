@@ -287,6 +287,10 @@ where
     fn iter(&self) -> BoxedVecIterator<'_, V::I, V::T> {
         self.0.iter()
     }
+
+    fn iter_small_range(&self, from: usize, to: usize) -> BoxedVecIterator<'_, V::I, V::T> {
+        self.0.iter_small_range(from, to)
+    }
 }
 
 impl<V> TypedVec for EagerVec<V>

@@ -143,6 +143,13 @@ where
     fn iter(&self) -> BoxedVecIterator<'_, I, T> {
         Box::new(self.into_iter())
     }
+
+    fn iter_small_range(&self, from: usize, to: usize) -> BoxedVecIterator<'_, I, T> {
+        let mut iter = self.iter();
+        iter.set_position_to(from);
+        iter.set_end_to(to);
+        iter
+    }
 }
 
 impl<I, T, S1I, S1T> TypedVec for LazyVecFrom1<I, T, S1I, S1T>

@@ -10,6 +10,36 @@ pub trait IterableVec<I, T>: AnyVec {
         I: VecIndex,
         T: VecValue;
 
+    /// Returns an iterator optimized for a small index range `[from, to)`.
+    ///
+    /// Stored vec types should override this to return view-backed (mmap) iterators
+    /// that avoid the file open / buffer alloc / seek overhead of `iter()`.
+    ///
+    /// For full sequential scans, prefer `iter()` which streams via buffered I/O.
+    ///
+    /// Benchmarks (80 GB dataset):
+    ///
+    /// Full sequential read (80 GB):
+    ///  - iter         14.685s (5.45 GB/s)
+    ///  - view (iter)  129.986s (0.62 GB/s)
+    ///
+    /// 100x (fixed 1M + random-start 1M):
+    ///  - iter (reuse) 512.339ms (5.123ms/iter)
+    ///  - view (range) 77.211ms (772µs/iter)
+    fn iter_small_range(&self, from: usize, to: usize) -> BoxedVecIterator<'_, I, T>
+    where
+        I: VecIndex,
+        T: VecValue;
+
+    /// Collects values from the range `[from, to)` into a Vec via `iter_small_range`.
+    fn collect_small_range(&self, from: usize, to: usize) -> Vec<T>
+    where
+        I: VecIndex,
+        T: VecValue,
+    {
+        self.iter_small_range(from, to).collect()
+    }
+
     /// Create a windowed lookback for efficient windowed access.
     /// Uses a ring buffer if many items will be processed, otherwise uses direct access.
     fn create_lookback(&self, skip: usize, window: usize, min_start: usize) -> Lookback<'_, I, T>

@@ -33,7 +33,7 @@ where
         let from_idx = from.unwrap_or(0);
         let to_idx = to.unwrap_or(len).min(len);
 
-        let vec: Vec<V::T> = self.iter_range(Some(from_idx), Some(to_idx)).collect();
+        let vec: Vec<V::T> = self.collect_small_range(from_idx, to_idx);
 
         #[cfg(feature = "sonic-rs")]
         sonic_rs::to_writer(buf, &vec)?;
@@ -46,7 +46,7 @@ where
     fn write_json_value(&self, from: Option<usize>, buf: &mut Vec<u8>) -> crate::Result<()> {
         let from_idx = from.unwrap_or(0);
 
-        if let Some(value) = self.iter_range(Some(from_idx), Some(from_idx + 1)).next() {
+        if let Some(value) = self.iter_small_range(from_idx, from_idx + 1).next() {
             #[cfg(feature = "sonic-rs")]
             sonic_rs::to_writer(buf, &value)?;
             #[cfg(all(feature = "serde_json", not(feature = "sonic-rs")))]

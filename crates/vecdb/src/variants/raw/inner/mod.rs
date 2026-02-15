@@ -13,8 +13,9 @@ use rawdb::{Database, Reader, Region, unlikely};
 use crate::{
     AnyStoredVec, AnyVec, BUFFER_SIZE, BaseVec, BoxedVecIterator, Bytes, BytesExt,
     CleanRawVecIterator, DirtyRawVecIterator, Error, Format, GenericStoredVec, HEADER_OFFSET,
-    Header, ImportOptions, IterableVec, RawVecIterator, Result, SIZE_OF_U64, Stamp, TypedVec,
-    VecIndex, VecValue, Version, WithPrev, short_type_name, vec_region_name_with,
+    Header, ImportOptions, IterableVec, RawVecIterator, RawVecView, Result, SIZE_OF_U64, Stamp,
+    TypedVec, VecIndex, VecIterator, VecValue, Version, WithPrev, short_type_name,
+    vec_region_name_with,
 };
 
 mod strategy;
@@ -437,6 +438,15 @@ where
     #[inline]
     pub fn index_to_name(&self) -> String {
         vec_region_name_with::<I>(self.name())
+    }
+
+    /// Returns a read-only view for fast mmap-backed random access and range iteration.
+    ///
+    /// The view only sees stored (persisted) values. Call `write()` first
+    /// if you need pushed values to be visible.
+    #[inline]
+    pub fn view(&self) -> RawVecView<I, T, S> {
+        RawVecView::new(self.create_reader(), self.base.stored_len())
     }
 
     #[inline]
@@ -892,6 +902,13 @@ where
 {
     fn iter(&self) -> BoxedVecIterator<'_, I, T> {
         Box::new(self.into_iter())
+    }
+
+    fn iter_small_range(&self, from: usize, to: usize) -> BoxedVecIterator<'_, I, T> {
+        let mut view = self.view();
+        view.set_position_to(from);
+        view.set_end_to(to);
+        Box::new(view)
     }
 }
 

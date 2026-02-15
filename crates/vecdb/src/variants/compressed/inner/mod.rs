@@ -6,9 +6,10 @@ use rawdb::{Database, Reader, Region};
 
 use crate::{
     AnyStoredVec, AnyVec, BaseVec, BoxedVecIterator, CleanCompressedVecIterator,
-    CompressedVecIterator, DirtyCompressedVecIterator, Error, Format, GenericStoredVec,
-    HEADER_OFFSET, Header, ImportOptions, IterableVec, Result, Stamp, TypedVec, VecIndex, VecValue,
-    Version, likely, short_type_name, unlikely, vec_region_name_with,
+    CompressedVecIterator, CompressedVecView, DirtyCompressedVecIterator, Error, Format,
+    GenericStoredVec, HEADER_OFFSET, Header, ImportOptions, IterableVec, Result, Stamp, TypedVec,
+    VecIndex, VecValue, Version, likely, short_type_name, unlikely,
+    vec_region_name_with,
 };
 
 mod page;
@@ -23,7 +24,7 @@ pub use strategy::*;
 /// Smaller pages reduce memory overhead during decompression and improve
 /// random access performance, while larger pages compress more efficiently.
 /// 16 KiB balances these trade-offs for typical workloads.
-pub(crate) const MAX_UNCOMPRESSED_PAGE_SIZE: usize = 16 * 1024;
+pub const MAX_UNCOMPRESSED_PAGE_SIZE: usize = 16 * 1024;
 
 const VERSION: Version = Version::new(3);
 
@@ -96,7 +97,7 @@ where
 
     /// Decodes a compressed page, returning the decompressed values.
     #[inline]
-    pub(crate) fn decode_page(&self, page_index: usize, reader: &Reader) -> Result<Vec<T>> {
+    pub fn decode_page(&self, page_index: usize, reader: &Reader) -> Result<Vec<T>> {
         Self::decode_page_(self.stored_len(), page_index, reader, &self.pages.read())
     }
 
@@ -200,6 +201,19 @@ where
     #[inline]
     pub(crate) fn pages(&self) -> &Arc<RwLock<Pages>> {
         &self.pages
+    }
+
+    /// Returns a read-only view for fast page-based random access and range iteration.
+    ///
+    /// The view only sees stored (persisted) values. Call `write()` first
+    /// if you need pushed values to be visible.
+    #[inline]
+    pub fn view(&self) -> CompressedVecView<'_, I, T, S> {
+        CompressedVecView::new(
+            self.base.region().create_reader(),
+            self.base.stored_len(),
+            self.pages.read(),
+        )
     }
 
     #[inline]
@@ -507,6 +521,10 @@ where
 {
     fn iter(&self) -> BoxedVecIterator<'_, I, T> {
         Box::new(self.into_iter())
+    }
+
+    fn iter_small_range(&self, from: usize, to: usize) -> BoxedVecIterator<'_, I, T> {
+        Box::new(self.view().into_range_iter(from, to))
     }
 }
 

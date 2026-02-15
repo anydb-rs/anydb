@@ -12,7 +12,7 @@ version.workspace = true
 [dependencies]
 libc = "=0.2.180" # TODO: Unfreeze when possible
 log = { workspace = true }
-memmap2 = "0.9.9"
+memmap2 = "0.9.10"
 parking_lot = { workspace = true }
 rayon = { workspace = true }
 smallvec = "1.15"

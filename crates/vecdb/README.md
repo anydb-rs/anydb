@@ -60,11 +60,9 @@ fn main() -> Result<()> {
     }
 
     // Random access
-    let reader = vec.create_reader();
+    let view = vec.view();
     for i in [500, 1000, 10] {
-        if let Ok(value) = vec.read_at(i, &reader) {
-            println!("vec[{}] = {}", i, value);
-        }
+        println!("vec[{}] = {}", i, view.get(i));
     }
 
     Ok(())
