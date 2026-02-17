@@ -33,17 +33,26 @@ pub trait CompressionStrategy<T>: RawStrategy<T> {
     #[inline]
     fn bytes_to_values(bytes: &[u8], expected_len: usize) -> Result<Vec<T>> {
         let mut vec = Vec::with_capacity(expected_len);
+        Self::bytes_to_values_into(bytes, expected_len, &mut vec)?;
+        Ok(vec)
+    }
+
+    /// Deserializes bytes into an existing buffer, reusing its allocation.
+    #[inline]
+    fn bytes_to_values_into(bytes: &[u8], expected_len: usize, dst: &mut Vec<T>) -> Result<()> {
+        dst.clear();
+        dst.reserve(expected_len);
         for chunk in bytes.chunks_exact(size_of::<T>()) {
-            vec.push(Self::read(chunk)?);
+            dst.push(Self::read(chunk)?);
         }
 
-        if likely(vec.len() == expected_len) {
-            return Ok(vec);
+        if likely(dst.len() == expected_len) {
+            return Ok(());
         }
 
         Err(Error::DecompressionMismatch {
             expected_len,
-            actual_len: vec.len(),
+            actual_len: dst.len(),
         })
     }
 }

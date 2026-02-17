@@ -16,14 +16,12 @@ where
     V::T: Formattable,
 {
     fn create_writer(&self, from: Option<i64>, to: Option<i64>) -> Box<dyn ValueWriter + '_> {
-        let from_usize = from.map(|i| self.i64_to_usize(i));
-        let to_usize = to.map(|i| self.i64_to_usize(i));
+        let from_usize = from.map(|i| self.i64_to_usize(i)).unwrap_or(0);
+        let to_usize = to.map(|i| self.i64_to_usize(i)).unwrap_or_else(|| self.len());
 
-        // Uses iterator-based streaming. For small ranges a view-based approach
-        // would avoid the iterator setup overhead, but CSV typically streams
-        // full datasets.
+        let values = self.collect_range(from_usize, to_usize);
         Box::new(VecIteratorWriter {
-            iter: Box::new(self.iter_range(from_usize, to_usize)),
+            iter: Box::new(values.into_iter()),
             _phantom: PhantomData as PhantomData<V::T>,
         })
     }

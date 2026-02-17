@@ -1,6 +1,6 @@
 use std::ops::{Add, Div, Mul, Sub};
 
-use crate::{Exit, IterableVec, Result, StoredVec, VecValue};
+use crate::{Exit, ScannableVec, Result, StoredVec, VecValue};
 
 use super::{CheckedSub, EagerVec};
 
@@ -11,8 +11,8 @@ where
     pub fn compute_add(
         &mut self,
         max_from: V::I,
-        added: &impl IterableVec<V::I, V::T>,
-        adder: &impl IterableVec<V::I, V::T>,
+        added: &impl ScannableVec<V::I, V::T>,
+        adder: &impl ScannableVec<V::I, V::T>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -30,8 +30,8 @@ where
     pub fn compute_subtract(
         &mut self,
         max_from: V::I,
-        subtracted: &impl IterableVec<V::I, V::T>,
-        subtracter: &impl IterableVec<V::I, V::T>,
+        subtracted: &impl ScannableVec<V::I, V::T>,
+        subtracter: &impl ScannableVec<V::I, V::T>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -55,8 +55,8 @@ where
     pub fn compute_multiply<A, B>(
         &mut self,
         max_from: V::I,
-        multiplied: &impl IterableVec<V::I, A>,
-        multiplier: &impl IterableVec<V::I, B>,
+        multiplied: &impl ScannableVec<V::I, A>,
+        multiplier: &impl ScannableVec<V::I, B>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -76,8 +76,8 @@ where
     pub fn compute_divide<A, B>(
         &mut self,
         max_from: V::I,
-        divided: &impl IterableVec<V::I, A>,
-        divider: &impl IterableVec<V::I, B>,
+        divided: &impl ScannableVec<V::I, A>,
+        divider: &impl ScannableVec<V::I, B>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -97,8 +97,8 @@ where
     pub fn compute_percentage<A, B>(
         &mut self,
         max_from: V::I,
-        divided: &impl IterableVec<V::I, A>,
-        divider: &impl IterableVec<V::I, B>,
+        divided: &impl ScannableVec<V::I, A>,
+        divider: &impl ScannableVec<V::I, B>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -118,8 +118,8 @@ where
     pub fn compute_percentage_difference<A, B>(
         &mut self,
         max_from: V::I,
-        divided: &impl IterableVec<V::I, A>,
-        divider: &impl IterableVec<V::I, B>,
+        divided: &impl ScannableVec<V::I, A>,
+        divider: &impl ScannableVec<V::I, B>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -139,8 +139,8 @@ where
     fn compute_percentage_<A, B>(
         &mut self,
         max_from: V::I,
-        divided: &impl IterableVec<V::I, A>,
-        divider: &impl IterableVec<V::I, B>,
+        divided: &impl ScannableVec<V::I, A>,
+        divider: &impl ScannableVec<V::I, B>,
         exit: &Exit,
         as_difference: bool,
     ) -> Result<()>

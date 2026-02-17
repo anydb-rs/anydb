@@ -55,5 +55,13 @@ required-features = ["pco"]
 name = "pco_bench"
 required-features = ["pco"]
 
+[[example]]
+name = "io_vs_mmap"
+required-features = ["pco"]
+
+[[example]]
+name = "bench"
+required-features = ["pco"]
+
 [package.metadata.docs.rs]
 all-features = true

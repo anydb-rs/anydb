@@ -1,7 +1,7 @@
 use std::{fmt::Debug, path::PathBuf};
 
 use log::info;
-use rawdb::{Database, Reader, Region};
+use rawdb::{Database, Region};
 
 mod aggregates;
 mod arithmetic;
@@ -16,9 +16,10 @@ pub use checked_sub::*;
 pub use saturating_add::*;
 
 use crate::{
-    AnyStoredVec, AnyVec, BoxedVecIterator, Exit, GenericStoredVec, Header, ImportOptions,
-    ImportableVec, IterableVec, PrintableIndex, Result, Stamp, StoredVec, TypedVec, Version,
-    short_type_name,
+    AnyStoredVec, AnyVec, Exit, GenericStoredVec, Header, ImportOptions,
+    ImportableVec, ScannableVec, Result, Stamp, StoredVec, TypedVec,
+    Version,
+    traits::generic::MAX_CACHE_SIZE,
 };
 
 /// Wrapper for computing and storing derived values from source vectors.
@@ -64,14 +65,18 @@ impl<V> EagerVec<V>
 where
     V: StoredVec,
 {
+    /// Max end index for one batch, capped at `max_end`.
+    /// Ensures `pushed_len * SIZE_OF_T >= MAX_CACHE_SIZE` so `batch_limit_reached()` fires.
     #[inline]
-    pub fn inner_version(&self) -> Version {
-        self.0.header().vec_version()
+    fn batch_end(&self, max_end: usize) -> usize {
+        let size = size_of::<V::T>().max(1);
+        let cap = MAX_CACHE_SIZE.div_ceil(size);
+        (self.len() + cap).min(max_end)
     }
 
     /// Helper that repeatedly calls a compute function until it completes.
     /// Writes between iterations when batch limit is hit.
-    pub(super) fn repeat_until_complete<F>(&mut self, exit: &Exit, mut f: F) -> Result<()>
+    pub fn repeat_until_complete<F>(&mut self, exit: &Exit, mut f: F) -> Result<()>
     where
         F: FnMut(&mut Self) -> Result<()>,
     {
@@ -120,17 +125,17 @@ where
 
     #[inline]
     fn index_type_to_string(&self) -> &'static str {
-        <V::I as PrintableIndex>::to_string()
+        self.0.index_type_to_string()
     }
 
     #[inline]
     fn value_type_to_size_of(&self) -> usize {
-        size_of::<V::T>()
+        self.0.value_type_to_size_of()
     }
 
     #[inline]
     fn value_type_to_string(&self) -> &'static str {
-        short_type_name::<V::T>()
+        self.0.value_type_to_string()
     }
 
     #[inline]
@@ -211,8 +216,8 @@ where
     V: StoredVec,
 {
     #[inline]
-    fn unchecked_read_at(&self, index: usize, reader: &Reader) -> Result<V::T> {
-        self.0.unchecked_read_at(index, reader)
+    fn collect_stored_range(&self, from: usize, to: usize) -> Result<Vec<V::T>> {
+        self.0.collect_stored_range(from, to)
     }
 
     #[inline(always)]
@@ -267,29 +272,35 @@ where
     }
 }
 
-impl<'a, V> IntoIterator for &'a EagerVec<V>
-where
-    V: StoredVec,
-    &'a V: IntoIterator<Item = V::T>,
-{
-    type Item = V::T;
-    type IntoIter = <&'a V as IntoIterator>::IntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        (&self.0).into_iter()
-    }
-}
-
-impl<V> IterableVec<V::I, V::T> for EagerVec<V>
+impl<V> ScannableVec<V::I, V::T> for EagerVec<V>
 where
     V: StoredVec,
 {
-    fn iter(&self) -> BoxedVecIterator<'_, V::I, V::T> {
-        self.0.iter()
+    #[inline]
+    fn for_each_range_dyn(&self, from: usize, to: usize, f: &mut dyn FnMut(V::T)) {
+        self.0.for_each_range_dyn(from, to, f)
     }
 
-    fn iter_small_range(&self, from: usize, to: usize) -> BoxedVecIterator<'_, V::I, V::T> {
-        self.0.iter_small_range(from, to)
+    #[inline]
+    fn fold_range<B, F: FnMut(B, V::T) -> B>(&self, from: usize, to: usize, init: B, f: F) -> B
+    where
+        Self: Sized,
+    {
+        self.0.fold_range(from, to, init, f)
+    }
+
+    #[inline]
+    fn try_fold_range<B, E, F: FnMut(B, V::T) -> std::result::Result<B, E>>(
+        &self,
+        from: usize,
+        to: usize,
+        init: B,
+        f: F,
+    ) -> std::result::Result<B, E>
+    where
+        Self: Sized,
+    {
+        self.0.try_fold_range(from, to, init, f)
     }
 }
 

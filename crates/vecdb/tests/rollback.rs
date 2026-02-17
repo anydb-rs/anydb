@@ -10,7 +10,7 @@ use rawdb::Database;
 use std::ops::DerefMut;
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, CollectableVec, GenericStoredVec, ImportOptions, ImportableVec, Result, Stamp,
+    AnyStoredVec, GenericStoredVec, ImportOptions, ImportableVec, Result, ScannableVec, Stamp,
     StoredVec, Version,
 };
 
@@ -750,7 +750,7 @@ mod raw_rollback {
         }
 
         fn collect(&self) -> Vec<u32> {
-            CollectableVec::collect(self)
+            ScannableVec::collect(self)
         }
 
         fn collect_holed(&self) -> Result<Vec<Option<u32>>> {
@@ -820,7 +820,7 @@ mod raw_rollback {
         }
 
         fn collect(&self) -> Vec<u32> {
-            CollectableVec::collect(self)
+            ScannableVec::collect(self)
         }
 
         fn collect_holed(&self) -> Result<Vec<Option<u32>>> {

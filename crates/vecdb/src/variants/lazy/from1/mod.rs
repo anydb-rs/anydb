@@ -1,16 +1,15 @@
+use std::marker::PhantomData;
+
 use crate::{
-    AnyVec, BoxedVecIterator, Error, IterableBoxedVec, IterableVec, Result, TypedVec,
-    TypedVecIterator, VecIndex, VecValue, Version, short_type_name,
+    AnyVec, ScannableBoxedVec, ScannableVec, TypedVec,
+    VecIndex, VecValue, Version, short_type_name,
 };
 
-mod iterator;
 mod transform;
 
-pub use iterator::*;
 pub use transform::*;
 
-pub type ComputeFrom1<I, T, S1I, S1T> =
-    for<'a> fn(I, &mut dyn TypedVecIterator<I = S1I, T = S1T, Item = S1T>) -> Option<T>;
+pub type ComputeFrom1<T, S1T> = fn(S1T) -> T;
 
 /// Lazily computed vector deriving values on-the-fly from one source vector.
 ///
@@ -24,12 +23,14 @@ pub type ComputeFrom1<I, T, S1I, S1T> =
 #[derive(Clone)]
 pub struct LazyVecFrom1<I, T, S1I, S1T>
 where
-    S1T: Clone,
+    S1I: VecIndex,
+    S1T: VecValue,
 {
     name: String,
     base_version: Version,
-    source: IterableBoxedVec<S1I, S1T>,
-    compute: ComputeFrom1<I, T, S1I, S1T>,
+    source: ScannableBoxedVec<S1I, S1T>,
+    compute: ComputeFrom1<T, S1T>,
+    _index: PhantomData<fn() -> I>,
 }
 
 impl<I, T, S1I, S1T> LazyVecFrom1<I, T, S1I, S1T>
@@ -42,8 +43,8 @@ where
     pub fn init(
         name: &str,
         version: Version,
-        source: IterableBoxedVec<S1I, S1T>,
-        compute: ComputeFrom1<I, T, S1I, S1T>,
+        source: ScannableBoxedVec<S1I, S1T>,
+        compute: ComputeFrom1<T, S1T>,
     ) -> Self {
         assert_eq!(
             I::to_string(),
@@ -58,6 +59,7 @@ where
             base_version: version,
             source,
             compute,
+            _index: PhantomData,
         }
     }
 
@@ -65,33 +67,6 @@ where
         self.base_version + self.source.version()
     }
 
-    /// Read a single value at the given index.
-    /// Creates an iterator internally, so prefer `into_iter()` for multiple reads.
-    #[inline]
-    pub fn read_once(&self, index: I) -> Result<T> {
-        self.into_iter()
-            .get(index)
-            .ok_or(Error::IndexTooHigh {
-                index: index.to_usize(),
-                len: self.len(),
-                name: self.name.clone(),
-            })
-    }
-}
-
-impl<'a, I, T, S1I, S1T> IntoIterator for &'a LazyVecFrom1<I, T, S1I, S1T>
-where
-    I: VecIndex,
-    T: VecValue + 'a,
-    S1I: VecIndex,
-    S1T: VecValue,
-{
-    type Item = T;
-    type IntoIter = LazyVecFrom1Iterator<'a, I, T, S1I, S1T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        LazyVecFrom1Iterator::new(self)
-    }
 }
 
 impl<I, T, S1I, S1T> AnyVec for LazyVecFrom1<I, T, S1I, S1T>
@@ -133,22 +108,16 @@ where
     }
 }
 
-impl<I, T, S1I, S1T> IterableVec<I, T> for LazyVecFrom1<I, T, S1I, S1T>
+impl<I, T, S1I, S1T> ScannableVec<I, T> for LazyVecFrom1<I, T, S1I, S1T>
 where
     I: VecIndex,
     T: VecValue,
     S1I: VecIndex,
     S1T: VecValue,
 {
-    fn iter(&self) -> BoxedVecIterator<'_, I, T> {
-        Box::new(self.into_iter())
-    }
-
-    fn iter_small_range(&self, from: usize, to: usize) -> BoxedVecIterator<'_, I, T> {
-        let mut iter = self.iter();
-        iter.set_position_to(from);
-        iter.set_end_to(to);
-        iter
+    fn for_each_range_dyn(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
+        let compute = self.compute;
+        self.source.for_each_range_dyn(from, to, &mut |v| f(compute(v)));
     }
 }
 
@@ -174,8 +143,8 @@ where
     pub fn transformed<F: UnaryTransform<S1T, T>>(
         name: &str,
         version: Version,
-        source: IterableBoxedVec<I, S1T>,
+        source: ScannableBoxedVec<I, S1T>,
     ) -> Self {
-        Self::init(name, version, source, |i, iter| iter.get(i).map(F::apply))
+        Self::init(name, version, source, F::apply)
     }
 }

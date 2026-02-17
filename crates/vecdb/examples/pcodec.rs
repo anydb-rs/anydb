@@ -1,8 +1,8 @@
 use std::{fs, path::Path};
 
 use vecdb::{
-    AnyStoredVec, AnyVec, CollectableVec, Database, GenericStoredVec, ImportableVec, PcoVec, Stamp,
-    TypedVecIterator, Version,
+    AnyStoredVec, AnyVec, CollectableVec, Database, GenericStoredVec, ImportableVec, PcoVec,
+    ScannableVec, Stamp, Version,
 };
 
 #[allow(clippy::upper_case_acronyms)]
@@ -24,13 +24,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             vec.push(v);
         });
 
-        let mut iter = vec.into_iter();
-        assert_eq!(iter.get(0), Some(0));
-        assert_eq!(iter.get(1), Some(1));
-        assert_eq!(iter.get(2), Some(2));
-        assert_eq!(iter.get(20), Some(20));
-        assert_eq!(iter.get(21), None);
-        drop(iter);
+        assert_eq!(vec.collect_range(0, 1), vec![0]);
+        assert_eq!(vec.collect_range(1, 2), vec![1]);
+        assert_eq!(vec.collect_range(2, 3), vec![2]);
+        assert_eq!(vec.collect_range(20, 21), vec![20]);
+        assert!(vec.collect_range(21, 22).is_empty());
 
         vec.write()?;
 
@@ -44,17 +42,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         assert_eq!(vec.header().stamp(), Stamp::new(100));
 
-        let mut iter = vec.into_iter();
-        assert_eq!(iter.get(0), Some(0));
-        assert_eq!(iter.get(1), Some(1));
-        assert_eq!(iter.get(2), Some(2));
-        assert_eq!(iter.get(3), Some(3));
-        assert_eq!(iter.get(4), Some(4));
-        assert_eq!(iter.get(5), Some(5));
-        assert_eq!(iter.get(20), Some(20));
-        assert_eq!(iter.get(20), Some(20));
-        assert_eq!(iter.get(0), Some(0));
-        drop(iter);
+        assert_eq!(vec.collect_range(0, 1), vec![0]);
+        assert_eq!(vec.collect_range(1, 2), vec![1]);
+        assert_eq!(vec.collect_range(2, 3), vec![2]);
+        assert_eq!(vec.collect_range(3, 4), vec![3]);
+        assert_eq!(vec.collect_range(4, 5), vec![4]);
+        assert_eq!(vec.collect_range(5, 6), vec![5]);
+        assert_eq!(vec.collect_range(20, 21), vec![20]);
+        assert_eq!(vec.collect_range(0, 1), vec![0]);
 
         vec.push(21);
         vec.push(22);
@@ -63,12 +58,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(vec.pushed_len(), 2);
         assert_eq!(vec.len(), 23);
 
-        let mut iter = vec.into_iter();
-        assert_eq!(iter.get(20), Some(20));
-        assert_eq!(iter.get(21), Some(21));
-        assert_eq!(iter.get(22), Some(22));
-        assert_eq!(iter.get(23), None);
-        drop(iter);
+        assert_eq!(vec.collect_range(20, 21), vec![20]);
+        assert_eq!(vec.collect_range(21, 22), vec![21]);
+        assert_eq!(vec.collect_range(22, 23), vec![22]);
+        assert!(vec.collect_range(23, 24).is_empty());
 
         vec.write()?;
     }
@@ -82,12 +75,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(vec.pushed_len(), 0);
         assert_eq!(vec.len(), 23);
 
-        let mut iter = vec.into_iter();
-        assert_eq!(iter.get(0), Some(0));
-        assert_eq!(iter.get(20), Some(20));
-        assert_eq!(iter.get(21), Some(21));
-        assert_eq!(iter.get(22), Some(22));
-        drop(iter);
+        assert_eq!(vec.collect_range(0, 1), vec![0]);
+        assert_eq!(vec.collect_range(20, 21), vec![20]);
+        assert_eq!(vec.collect_range(21, 22), vec![21]);
+        assert_eq!(vec.collect_range(22, 23), vec![22]);
 
         vec.truncate_if_needed(14)?;
 
@@ -95,11 +86,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(vec.pushed_len(), 0);
         assert_eq!(vec.len(), 14);
 
-        let mut iter = vec.into_iter();
-        assert_eq!(iter.get(0), Some(0));
-        assert_eq!(iter.get(5), Some(5));
-        assert_eq!(iter.get(20), None);
-        drop(iter);
+        assert_eq!(vec.collect_range(0, 1), vec![0]);
+        assert_eq!(vec.collect_range(5, 6), vec![5]);
+        assert!(vec.collect_range(20, 21).is_empty());
 
         assert_eq!(
             vec.collect_signed_range(Some(-5), None),
@@ -107,12 +96,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         vec.push(vec.len() as u32);
-        assert_eq!(vec.iter()?.last(), Some(14));
+        let all = vec.collect();
+        assert_eq!(*all.last().unwrap(), 14);
 
         vec.write()?;
 
         assert_eq!(
-            vec.into_iter().collect::<Vec<_>>(),
+            vec.collect(),
             vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
         );
     }
@@ -121,15 +111,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut vec: VEC = PcoVec::forced_import_with(options)?;
 
         assert_eq!(
-            vec.into_iter().collect::<Vec<_>>(),
+            vec.collect(),
             vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
         );
 
-        let mut iter = vec.into_iter();
-        assert_eq!(iter.get(0), Some(0));
-        assert_eq!(iter.get(5), Some(5));
-        assert_eq!(iter.get(20), None);
-        drop(iter);
+        assert_eq!(vec.collect_range(0, 1), vec![0]);
+        assert_eq!(vec.collect_range(5, 6), vec![5]);
+        assert!(vec.collect_range(20, 21).is_empty());
 
         assert_eq!(
             vec.collect_signed_range(Some(-5), None),
@@ -150,11 +138,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(vec.stored_len(), 0);
         assert_eq!(vec.len(), 21);
 
-        let mut iter = vec.into_iter();
-        assert_eq!(iter.get(0), Some(0));
-        assert_eq!(iter.get(20), Some(20));
-        assert_eq!(iter.get(21), None);
-        drop(iter);
+        assert_eq!(vec.collect_range(0, 1), vec![0]);
+        assert_eq!(vec.collect_range(20, 21), vec![20]);
+        assert!(vec.collect_range(21, 22).is_empty());
 
         vec.write()?;
     }
@@ -166,10 +152,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(vec.stored_len(), 21);
         assert_eq!(vec.len(), 21);
 
-        let reader = vec.create_reader();
-        assert_eq!(vec.get_pushed_or_read(0, &reader)?, Some(0));
-        assert_eq!(vec.get_pushed_or_read(10, &reader)?, Some(10));
-        drop(reader);
+        assert_eq!(vec.collect_range(0, 1), vec![0]);
+        assert_eq!(vec.collect_range(10, 11), vec![10]);
 
         vec.write()?;
     }
@@ -187,5 +171,3 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-
-// fn main() {}

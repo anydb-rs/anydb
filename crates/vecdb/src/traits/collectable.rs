@@ -1,52 +1,28 @@
-use crate::IterableVec;
+use crate::ScannableVec;
 
 use super::{VecIndex, VecValue};
 
-/// Trait for vectors that can be collected into standard Rust collections with range support.
-pub trait CollectableVec<I, T>: IterableVec<I, T>
+/// Extension for [`ScannableVec`] adding signed-index range collection (Python-style).
+///
+/// Negative indices count from the end: `-1` is the last element, `-2` is second-to-last, etc.
+/// Automatically implemented for all `ScannableVec + Clone` types.
+pub trait CollectableVec<I, T>: ScannableVec<I, T>
 where
     Self: Clone,
     I: VecIndex,
     T: VecValue,
 {
-    /// Returns an iterator over the specified range.
-    fn iter_range(&self, from: Option<usize>, to: Option<usize>) -> impl Iterator<Item = T> {
-        let len = self.len();
-        let from = from.unwrap_or_default();
-        let to = to.map_or(len, |to| to.min(len));
-        let mut iter = self.iter();
-        iter.set_end_to(to);
-        iter.skip(from).take(to.saturating_sub(from))
-    }
-
-    /// Returns an iterator over the specified range using signed indices (supports negative indexing).
-    fn iter_signed_range(&self, from: Option<i64>, to: Option<i64>) -> impl Iterator<Item = T> {
-        let from = from.map(|i| self.i64_to_usize(i));
-        let to = to.map(|i| self.i64_to_usize(i));
-        self.iter_range(from, to)
-    }
-
-    /// Collects all values into a Vec.
-    fn collect(&self) -> Vec<T> {
-        self.collect_range(None, None)
-    }
-
-    /// Collects values in the specified range into a Vec.
-    fn collect_range(&self, from: Option<usize>, to: Option<usize>) -> Vec<T> {
-        self.iter_range(from, to).collect::<Vec<_>>()
-    }
-
-    /// Collects values in the specified range into a Vec using signed indices.
+    /// Collects values using signed indices. Negative indices count from the end.
     fn collect_signed_range(&self, from: Option<i64>, to: Option<i64>) -> Vec<T> {
-        let from = from.map(|i| self.i64_to_usize(i));
-        let to = to.map(|i| self.i64_to_usize(i));
+        let from = from.map(|i| self.i64_to_usize(i)).unwrap_or(0);
+        let to = to.map(|i| self.i64_to_usize(i)).unwrap_or_else(|| self.len());
         self.collect_range(from, to)
     }
 }
 
 impl<I, T, V> CollectableVec<I, T> for V
 where
-    V: IterableVec<I, T> + Clone,
+    V: ScannableVec<I, T> + Clone,
     I: VecIndex,
     T: VecValue,
 {

@@ -5,9 +5,9 @@ use parking_lot::RwLock;
 use rawdb::{Database, Reader, Region};
 
 use crate::{
-    AnyStoredVec, AnyVec, BaseVec, BoxedVecIterator, CleanCompressedVecIterator,
-    CompressedVecIterator, CompressedVecView, DirtyCompressedVecIterator, Error, Format,
-    GenericStoredVec, HEADER_OFFSET, Header, ImportOptions, IterableVec, Result, Stamp, TypedVec,
+    AnyStoredVec, AnyVec, BaseVec, CompressedIoSource,
+    CompressedMmapSource, Error, Format,
+    GenericStoredVec, HEADER_OFFSET, Header, ImportOptions, Result, ScannableVec, Stamp, TypedVec,
     VecIndex, VecValue, Version, likely, short_type_name, unlikely,
     vec_region_name_with,
 };
@@ -176,11 +176,6 @@ where
         format!("{}_pages", vec_region_name_with::<I>(name))
     }
 
-    #[inline]
-    pub fn is_dirty(&self) -> bool {
-        !self.is_pushed_empty()
-    }
-
     /// Removes this vector and all its associated regions from the database
     pub fn remove(self) -> Result<()> {
         // Remove main region
@@ -199,41 +194,41 @@ where
     }
 
     #[inline]
+    pub(crate) fn create_reader(&self) -> Reader {
+        self.base.region().create_reader()
+    }
+
+    #[inline]
     pub(crate) fn pages(&self) -> &Arc<RwLock<Pages>> {
         &self.pages
     }
 
-    /// Returns a read-only view for fast page-based random access and range iteration.
-    ///
-    /// The view only sees stored (persisted) values. Call `write()` first
-    /// if you need pushed values to be visible.
-    #[inline]
-    pub fn view(&self) -> CompressedVecView<'_, I, T, S> {
-        CompressedVecView::new(
-            self.base.region().create_reader(),
-            self.base.stored_len(),
-            self.pages.read(),
-        )
+    // ── Source helpers (internal, for ScannableVec) ──────────────────
+
+    /// Fold over stored data using auto-selected source (mmap or IO).
+    fn fold_source<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, f: F) -> B {
+        let range_bytes = to.saturating_sub(from) * size_of::<T>();
+        if range_bytes > crate::MMAP_CROSSOVER_BYTES {
+            CompressedIoSource::new(self, from, to).fold(init, f)
+        } else {
+            CompressedMmapSource::new(self, from, to).fold(init, f)
+        }
     }
 
-    #[inline]
-    pub fn iter(&self) -> Result<CompressedVecIterator<'_, I, T, S>> {
-        CompressedVecIterator::new(self)
-    }
-
-    #[inline]
-    pub fn clean_iter(&self) -> Result<CleanCompressedVecIterator<'_, I, T, S>> {
-        CleanCompressedVecIterator::new(self)
-    }
-
-    #[inline]
-    pub fn dirty_iter(&self) -> Result<DirtyCompressedVecIterator<'_, I, T, S>> {
-        DirtyCompressedVecIterator::new(self)
-    }
-
-    #[inline]
-    pub fn boxed_iter(&self) -> Result<BoxedVecIterator<'_, I, T>> {
-        Ok(Box::new(self.iter()?))
+    /// Fallible fold over stored data using auto-selected source.
+    fn try_fold_source<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
+        &self,
+        from: usize,
+        to: usize,
+        init: B,
+        f: F,
+    ) -> std::result::Result<B, E> {
+        let range_bytes = to.saturating_sub(from) * size_of::<T>();
+        if range_bytes > crate::MMAP_CROSSOVER_BYTES {
+            CompressedIoSource::new(self, from, to).try_fold(init, f)
+        } else {
+            CompressedMmapSource::new(self, from, to).try_fold(init, f)
+        }
     }
 }
 
@@ -365,15 +360,12 @@ where
         // Phase 2: Compress (no locks held)
         values.append(&mut mem::take(self.base.mut_pushed()));
 
-        let compressed = values
-            .chunks(Self::PER_PAGE)
-            .map(|chunk| Ok((Self::compress_page(chunk)?, chunk.len())))
-            .collect::<Result<Vec<_>>>()?;
-
-        let total_size: usize = compressed.iter().map(|(v, _)| v.len()).sum();
-        let mut buf = Vec::with_capacity(total_size);
-        for (v, _) in &compressed {
-            buf.extend_from_slice(v);
+        let mut buf = Vec::new();
+        let mut page_sizes = Vec::new();
+        for chunk in values.chunks(Self::PER_PAGE) {
+            let compressed = Self::compress_page(chunk)?;
+            page_sizes.push((compressed.len(), chunk.len()));
+            buf.extend_from_slice(&compressed);
         }
 
         // Phase 3: Write to region first (without holding pages lock to avoid deadlock)
@@ -385,7 +377,7 @@ where
         let mut pages = self.pages.write();
         pages.truncate(starting_page_index);
 
-        compressed.iter().enumerate().for_each(|(i, (bytes, len))| {
+        for (i, &(compressed_len, values_len)) in page_sizes.iter().enumerate() {
             let page_index = starting_page_index + i;
 
             let start = if page_index != 0 {
@@ -399,9 +391,9 @@ where
 
             pages.checked_push(
                 page_index,
-                Page::new(start, bytes.len() as u32, *len as u32),
+                Page::new(start, compressed_len as u32, values_len as u32),
             );
-        });
+        }
 
         self.update_stored_len(stored_len + pushed_len);
         pages.flush()?;
@@ -438,15 +430,34 @@ where
     T: VecValue,
     S: CompressionStrategy<T>,
 {
-    #[inline]
-    fn unchecked_read_at(&self, index: usize, reader: &Reader) -> Result<T> {
-        let page_index = Self::index_to_page_index(index);
-        let decoded_index = index % Self::PER_PAGE;
-        Ok(unsafe {
-            self.decode_page(page_index, reader)?
-                .get_unchecked(decoded_index)
-                .clone()
-        })
+    fn collect_stored_range(&self, from: usize, to: usize) -> Result<Vec<T>> {
+        if from >= to {
+            return Ok(vec![]);
+        }
+
+        // Must decode pages directly — fold_source clamps to stored_len,
+        // but this method may read truncated values still in pages on disk.
+        let reader = self.create_reader();
+        let pages = self.pages.read();
+        let real_len = pages.stored_len(Self::PER_PAGE);
+        let to = to.min(real_len);
+        if from >= to {
+            return Ok(vec![]);
+        }
+
+        let mut result = Vec::with_capacity(to - from);
+        let start_page = from / Self::PER_PAGE;
+        let end_page = (to - 1) / Self::PER_PAGE;
+
+        for page_idx in start_page..=end_page {
+            let page_start = page_idx * Self::PER_PAGE;
+            let decoded = Self::decode_page_(real_len, page_idx, &reader, &pages)?;
+            let local_from = from.saturating_sub(page_start);
+            let local_to = (to - page_start).min(decoded.len());
+            result.extend_from_slice(&decoded[local_from..local_to]);
+        }
+
+        Ok(result)
     }
 
     #[inline(always)]
@@ -498,33 +509,108 @@ where
     }
 }
 
-impl<'a, I, T, S> IntoIterator for &'a CompressedVecInner<I, T, S>
+impl<I, T, S> ScannableVec<I, T> for CompressedVecInner<I, T, S>
 where
     I: VecIndex,
     T: VecValue,
     S: CompressionStrategy<T>,
 {
-    type Item = T;
-    type IntoIter = CompressedVecIterator<'a, I, T, S>;
+    fn for_each_range_dyn(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
+        let len = self.len_();
+        let from = from.min(len);
+        let to = to.min(len);
+        if from >= to {
+            return;
+        }
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-            .expect("CompressedVecIterator::new(self) to work")
+        let stored_len = self.stored_len();
+        let stored_to = to.min(stored_len);
+
+        if from < stored_to {
+            self.fold_source(from, stored_to, (), |(), v| f(v));
+        }
+
+        let push_start = from.max(stored_len);
+        for i in push_start..to {
+            if let Some(v) = self.get_pushed_at(i, stored_len) {
+                f(v.clone());
+            }
+        }
     }
-}
 
-impl<I, T, S> IterableVec<I, T> for CompressedVecInner<I, T, S>
-where
-    I: VecIndex,
-    T: VecValue,
-    S: CompressionStrategy<T>,
-{
-    fn iter(&self) -> BoxedVecIterator<'_, I, T> {
-        Box::new(self.into_iter())
+    fn fold_range<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+    {
+        let len = self.len_();
+        let from = from.min(len);
+        let to = to.min(len);
+        if from >= to {
+            return init;
+        }
+
+        let stored_len = self.stored_len();
+
+        // Fast path: entirely within stored data
+        if to <= stored_len {
+            return self.fold_source(from, to, init, f);
+        }
+
+        let stored_to = to.min(stored_len);
+        let mut acc = init;
+
+        if from < stored_to {
+            acc = self.fold_source(from, stored_to, acc, &mut f);
+        }
+
+        let push_start = from.max(stored_len);
+        for i in push_start..to {
+            if let Some(v) = self.get_pushed_at(i, stored_len) {
+                acc = f(acc, v.clone());
+            }
+        }
+
+        acc
     }
 
-    fn iter_small_range(&self, from: usize, to: usize) -> BoxedVecIterator<'_, I, T> {
-        Box::new(self.view().into_range_iter(from, to))
+    fn try_fold_range<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
+        &self,
+        from: usize,
+        to: usize,
+        init: B,
+        mut f: F,
+    ) -> std::result::Result<B, E>
+    where
+        Self: Sized,
+    {
+        let len = self.len_();
+        let from = from.min(len);
+        let to = to.min(len);
+        if from >= to {
+            return Ok(init);
+        }
+
+        let stored_len = self.stored_len();
+
+        if to <= stored_len {
+            return self.try_fold_source(from, to, init, f);
+        }
+
+        let stored_to = to.min(stored_len);
+        let mut acc = init;
+
+        if from < stored_to {
+            acc = self.try_fold_source(from, stored_to, acc, &mut f)?;
+        }
+
+        let push_start = from.max(stored_len);
+        for i in push_start..to {
+            if let Some(v) = self.get_pushed_at(i, stored_len) {
+                acc = f(acc, v.clone())?;
+            }
+        }
+
+        Ok(acc)
     }
 }
 

@@ -4,11 +4,9 @@ use crate::{AnyStoredVec, Format, HEADER_OFFSET, VecIndex, impl_vec_wrapper};
 
 use super::RawVecInner;
 
-mod iterators;
 mod strategy;
 mod value;
 
-pub use iterators::*;
 pub use strategy::*;
 pub use value::*;
 
@@ -102,8 +100,5 @@ impl_vec_wrapper!(
     ZeroCopyVec,
     RawVecInner<I, T, ZeroCopyStrategy<T>>,
     ZeroCopyVecValue,
-    ZeroCopyVecIterator,
-    CleanZeroCopyVecIterator,
-    DirtyZeroCopyVecIterator,
     Format::ZeroCopy
 );

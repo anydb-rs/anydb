@@ -1,6 +1,6 @@
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, CollectableVec, Database, GenericStoredVec, ImportableVec, Pco, PcoVec, Version,
+    AnyStoredVec, Database, GenericStoredVec, ImportableVec, Pco, PcoVec, ScannableVec, Version,
 };
 
 // Test with a single generic parameter

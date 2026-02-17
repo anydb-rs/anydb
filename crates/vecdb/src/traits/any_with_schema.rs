@@ -1,10 +1,10 @@
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 
-use crate::TypedVec;
+use crate::{AnyVec, TypedVec};
 
 /// Trait for vectors whose value type implements JsonSchema.
 /// Provides access to the JSON Schema of the value type.
-pub trait AnyVecWithSchema {
+pub trait AnyVecWithSchema: AnyVec {
     /// Returns the JSON Schema for the value type.
     fn value_schema(&self) -> Schema;
 }

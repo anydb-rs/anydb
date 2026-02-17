@@ -1,18 +1,11 @@
+use std::marker::PhantomData;
+
 use crate::{
-    AnyVec, BoxedVecIterator, IterableBoxedVec, IterableVec, TypedVec, TypedVecIterator, VecIndex,
+    AnyVec, ScannableBoxedVec, ScannableVec, TypedVec, VecIndex,
     VecValue, Version, short_type_name,
 };
 
-mod iterator;
-
-pub use iterator::*;
-
-pub type ComputeFrom3<I, T, S1I, S1T, S2I, S2T, S3I, S3T> = for<'a> fn(
-    I,
-    &mut dyn TypedVecIterator<I = S1I, T = S1T, Item = S1T>,
-    &mut dyn TypedVecIterator<I = S2I, T = S2T, Item = S2T>,
-    &mut dyn TypedVecIterator<I = S3I, T = S3T, Item = S3T>,
-) -> Option<T>;
+pub type ComputeFrom3<T, S1T, S2T, S3T> = fn(S1T, S2T, S3T) -> T;
 
 /// Lazily computed vector deriving values from three source vectors.
 ///
@@ -21,16 +14,23 @@ pub type ComputeFrom3<I, T, S1I, S1T, S2I, S2T, S3I, S3T> = for<'a> fn(
 #[derive(Clone)]
 pub struct LazyVecFrom3<I, T, S1I, S1T, S2I, S2T, S3I, S3T>
 where
-    S1T: Clone,
-    S2T: Clone,
-    S3T: Clone,
+    S1I: VecIndex,
+    S1T: VecValue,
+    S2I: VecIndex,
+    S2T: VecValue,
+    S3I: VecIndex,
+    S3T: VecValue,
 {
     name: String,
     base_version: Version,
-    source1: IterableBoxedVec<S1I, S1T>,
-    source2: IterableBoxedVec<S2I, S2T>,
-    source3: IterableBoxedVec<S3I, S3T>,
-    compute: ComputeFrom3<I, T, S1I, S1T, S2I, S2T, S3I, S3T>,
+    source1: ScannableBoxedVec<S1I, S1T>,
+    source2: ScannableBoxedVec<S2I, S2T>,
+    source3: ScannableBoxedVec<S3I, S3T>,
+    compute: ComputeFrom3<T, S1T, S2T, S3T>,
+    s1_counts: bool,
+    s2_counts: bool,
+    s3_counts: bool,
+    _index: PhantomData<fn() -> I>,
 }
 
 impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> LazyVecFrom3<I, T, S1I, S1T, S2I, S2T, S3I, S3T>
@@ -47,10 +47,10 @@ where
     pub fn init(
         name: &str,
         version: Version,
-        source1: IterableBoxedVec<S1I, S1T>,
-        source2: IterableBoxedVec<S2I, S2T>,
-        source3: IterableBoxedVec<S3I, S3T>,
-        compute: ComputeFrom3<I, T, S1I, S1T, S2I, S2T, S3I, S3T>,
+        source1: ScannableBoxedVec<S1I, S1T>,
+        source2: ScannableBoxedVec<S2I, S2T>,
+        source3: ScannableBoxedVec<S3I, S3T>,
+        compute: ComputeFrom3<T, S1T, S2T, S3T>,
     ) -> Self {
         let target = I::to_string();
         let s1 = source1.index_type_to_string();
@@ -66,6 +66,10 @@ where
             s3
         );
 
+        let s1_counts = s1 == target;
+        let s2_counts = s2 == target;
+        let s3_counts = s3 == target;
+
         Self {
             name: name.to_string(),
             base_version: version,
@@ -73,31 +77,15 @@ where
             source2,
             source3,
             compute,
+            s1_counts,
+            s2_counts,
+            s3_counts,
+            _index: PhantomData,
         }
     }
 
     fn version(&self) -> Version {
         self.base_version + self.source1.version() + self.source2.version() + self.source3.version()
-    }
-}
-
-impl<'a, I, T, S1I, S1T, S2I, S2T, S3I, S3T> IntoIterator
-    for &'a LazyVecFrom3<I, T, S1I, S1T, S2I, S2T, S3I, S3T>
-where
-    I: VecIndex,
-    T: VecValue + 'a,
-    S1I: VecIndex,
-    S1T: VecValue,
-    S2I: VecIndex,
-    S2T: VecValue,
-    S3I: VecIndex,
-    S3T: VecValue,
-{
-    type Item = T;
-    type IntoIter = LazyVecFrom3Iterator<'a, I, T, S1I, S1T, S2I, S2T, S3I, S3T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        LazyVecFrom3Iterator::new(self)
     }
 }
 
@@ -125,21 +113,9 @@ where
     }
 
     fn len(&self) -> usize {
-        let len1 = if self.source1.index_type_to_string() == I::to_string() {
-            self.source1.len()
-        } else {
-            usize::MAX
-        };
-        let len2 = if self.source2.index_type_to_string() == I::to_string() {
-            self.source2.len()
-        } else {
-            usize::MAX
-        };
-        let len3 = if self.source3.index_type_to_string() == I::to_string() {
-            self.source3.len()
-        } else {
-            usize::MAX
-        };
+        let len1 = if self.s1_counts { self.source1.len() } else { usize::MAX };
+        let len2 = if self.s2_counts { self.source2.len() } else { usize::MAX };
+        let len3 = if self.s3_counts { self.source3.len() } else { usize::MAX };
         len1.min(len2).min(len3)
     }
 
@@ -159,7 +135,7 @@ where
     }
 }
 
-impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> IterableVec<I, T>
+impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> ScannableVec<I, T>
     for LazyVecFrom3<I, T, S1I, S1T, S2I, S2T, S3I, S3T>
 where
     I: VecIndex,
@@ -171,15 +147,17 @@ where
     S3I: VecIndex,
     S3T: VecValue,
 {
-    fn iter(&self) -> BoxedVecIterator<'_, I, T> {
-        Box::new(self.into_iter())
-    }
-
-    fn iter_small_range(&self, from: usize, to: usize) -> BoxedVecIterator<'_, I, T> {
-        let mut iter = self.iter();
-        iter.set_position_to(from);
-        iter.set_end_to(to);
-        iter
+    fn for_each_range_dyn(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
+        let compute = self.compute;
+        let s2_vals = self.source2.collect_range(from, to);
+        let s3_vals = self.source3.collect_range(from, to);
+        let mut s2_iter = s2_vals.into_iter();
+        let mut s3_iter = s3_vals.into_iter();
+        self.source1.for_each_range_dyn(from, to, &mut |v1| {
+            let v2 = s2_iter.next().unwrap();
+            let v3 = s3_iter.next().unwrap();
+            f(compute(v1, v2, v3));
+        });
     }
 }
 

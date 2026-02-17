@@ -3,7 +3,7 @@
 use rawdb::Database;
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, EagerVec, GenericStoredVec, ImportableVec, IterableVec, StoredVec, Version,
+    AnyStoredVec, EagerVec, GenericStoredVec, ImportableVec, ScannableVec, StoredVec, Version,
 };
 
 // ============================================================================
@@ -31,12 +31,10 @@ where
 
     println!("After flush, checking data consistency...");
 
-    // Now create an iterator (which uses file handle for reads)
-    let mut iter = vec.iter();
-
-    // Check if iterator sees the written data
-    for i in 0..1000u32 {
-        let value = iter.next().expect("Should have value");
+    // Check if collected data matches what was written
+    let collected = vec.collect();
+    for i in 0..1000usize {
+        let value = collected[i];
         let expected = i as u64 * 100;
 
         if value != expected {
@@ -73,10 +71,10 @@ where
         // Flush
         vec.flush().unwrap();
 
-        // Immediately read back using read_at_unwrap_once
+        // Immediately read back using collect_range
         for i in 0..100usize {
             let idx = start + i;
-            let value = vec.read_at_unwrap_once(idx);
+            let value = vec.collect_one(idx).unwrap();
             let expected = (start + i) as u64 * 100;
 
             if value != expected {

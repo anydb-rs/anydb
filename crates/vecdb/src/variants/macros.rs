@@ -6,8 +6,7 @@
 ///     LZ4Vec,
 ///     CompressedVecInner<I, T, LZ4Strategy<T>>,
 ///     LZ4VecValue,
-///     LZ4VecIterator, CleanLZ4VecIterator, DirtyLZ4VecIterator,
-///     Format::LZ4
+///     Format::LZ4,
 /// );
 /// ```
 ///
@@ -18,11 +17,9 @@
 /// - `TypedVec`
 /// - `AnyStoredVec`
 /// - `GenericStoredVec`
-/// - `IntoIterator`
-/// - `IterableVec`
-/// - Iterator methods (`iter`, `clean_iter`, `dirty_iter`, `boxed_iter`)
+/// - `ScannableVec` (delegates `for_each_range_dyn` / `fold_range` to inner)
 macro_rules! impl_vec_wrapper {
-    ($wrapper:ident, $inner:ty, $value_trait:ident, $iterator:ident, $clean_iter:ident, $dirty_iter:ident, $format:expr) => {
+    ($wrapper:ident, $inner:ty, $value_trait:ident, $format:expr) => {
         impl<I, T> ::std::ops::Deref for $wrapper<I, T> {
             type Target = $inner;
 
@@ -197,12 +194,12 @@ macro_rules! impl_vec_wrapper {
             T: $value_trait,
         {
             #[inline]
-            fn unchecked_read_at(
+            fn collect_stored_range(
                 &self,
-                index: usize,
-                reader: &::rawdb::Reader,
-            ) -> $crate::Result<T> {
-                self.0.unchecked_read_at(index, reader)
+                from: usize,
+                to: usize,
+            ) -> $crate::Result<Vec<T>> {
+                self.0.collect_stored_range(from, to)
             }
 
             #[inline(always)]
@@ -256,15 +253,6 @@ macro_rules! impl_vec_wrapper {
             }
 
             #[inline]
-            fn get_stored_value_for_serialization(
-                &self,
-                index: usize,
-                reader: &::rawdb::Reader,
-            ) -> $crate::Result<T> {
-                self.0.get_stored_value_for_serialization(index, reader)
-            }
-
-            #[inline]
             fn restore_truncated_value(&mut self, index: usize, value: T) {
                 self.0.restore_truncated_value(index, value)
             }
@@ -300,59 +288,39 @@ macro_rules! impl_vec_wrapper {
             }
         }
 
-        impl<'a, I, T> IntoIterator for &'a $wrapper<I, T>
-        where
-            I: $crate::VecIndex,
-            T: $value_trait,
-        {
-            type Item = T;
-            type IntoIter = $iterator<'a, I, T>;
-
-            fn into_iter(self) -> Self::IntoIter {
-                self.iter()
-                    .expect(concat!(stringify!($iterator), "::new(self) to work"))
-            }
-        }
-
-        impl<I, T> $crate::IterableVec<I, T> for $wrapper<I, T>
-        where
-            I: $crate::VecIndex,
-            T: $value_trait,
-        {
-            fn iter(&self) -> $crate::BoxedVecIterator<'_, I, T> {
-                Box::new(self.into_iter())
-            }
-
-            fn iter_small_range(&self, from: usize, to: usize) -> $crate::BoxedVecIterator<'_, I, T> {
-                $crate::IterableVec::<I, T>::iter_small_range(&self.0, from, to)
-            }
-        }
-
-        impl<I, T> $wrapper<I, T>
+        impl<I, T> $crate::ScannableVec<I, T> for $wrapper<I, T>
         where
             I: $crate::VecIndex,
             T: $value_trait,
         {
             #[inline]
-            pub fn iter(&self) -> $crate::Result<$iterator<'_, I, T>> {
-                self.0.iter()
+            fn for_each_range_dyn(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
+                $crate::ScannableVec::<I, T>::for_each_range_dyn(&self.0, from, to, f)
             }
 
             #[inline]
-            pub fn clean_iter(&self) -> $crate::Result<$clean_iter<'_, I, T>> {
-                self.0.clean_iter()
+            fn fold_range<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, f: F) -> B
+            where
+                Self: Sized,
+            {
+                $crate::ScannableVec::<I, T>::fold_range(&self.0, from, to, init, f)
             }
 
             #[inline]
-            pub fn dirty_iter(&self) -> $crate::Result<$dirty_iter<'_, I, T>> {
-                self.0.dirty_iter()
-            }
-
-            #[inline]
-            pub fn boxed_iter(&self) -> $crate::Result<$crate::BoxedVecIterator<'_, I, T>> {
-                self.0.boxed_iter()
+            fn try_fold_range<B, E, F: FnMut(B, T) -> ::std::result::Result<B, E>>(
+                &self,
+                from: usize,
+                to: usize,
+                init: B,
+                f: F,
+            ) -> ::std::result::Result<B, E>
+            where
+                Self: Sized,
+            {
+                $crate::ScannableVec::<I, T>::try_fold_range(&self.0, from, to, init, f)
             }
         }
+
     };
 }
 

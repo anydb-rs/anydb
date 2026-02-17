@@ -1,6 +1,6 @@
 use std::ops::{Add, AddAssign};
 
-use crate::{AnyVec, Exit, GenericStoredVec, IterableVec, Result, StoredVec, VecIndex, VecValue};
+use crate::{AnyVec, Exit, GenericStoredVec, ScannableVec, Result, StoredVec, VecIndex, VecValue};
 
 use super::EagerVec;
 
@@ -15,7 +15,7 @@ where
     pub fn compute_cumulative<S>(
         &mut self,
         max_from: V::I,
-        source: &impl IterableVec<V::I, S>,
+        source: &impl ScannableVec<V::I, S>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -28,23 +28,24 @@ where
 
         self.repeat_until_complete(exit, |this| {
             let skip = this.len();
+            let end = this.batch_end(source.len());
+            if skip >= end {
+                return Ok(());
+            }
 
             let mut cumulative_val = if skip > 0 {
-                this.read_unwrap_once(V::I::from(skip - 1))
+                this.collect_one(skip - 1).unwrap()
             } else {
                 V::T::from(0_usize)
             };
 
-            for (i, v) in source.iter().enumerate().skip(skip) {
+            let mut i = skip;
+            source.try_fold_range(skip, end, (), |(), v: S| {
                 cumulative_val += v.into();
                 this.checked_push_at(i, cumulative_val)?;
-
-                if this.batch_limit_reached() {
-                    break;
-                }
-            }
-
-            Ok(())
+                i += 1;
+                Ok(())
+            })
         })
     }
 
@@ -55,8 +56,8 @@ where
     pub fn compute_cumulative_binary<S1, S2>(
         &mut self,
         max_from: V::I,
-        source1: &impl IterableVec<V::I, S1>,
-        source2: &impl IterableVec<V::I, S2>,
+        source1: &impl ScannableVec<V::I, S1>,
+        source2: &impl ScannableVec<V::I, S2>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -80,8 +81,8 @@ where
     pub fn compute_cumulative_transformed_binary<S1, S2, F>(
         &mut self,
         max_from: V::I,
-        source1: &impl IterableVec<V::I, S1>,
-        source2: &impl IterableVec<V::I, S2>,
+        source1: &impl ScannableVec<V::I, S1>,
+        source2: &impl ScannableVec<V::I, S2>,
         mut transform: F,
         exit: &Exit,
     ) -> Result<()>
@@ -100,32 +101,28 @@ where
 
         self.repeat_until_complete(exit, |this| {
             let skip = this.len();
-
-            if skip >= target_len {
+            let end = this.batch_end(target_len);
+            if skip >= end {
                 return Ok(());
             }
 
             let mut cumulative_val = if skip > 0 {
-                this.read_unwrap_once(V::I::from(skip - 1))
+                this.collect_one(skip - 1).unwrap()
             } else {
                 V::T::from(0_usize)
             };
 
-            let mut iter1 = source1.iter().skip(skip);
-            let mut iter2 = source2.iter().skip(skip);
+            let batch2 = source2.collect_range(skip, end);
+            let mut iter2 = batch2.into_iter();
+            let mut i = skip;
 
-            for i in skip..target_len {
-                let v1 = iter1.next().unwrap();
+            source1.try_fold_range(skip, end, (), |(), v1: S1| {
                 let v2 = iter2.next().unwrap();
                 cumulative_val += transform(v1, v2);
                 this.checked_push_at(i, cumulative_val)?;
-
-                if this.batch_limit_reached() {
-                    break;
-                }
-            }
-
-            Ok(())
+                i += 1;
+                Ok(())
+            })
         })
     }
 
@@ -136,7 +133,7 @@ where
     pub fn compute_cumulative_count<S, P>(
         &mut self,
         max_from: V::I,
-        source: &impl IterableVec<V::I, S>,
+        source: &impl ScannableVec<V::I, S>,
         predicate: P,
         exit: &Exit,
     ) -> Result<()>
@@ -145,40 +142,21 @@ where
         V::T: From<usize> + AddAssign + Copy,
         P: Fn(&S) -> bool,
     {
-        let mut count: Option<V::T> = None;
-        self.compute_transform(
-            max_from,
-            source,
-            |(i, v, this)| {
-                if count.is_none() {
-                    let idx = i.to_usize();
-                    count = Some(if idx > 0 {
-                        this.read_at_unwrap_once(idx - 1)
-                    } else {
-                        V::T::from(0_usize)
-                    });
-                }
-                if predicate(&v) {
-                    *count.as_mut().unwrap() += V::T::from(1_usize);
-                }
-                (i, count.unwrap())
-            },
-            exit,
-        )
+        self.compute_cumulative_count_from(max_from, source, V::I::from(0), predicate, exit)
     }
 
     /// Compute rolling count of values matching a predicate within a window.
     pub fn compute_rolling_count<S, P>(
         &mut self,
         max_from: V::I,
-        source: &impl IterableVec<V::I, S>,
+        source: &impl ScannableVec<V::I, S>,
         window_size: usize,
         predicate: P,
         exit: &Exit,
     ) -> Result<()>
     where
         S: VecValue,
-        V::T: From<usize> + Copy,
+        V::T: From<usize> + Into<usize> + Copy,
         P: Fn(&S) -> bool,
     {
         self.validate_computed_version_or_reset(source.version())?;
@@ -186,32 +164,47 @@ where
 
         self.repeat_until_complete(exit, |this| {
             let skip = this.len();
-            let mut count = 0usize;
-            let mut ring = vec![false; window_size];
-
-            // Rebuild state from source
-            if skip > 0 {
-                let start = skip.saturating_sub(window_size);
-                for (i, v) in source.iter().enumerate().skip(start).take(skip - start) {
-                    let matches = predicate(&v);
-                    let slot = i % window_size;
-                    if ring[slot] { count -= 1; }
-                    ring[slot] = matches;
-                    if matches { count += 1; }
-                }
+            let end = this.batch_end(source.len());
+            if skip >= end {
+                return Ok(());
             }
 
-            for (i, v) in source.iter().enumerate().skip(skip) {
-                let matches = predicate(&v);
-                let slot = i % window_size;
-                if ring[slot] { count -= 1; }
-                ring[slot] = matches;
-                if matches { count += 1; }
+            // Recover count from stored output instead of rebuilding full window.
+            // Reads 1 element from self instead of window_size from source.
+            let mut count: usize = if skip > 0 {
+                this.collect_one(skip - 1).unwrap().into()
+            } else {
+                0
+            };
+
+            // Collect only the elements that leave the window during this batch.
+            // At position i, source[i - window_size] leaves (when i >= window_size).
+            // Reads batch_size elements instead of window_size.
+            let leave_start = skip.saturating_sub(window_size);
+            let leave_end = end.saturating_sub(window_size);
+            let leave_batch = if leave_end > leave_start {
+                source.collect_range(leave_start, leave_end)
+            } else {
+                vec![]
+            };
+
+            let mut leave_idx = 0;
+            let mut i = skip;
+            source.try_fold_range(skip, end, (), |(), v: S| {
+                if i >= window_size {
+                    if predicate(&leave_batch[leave_idx]) {
+                        count -= 1;
+                    }
+                    leave_idx += 1;
+                }
+                if predicate(&v) {
+                    count += 1;
+                }
 
                 this.checked_push_at(i, V::T::from(count))?;
-                if this.batch_limit_reached() { break; }
-            }
-            Ok(())
+                i += 1;
+                Ok(())
+            })
         })
     }
 
@@ -221,7 +214,7 @@ where
     pub fn compute_cumulative_count_from<S, P>(
         &mut self,
         max_from: V::I,
-        source: &impl IterableVec<V::I, S>,
+        source: &impl ScannableVec<V::I, S>,
         from: V::I,
         predicate: P,
         exit: &Exit,
@@ -240,7 +233,7 @@ where
                 let idx = i.to_usize();
                 if count.is_none() {
                     count = Some(if idx > 0 {
-                        this.read_at_unwrap_once(idx - 1)
+                        this.collect_one(idx - 1).unwrap()
                     } else {
                         V::T::from(0_usize)
                     });

@@ -2,12 +2,10 @@ use crate::{Format, impl_vec_wrapper};
 
 use super::RawVecInner;
 
-mod iterators;
 mod strategy;
 mod r#trait;
 mod value;
 
-pub use iterators::*;
 pub use strategy::*;
 pub use r#trait::*;
 pub use value::*;
@@ -42,8 +40,5 @@ impl_vec_wrapper!(
     BytesVec,
     RawVecInner<I, T, BytesStrategy<T>>,
     BytesVecValue,
-    BytesVecIterator,
-    CleanBytesVecIterator,
-    DirtyBytesVecIterator,
     Format::Bytes
 );

@@ -33,14 +33,12 @@ where
         vec.push(i);
     }
 
-    // Read via iterator before write
-    let mut iter = vec.iter();
-    assert_eq!(iter.get(0), Some(0));
-    assert_eq!(iter.get(1), Some(1));
-    assert_eq!(iter.get(2), Some(2));
-    assert_eq!(iter.get(20), Some(20));
-    assert_eq!(iter.get(21), None);
-    drop(iter);
+    // Read via get before write
+    assert_eq!(vec.collect_range(0, 1), vec![0]);
+    assert_eq!(vec.collect_range(1, 2), vec![1]);
+    assert_eq!(vec.collect_range(2, 3), vec![2]);
+    assert_eq!(vec.collect_range(20, 21), vec![20]);
+    assert!(vec.collect_range(21, 22).is_empty());
 
     // Write to storage
     vec.write()?;
@@ -70,10 +68,9 @@ where
     assert_eq!(vec.header().stamp(), Stamp::new(100));
 
     // Verify data still readable
-    let mut iter = vec.iter();
-    assert_eq!(iter.get(0), Some(0));
-    assert_eq!(iter.get(1), Some(1));
-    assert_eq!(iter.get(20), Some(20));
+    assert_eq!(vec.collect_range(0, 1), vec![0]);
+    assert_eq!(vec.collect_range(1, 2), vec![1]);
+    assert_eq!(vec.collect_range(20, 21), vec![20]);
 
     Ok(())
 }
@@ -105,13 +102,11 @@ where
     assert_eq!(vec.pushed_len(), 2);
     assert_eq!(vec.len(), 23);
 
-    // Read via iterator (crosses stored/pushed boundary)
-    let mut iter = vec.iter();
-    assert_eq!(iter.get(20), Some(20));
-    assert_eq!(iter.get(21), Some(21));
-    assert_eq!(iter.get(22), Some(22));
-    assert_eq!(iter.get(23), None);
-    drop(iter);
+    // Read across stored/pushed boundary
+    assert_eq!(vec.collect_range(20, 21), vec![20]);
+    assert_eq!(vec.collect_range(21, 22), vec![21]);
+    assert_eq!(vec.collect_range(22, 23), vec![22]);
+    assert!(vec.collect_range(23, 24).is_empty());
 
     // Write and verify persistence
     vec.write()?;
@@ -146,12 +141,11 @@ where
     assert_eq!(vec.len(), 14);
 
     // Verify truncated data
-    let mut iter = vec.iter();
-    assert_eq!(iter.get(0), Some(0));
-    assert_eq!(iter.get(5), Some(5));
-    assert_eq!(iter.get(13), Some(13));
-    assert_eq!(iter.get(14), None);
-    assert_eq!(iter.get(20), None);
+    assert_eq!(vec.collect_range(0, 1), vec![0]);
+    assert_eq!(vec.collect_range(5, 6), vec![5]);
+    assert_eq!(vec.collect_range(13, 14), vec![13]);
+    assert!(vec.collect_range(14, 15).is_empty());
+    assert!(vec.collect_range(20, 21).is_empty());
 
     Ok(())
 }
@@ -198,7 +192,8 @@ where
     // Push one more without writing
     vec.push(15);
 
-    assert_eq!(vec.iter().last(), Some(15));
+    let last = vec.collect_range(vec.len() - 1, vec.len());
+    assert_eq!(last[0], 15);
 
     Ok(())
 }
@@ -232,10 +227,9 @@ where
     assert_eq!(vec.len(), 21);
 
     // Verify new data
-    let mut iter = vec.iter();
-    assert_eq!(iter.get(0), Some(0));
-    assert_eq!(iter.get(20), Some(20));
-    assert_eq!(iter.get(21), None);
+    assert_eq!(vec.collect_range(0, 1), vec![0]);
+    assert_eq!(vec.collect_range(20, 21), vec![20]);
+    assert!(vec.collect_range(21, 22).is_empty());
 
     Ok(())
 }
@@ -278,10 +272,9 @@ where
         assert_eq!(vec.len(), 100);
         assert_eq!(vec.collect().len(), 100);
 
-        let mut iter = vec.iter();
-        assert_eq!(iter.get(0), Some(0));
-        assert_eq!(iter.get(50), Some(50));
-        assert_eq!(iter.get(99), Some(99));
+        assert_eq!(vec.collect_range(0, 1), vec![0]);
+        assert_eq!(vec.collect_range(50, 51), vec![50]);
+        assert_eq!(vec.collect_range(99, 100), vec![99]);
     }
 
     Ok(())

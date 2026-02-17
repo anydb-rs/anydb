@@ -36,7 +36,7 @@ mod clean_iter {
         }
         vec.write()?;
 
-        let collected: Vec<i32> = vec.iter().collect();
+        let collected: Vec<i32> = vec.collect();
         assert_eq!(collected.len(), 100);
         assert_eq!(collected[0], 0);
         assert_eq!(collected[99], 99);
@@ -55,10 +55,10 @@ mod clean_iter {
         }
         vec.write()?;
 
-        let mut iter = vec.iter();
-        assert_eq!(iter.next(), Some(0));
-        assert_eq!(iter.nth(9), Some(10));
-        assert_eq!(iter.next(), Some(11));
+        // Test point reads at specific indices
+        assert_eq!(vec.collect_first().unwrap(), 0);
+        assert_eq!(vec.collect_one(10).unwrap(), 10);
+        assert_eq!(vec.collect_one(11).unwrap(), 11);
         Ok(())
     }
 
@@ -74,7 +74,7 @@ mod clean_iter {
         }
         vec.write()?;
 
-        let collected: Vec<i32> = vec.iter().skip(50).collect();
+        let collected = vec.collect_range(50, 100);
         assert_eq!(collected.len(), 50);
         assert_eq!(collected[0], 50);
         Ok(())
@@ -92,7 +92,7 @@ mod clean_iter {
         }
         vec.write()?;
 
-        let collected: Vec<i32> = vec.iter().take(25).collect();
+        let collected = vec.collect_range(0, 25);
         assert_eq!(collected.len(), 25);
         assert_eq!(collected[24], 24);
         Ok(())
@@ -110,10 +110,9 @@ mod clean_iter {
         }
         vec.write()?;
 
-        let mut iter = vec.iter();
-        iter.set_position_to(50);
-        assert_eq!(iter.next(), Some(50));
-        assert_eq!(iter.next(), Some(51));
+        let collected = vec.collect_range(50, 52);
+        assert_eq!(collected[0], 50);
+        assert_eq!(collected[1], 51);
         Ok(())
     }
 
@@ -129,9 +128,7 @@ mod clean_iter {
         }
         vec.write()?;
 
-        let mut iter = vec.iter();
-        iter.set_end_to(50);
-        let collected: Vec<i32> = iter.collect();
+        let collected = vec.collect_range(0, 50);
         assert_eq!(collected.len(), 50);
         Ok(())
     }
@@ -148,8 +145,7 @@ mod clean_iter {
         }
         vec.write()?;
 
-        let iter = vec.iter();
-        assert_eq!(iter.last(), Some(99));
+        assert_eq!(vec.collect_last().unwrap(), 99);
         Ok(())
     }
 
@@ -160,8 +156,8 @@ mod clean_iter {
         let (db, _temp) = setup_db()?;
         let vec = V::forced_import(&db, "test", Version::ONE)?;
 
-        let iter = vec.iter();
-        assert_eq!(iter.last(), None);
+        assert_eq!(vec.len(), 0);
+        assert!(vec.collect().is_empty());
         Ok(())
     }
 
@@ -177,10 +173,9 @@ mod clean_iter {
         }
         vec.write()?;
 
-        let mut iter = vec.iter();
-        assert_eq!(iter.len(), 100);
-        iter.next();
-        assert_eq!(iter.len(), 99);
+        assert_eq!(vec.len(), 100);
+        assert_eq!(vec.collect_range(0, 100).len(), 100);
+        assert_eq!(vec.collect_range(1, 100).len(), 99);
         Ok(())
     }
 
@@ -196,7 +191,7 @@ mod clean_iter {
         }
         vec.write()?;
 
-        let collected: Vec<i32> = vec.iter().collect();
+        let collected: Vec<i32> = vec.collect();
         assert_eq!(collected.len(), 10000);
 
         for (i, &val) in collected.iter().enumerate() {
@@ -217,7 +212,8 @@ mod clean_iter {
         }
         vec.write()?;
 
-        let collected: Vec<i32> = vec.iter().skip(100).take(200).skip(50).take(100).collect();
+        // skip(100).take(200).skip(50).take(100) => collect_range(150, 250)
+        let collected = vec.collect_range(150, 250);
 
         assert_eq!(collected.len(), 100);
         assert_eq!(collected[0], 150);
@@ -237,16 +233,10 @@ mod clean_iter {
         }
         vec.write()?;
 
-        let mut iter = vec.iter();
-
-        iter.set_position_to(100);
-        assert_eq!(iter.next(), Some(100));
-
-        iter.set_position_to(500);
-        assert_eq!(iter.next(), Some(500));
-
-        iter.set_position_to(50);
-        assert_eq!(iter.next(), Some(50));
+        // Random access reads at various positions
+        assert_eq!(vec.collect_one(100).unwrap(), 100);
+        assert_eq!(vec.collect_one(500).unwrap(), 500);
+        assert_eq!(vec.collect_one(50).unwrap(), 50);
         Ok(())
     }
 
@@ -262,9 +252,9 @@ mod clean_iter {
         }
         vec.write()?;
 
-        let mut iter = vec.iter();
-        assert_eq!(iter.nth(20), None);
-        assert_eq!(iter.next(), None);
+        // Reading beyond end returns empty
+        let collected = vec.collect_range(10, 10);
+        assert!(collected.is_empty());
         Ok(())
     }
 
@@ -280,8 +270,8 @@ mod clean_iter {
         }
         vec.write()?;
 
-        let mut iter = vec.iter().skip(100);
-        assert_eq!(iter.next(), None);
+        let collected = vec.collect_range(100, 100);
+        assert!(collected.is_empty());
         Ok(())
     }
 
@@ -297,7 +287,7 @@ mod clean_iter {
         }
         vec.write()?;
 
-        let collected: Vec<i32> = vec.iter().take(0).collect();
+        let collected = vec.collect_range(0, 0);
         assert_eq!(collected.len(), 0);
         Ok(())
     }
@@ -314,14 +304,10 @@ mod clean_iter {
         }
         vec.write()?;
 
-        let mut iter = vec.iter();
-
+        // Test that collect_range returns correct sizes for progressive ranges
         for i in 0..100 {
-            let (lower, upper) = iter.size_hint();
-            assert_eq!(lower, 100 - i);
-            assert_eq!(upper, Some(100 - i));
-            assert_eq!(iter.len(), 100 - i);
-            iter.next();
+            let remaining = vec.collect_range(i, 100);
+            assert_eq!(remaining.len(), 100 - i);
         }
         Ok(())
     }
@@ -857,7 +843,7 @@ mod dirty_iter {
         }
         vec.write()?;
 
-        let collected: Vec<i32> = vec.iter().collect();
+        let collected: Vec<i32> = vec.collect();
         assert_eq!(collected.len(), 100);
         assert_eq!(collected[0], 0);
         assert_eq!(collected[99], 99);
@@ -876,7 +862,7 @@ mod dirty_iter {
         }
         // Don't flush
 
-        let collected: Vec<i32> = vec.iter().collect();
+        let collected: Vec<i32> = vec.collect();
         assert_eq!(collected.len(), 50);
         assert_eq!(collected[0], 0);
         assert_eq!(collected[49], 49);
@@ -899,7 +885,7 @@ mod dirty_iter {
             vec.push(i);
         }
 
-        let collected: Vec<i32> = vec.iter().collect();
+        let collected: Vec<i32> = vec.collect();
         assert_eq!(collected.len(), 100);
 
         for (i, &val) in collected.iter().enumerate() {
@@ -924,7 +910,7 @@ mod dirty_iter {
             vec.push(i);
         }
 
-        let collected: Vec<i32> = vec.iter().skip(40).collect();
+        let collected = vec.collect_range(40, 100);
         assert_eq!(collected.len(), 60);
         assert_eq!(collected[0], 40);
         assert_eq!(collected[59], 99);
@@ -947,7 +933,7 @@ mod dirty_iter {
             vec.push(i);
         }
 
-        let collected: Vec<i32> = vec.iter().skip(40).take(20).collect();
+        let collected = vec.collect_range(40, 60);
         assert_eq!(collected.len(), 20);
         assert_eq!(collected[0], 40);
         assert_eq!(collected[19], 59);
@@ -970,12 +956,13 @@ mod dirty_iter {
             vec.push(i);
         }
 
-        let mut iter = vec.iter();
-        assert_eq!(iter.nth(45), Some(45)); // In stored
-        assert_eq!(iter.next(), Some(46)); // In stored
-        assert_eq!(iter.nth(2), Some(49)); // In stored
-        assert_eq!(iter.next(), Some(50)); // In pushed
-        assert_eq!(iter.next(), Some(51)); // In pushed
+        // Test reading across stored/pushed boundary
+        let vals = vec.collect_range(45, 52);
+        assert_eq!(vals[0], 45); // In stored
+        assert_eq!(vals[1], 46); // In stored
+        assert_eq!(vals[4], 49); // In stored
+        assert_eq!(vals[5], 50); // In pushed
+        assert_eq!(vals[6], 51); // In pushed
         Ok(())
     }
 
@@ -995,10 +982,9 @@ mod dirty_iter {
             vec.push(i);
         }
 
-        let mut iter = vec.iter();
-        iter.set_position_to(75);
-        assert_eq!(iter.next(), Some(75));
-        assert_eq!(iter.next(), Some(76));
+        let vals = vec.collect_range(75, 77);
+        assert_eq!(vals[0], 75);
+        assert_eq!(vals[1], 76);
         Ok(())
     }
 
@@ -1018,8 +1004,7 @@ mod dirty_iter {
             vec.push(i);
         }
 
-        let iter = vec.iter();
-        assert_eq!(iter.last(), Some(99));
+        assert_eq!(vec.collect_last().unwrap(), 99);
         Ok(())
     }
 
@@ -1035,8 +1020,7 @@ mod dirty_iter {
         }
         vec.write()?;
 
-        let iter = vec.iter();
-        assert_eq!(iter.last(), Some(99));
+        assert_eq!(vec.collect_last().unwrap(), 99);
         Ok(())
     }
 
@@ -1056,14 +1040,10 @@ mod dirty_iter {
             vec.push(i);
         }
 
-        let mut iter = vec.iter();
-        assert_eq!(iter.len(), 75);
-
-        iter.next();
-        assert_eq!(iter.len(), 74);
-
-        iter.nth(49); // Cross boundary
-        assert_eq!(iter.len(), 24);
+        assert_eq!(vec.len(), 75);
+        assert_eq!(vec.collect_range(0, 75).len(), 75);
+        assert_eq!(vec.collect_range(1, 75).len(), 74);
+        assert_eq!(vec.collect_range(51, 75).len(), 24); // Cross boundary
         Ok(())
     }
 
@@ -1085,7 +1065,7 @@ mod dirty_iter {
             vec.push(i);
         }
 
-        let collected: Vec<i32> = vec.iter().collect();
+        let collected: Vec<i32> = vec.collect();
         assert_eq!(collected.len(), 10100);
 
         for (i, &val) in collected.iter().enumerate() {
@@ -1110,14 +1090,8 @@ mod dirty_iter {
             vec.push(i);
         }
 
-        // Complex skip/take across boundary
-        let collected: Vec<i32> = vec
-            .iter()
-            .skip(7000)
-            .take(3000)
-            .skip(500)
-            .take(1000)
-            .collect();
+        // skip(7000).take(3000).skip(500).take(1000) => collect_range(7500, 8500)
+        let collected = vec.collect_range(7500, 8500);
 
         assert_eq!(collected.len(), 1000);
         assert_eq!(collected[0], 7500);
@@ -1554,7 +1528,7 @@ mod raw_features {
         vec.deref_mut().delete_at(5);
         vec.deref_mut().delete_at(7);
 
-        let collected: Vec<i32> = vec.iter().collect();
+        let collected: Vec<i32> = vec.collect();
         // Should skip holes: 0,1,2,4,6,8,9
         assert_eq!(collected, vec![0, 1, 2, 4, 6, 8, 9]);
         Ok(())
@@ -1578,7 +1552,7 @@ mod raw_features {
         vec.deref_mut().update_at(5, 500)?;
         vec.deref_mut().update_at(8, 800)?;
 
-        let collected: Vec<i32> = vec.iter().collect();
+        let collected: Vec<i32> = vec.collect();
         assert_eq!(collected, vec![0, 1, 200, 3, 4, 500, 6, 7, 800, 9]);
         Ok(())
     }
@@ -1602,7 +1576,7 @@ mod raw_features {
         vec.deref_mut().update_at(2, 200)?;
         vec.deref_mut().update_at(5, 500)?;
 
-        let collected: Vec<i32> = vec.iter().collect();
+        let collected: Vec<i32> = vec.collect();
         // Should be: 0, (skip 1), 200, (skip 3), 4, 500, 6, 7, 8, 9
         assert_eq!(collected, vec![0, 200, 4, 500, 6, 7, 8, 9]);
         Ok(())
@@ -1630,7 +1604,7 @@ mod raw_features {
             vec.push(i);
         }
 
-        let collected: Vec<i32> = vec.iter().collect();
+        let collected: Vec<i32> = vec.collect();
         // Should be: 0, (skip 1), 2, (skip 3), 4, 5, 6, 7, 8, 9
         assert_eq!(collected, vec![0, 2, 4, 5, 6, 7, 8, 9]);
         Ok(())
@@ -1658,7 +1632,7 @@ mod raw_features {
             vec.push(i);
         }
 
-        let collected: Vec<i32> = vec.iter().collect();
+        let collected: Vec<i32> = vec.collect();
         assert_eq!(collected, vec![0, 100, 2, 300, 4, 5, 6, 7, 8, 9]);
         Ok(())
     }
@@ -1681,10 +1655,11 @@ mod raw_features {
         vec.deref_mut().delete_at(6);
         vec.deref_mut().delete_at(7);
 
-        // Skip past the holes
-        let collected: Vec<i32> = vec.iter().skip(5).take(5).collect();
-        // After skipping 5 (0,1,2,3,4), next are 8,9,10,11,12 (holes are skipped automatically)
-        assert_eq!(collected, vec![8, 9, 10, 11, 12]);
+        // Skip past the holes — collect skips holes automatically
+        let collected: Vec<i32> = vec.collect();
+        // Should be: 0, 1, 2, 3, 4, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19
+        // (holes at 5,6,7 are skipped)
+        assert_eq!(collected[5..10], [8, 9, 10, 11, 12]);
         Ok(())
     }
 
@@ -1709,7 +1684,7 @@ mod raw_features {
         let idx = vec.deref_mut().fill_first_hole_or_push(999)?;
         assert_eq!(idx, 2);
 
-        let collected: Vec<i32> = vec.iter().collect();
+        let collected: Vec<i32> = vec.collect();
         // 0,1,999,3,4,(skip 5),6,7,8,9
         assert_eq!(collected, vec![0, 1, 999, 3, 4, 6, 7, 8, 9]);
         Ok(())

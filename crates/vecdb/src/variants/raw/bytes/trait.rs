@@ -17,6 +17,14 @@ pub trait Bytes: Sized {
     /// For fixed-size types, this is `[u8; N]` where N is the size of the type.
     type Array: AsRef<[u8]>;
 
+    /// Whether the byte representation from `to_bytes` is identical to the
+    /// in-memory representation of Self. When true, bulk operations can use
+    /// memcpy instead of per-element deserialization.
+    ///
+    /// For numeric types, this is true on little-endian platforms (since
+    /// `to_bytes`/`from_bytes` use little-endian format which matches native).
+    const IS_NATIVE_LAYOUT: bool = false;
+
     /// Serializes this value to bytes.
     ///
     /// For numeric types, this uses little-endian byte order (via `to_le_bytes`).
@@ -34,6 +42,7 @@ macro_rules! impl_bytes_for_numeric {
         $(
             impl Bytes for $t {
                 type Array = [u8; std::mem::size_of::<$t>()];
+                const IS_NATIVE_LAYOUT: bool = cfg!(target_endian = "little");
 
                 #[inline]
                 fn to_bytes(&self) -> Self::Array {
@@ -65,6 +74,7 @@ macro_rules! impl_bytes_for_array {
         $(
             impl Bytes for [u8; $n] {
                 type Array = [u8; $n];
+                const IS_NATIVE_LAYOUT: bool = true;
 
                 #[inline]
                 fn to_bytes(&self) -> Self::Array {
@@ -95,8 +105,23 @@ pub trait BytesExt {
 
 impl<T: Bytes> BytesExt for [T] {
     fn to_bytes(&self) -> Vec<u8> {
-        self.iter()
-            .flat_map(|item| item.to_bytes().as_ref().to_vec())
-            .collect()
+        let byte_len = size_of_val(self);
+        let mut buf = Vec::with_capacity(byte_len);
+        if T::IS_NATIVE_LAYOUT {
+            // Byte representation == memory representation. Single memcpy.
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    self.as_ptr() as *const u8,
+                    buf.as_mut_ptr(),
+                    byte_len,
+                );
+                buf.set_len(byte_len);
+            }
+        } else {
+            for item in self {
+                buf.extend_from_slice(item.to_bytes().as_ref());
+            }
+        }
+        buf
     }
 }

@@ -9,8 +9,8 @@ use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, CollectableVec, GenericStoredVec, ImportOptions, ImportableVec, RawStrategy,
-    RawVecInner, Reader, Result, Stamp, StoredVec, Version,
+    AnyStoredVec, GenericStoredVec, ImportOptions, ImportableVec, RawStrategy, RawVecInner, Reader,
+    Result, ScannableVec, Stamp, StoredVec, Version,
 };
 
 // ============================================================================
@@ -64,7 +64,7 @@ where
     }
 
     fn collect(&self) -> Vec<u32> {
-        CollectableVec::collect(self)
+        ScannableVec::collect(self)
     }
 
     fn collect_holed(&self) -> Result<Vec<Option<u32>>> {

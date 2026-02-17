@@ -39,11 +39,10 @@ where
     // vec_b should see all 100 values written by vec_a
     assert_eq!(vec_a_reader.len(), 100, "vec_b should see vec_a's written data");
 
-    let mut iter = vec_a_reader.iter();
-    for i in 0..100u32 {
+    for i in 0..100usize {
         assert_eq!(
-            iter.get(i as usize),
-            Some(i),
+            vec_a_reader.collect_one(i),
+            Some(i as u32),
             "vec_b should read correct value at index {}",
             i
         );
@@ -75,10 +74,9 @@ where
     let vec_a_for_read: V = V::forced_import(&database, "chain_a", version)?;
     let mut vec_b: V = V::forced_import(&database, "chain_b", version)?;
 
-    let mut iter_a = vec_a_for_read.iter();
-    for i in 0..25 {
-        let a1 = iter_a.get(i * 2).unwrap();
-        let a2 = iter_a.get(i * 2 + 1).unwrap();
+    for i in 0..25usize {
+        let a1 = vec_a_for_read.collect_one(i * 2).unwrap();
+        let a2 = vec_a_for_read.collect_one(i * 2 + 1).unwrap();
         vec_b.push(a1 + a2);
     }
     vec_b.write()?; // No fsync, just mmap write
@@ -88,7 +86,7 @@ where
     let mut vec_c: V = V::forced_import(&database, "chain_c", version)?;
 
     let mut cumsum = 0u32;
-    for val in vec_b_for_read.iter() {
+    for val in vec_b_for_read.collect() {
         cumsum += val;
         vec_c.push(cumsum);
     }
@@ -111,7 +109,7 @@ where
         })
         .collect();
 
-    let actual_c: Vec<u32> = vec_c_verify.iter().collect();
+    let actual_c: Vec<u32> = vec_c_verify.collect();
     assert_eq!(actual_c, expected_c, "compute chain should produce correct results");
 
     Ok(())

@@ -1,11 +1,9 @@
 use crate::{CompressedVecInner, Format, impl_vec_wrapper};
 
-mod iterators;
 mod strategy;
 mod r#trait;
 mod value;
 
-pub use iterators::*;
 pub use strategy::*;
 pub use r#trait::*;
 pub use value::*;
@@ -33,8 +31,5 @@ impl_vec_wrapper!(
     PcoVec,
     CompressedVecInner<I, T, PcodecStrategy<T>>,
     PcoVecValue,
-    PcodecVecIterator,
-    CleanPcodecVecIterator,
-    DirtyPcodecVecIterator,
     Format::Pco
 );

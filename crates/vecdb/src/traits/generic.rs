@@ -1,21 +1,24 @@
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use log::info;
-use rawdb::{Reader, unlikely};
+use rawdb::unlikely;
 
 use crate::{
-    AnyStoredVec, Bytes, Error, Result, SIZE_OF_U64, Stamp, VecIndex, VecValue, Version, likely,
-    vec_region_name_with,
+    AnyStoredVec, Bytes, Error, Result, SIZE_OF_U64, Stamp, VecIndex, VecValue, Version,
 };
-
-const ONE_KIB: usize = 1024;
-const ONE_MIB: usize = ONE_KIB * ONE_KIB;
-const ONE_GIB: usize = ONE_KIB * ONE_MIB;
 
 /// Maximum in-memory cache size before forcing a flush (1 GiB).
 /// Prevents unbounded memory growth when pushing many values without flushing.
-const MAX_CACHE_SIZE: usize = ONE_GIB;
+pub(crate) const MAX_CACHE_SIZE: usize = 1024 * 1024 * 1024;
 
+/// Typed interface for stored vectors (push, truncate, rollback).
+///
+/// Provides the core write operations for all stored vec types.
+/// For reading, use [`ScannableVec`] (`collect_range`, `fold_range`, etc.).
+/// Raw vecs (`BytesVec`, `ZeroCopyVec`) additionally provide
+/// `VecReader` for O(1) random access.
+///
+/// [`ScannableVec`]: crate::ScannableVec
 pub trait GenericStoredVec<I, T>: AnyStoredVec
 where
     I: VecIndex,
@@ -23,54 +26,23 @@ where
 {
     const SIZE_OF_T: usize = size_of::<T>();
 
-    /// Creates a reader to the underlying region.
-    /// Be careful with deadlocks - drop the reader before mutable ops.
-    fn create_reader(&'_ self) -> Reader {
-        self.region().create_reader()
-    }
+    // ── Serialization helpers ────────────────────────────────────────
 
-    /// Reads value at index using provided reader.
-    #[inline(always)]
-    fn read(&self, index: I, reader: &Reader) -> Result<T> {
-        self.read_at(index.to_usize(), reader)
-    }
-
-    /// Reads value at index, creating a temporary reader.
-    /// For multiple reads, prefer `read()` with a reused reader.
-    #[inline(always)]
-    fn read_once(&self, index: I) -> Result<T> {
-        self.read(index, &self.create_reader())
-    }
-
-    /// Reads value at usize index using provided reader.
-    #[inline(always)]
-    fn read_at(&self, index: usize, reader: &Reader) -> Result<T> {
-        let len = self.len();
-        if likely(index < len) {
-            self.unchecked_read_at(index, reader)
-        } else {
-            Err(Error::IndexTooHigh { index, len, name: self.name().to_string() })
-        }
-    }
-
-    /// Reads value at index using provided reader without checking the upper bound.
+    /// Collects stored values in `[from, to)` for serialization purposes.
+    ///
+    /// May read beyond `stored_len` to recover truncated values still on disk.
+    /// `RawVecInner` checks `prev_updated` first, then reads via reader.
+    /// `CompressedVecInner` decodes the relevant pages directly.
     #[doc(hidden)]
-    #[inline(always)]
-    fn unchecked_read(&self, index: I, reader: &Reader) -> Result<T> {
-        self.unchecked_read_at(index.to_usize(), reader)
-    }
+    fn collect_stored_range(&self, from: usize, to: usize) -> Result<Vec<T>>;
 
-    /// Reads value at usize index using provided reader without checking the upper bound.
-    #[doc(hidden)]
-    fn unchecked_read_at(&self, index: usize, reader: &Reader) -> Result<T>;
-
-    /// Deserializes a value from bytes. Implementors use their strategy.
+    /// Deserializes a value from bytes using the vector's strategy.
     fn read_value_from_bytes(&self, bytes: &[u8]) -> Result<T>;
 
-    /// Writes a value to the provided buffer. Implementors use their strategy.
+    /// Serializes a value into the buffer using the vector's strategy.
     fn write_value_to(&self, value: &T, buf: &mut Vec<u8>);
 
-    /// Writes multiple values to the provided buffer.
+    /// Serializes multiple values into the buffer.
     #[inline(always)]
     fn write_values_to(&self, values: &[T], buf: &mut Vec<u8>) {
         for v in values {
@@ -78,109 +50,7 @@ where
         }
     }
 
-    /// Reads value at usize index, creating a temporary reader.
-    /// For multiple reads, prefer `read_at()` with a reused reader.
-    #[inline]
-    fn read_at_once(&self, index: usize) -> Result<T> {
-        self.read_at(index, &self.create_reader())
-    }
-
-    /// Reads value at index using provided reader. Panics if read fails.
-    #[inline(always)]
-    fn read_unwrap(&self, index: I, reader: &Reader) -> T {
-        self.read(index, reader).unwrap()
-    }
-
-    /// Reads value at index, creating a temporary reader. Panics if read fails.
-    /// For multiple reads, prefer `read_unwrap()` with a reused reader.
-    #[inline]
-    fn read_unwrap_once(&self, index: I) -> T {
-        self.read_unwrap(index, &self.create_reader())
-    }
-
-    /// Reads value at usize index using provided reader. Panics if read fails.
-    #[inline]
-    fn read_at_unwrap(&self, index: usize, reader: &Reader) -> T {
-        self.read_at(index, reader).unwrap()
-    }
-
-    /// Reads value at usize index, creating a temporary reader. Panics if read fails.
-    /// For multiple reads, prefer `read_at_unwrap()` with a reused reader.
-    #[inline]
-    fn read_at_unwrap_once(&self, index: usize) -> T {
-        self.read_at_unwrap(index, &self.create_reader())
-    }
-
-    /// Gets value from pushed layer or storage using provided reader.
-    #[inline(always)]
-    fn get_pushed_or_read(&self, index: I, reader: &Reader) -> Result<Option<T>> {
-        self.get_pushed_or_read_at(index.to_usize(), reader)
-    }
-
-    /// Gets value from pushed layer or storage, creating a temporary reader.
-    /// For multiple reads, prefer `get_pushed_or_read()` with a reused reader.
-    #[inline]
-    fn get_pushed_or_read_once(&self, index: I) -> Result<Option<T>> {
-        self.get_pushed_or_read(index, &self.create_reader())
-    }
-
-    /// Gets value from pushed layer or storage using provided reader, unwrapping the result.
-    /// Panics if the read fails or if the value doesn't exist.
-    #[inline]
-    fn get_pushed_or_read_unwrap(&self, index: I, reader: &Reader) -> T {
-        self.get_pushed_or_read(index, reader)
-            .expect("Failed to read value")
-            .expect("Value doesn't exist")
-    }
-
-    /// Gets value from pushed layer or storage, unwrapping the result.
-    /// Panics if the read fails or if the value doesn't exist.
-    /// For multiple reads, prefer `get_pushed_or_read_unwrap()` with a reused reader.
-    #[inline]
-    fn get_pushed_or_read_unwrap_once(&self, index: I) -> T {
-        self.get_pushed_or_read_once(index)
-            .expect("Failed to read value")
-            .expect("Value doesn't exist")
-    }
-
-    /// Gets value from pushed layer or storage at usize index using provided reader.
-    /// Does not check the updated layer.
-    #[inline(always)]
-    fn get_pushed_or_read_at(&self, index: usize, reader: &Reader) -> Result<Option<T>> {
-        let stored_len = self.stored_len();
-        if index >= stored_len {
-            return Ok(self.pushed().get(index - stored_len).cloned());
-        }
-        Ok(Some(self.unchecked_read_at(index, reader)?))
-    }
-
-    /// Gets value from pushed layer or storage at usize index, creating a temporary reader.
-    /// For multiple reads, prefer `get_pushed_or_read_at()` with a reused reader.
-    #[inline]
-    fn get_pushed_or_read_at_once(&self, index: usize) -> Result<Option<T>> {
-        self.get_pushed_or_read_at(index, &self.create_reader())
-    }
-
-    /// Gets value from pushed layer or storage at usize index using provided reader, unwrapping the result.
-    /// Panics if the read fails or if the value doesn't exist.
-    #[inline]
-    fn get_pushed_or_read_at_unwrap(&self, index: usize, reader: &Reader) -> T {
-        self.get_pushed_or_read_at(index, reader)
-            .expect("Failed to read value")
-            .expect("Value doesn't exist")
-    }
-
-    /// Gets value from pushed layer or storage at usize index, unwrapping the result.
-    /// Panics if the read fails or if the value doesn't exist.
-    /// For multiple reads, prefer `get_pushed_or_read_at_unwrap()` with a reused reader.
-    #[inline]
-    fn get_pushed_or_read_at_unwrap_once(&self, index: usize) -> T {
-        self.get_pushed_or_read_at_once(index)
-            .expect("Failed to read value")
-            .expect("Value doesn't exist")
-    }
-
-    /// Gets value from pushed layer only (no disk reads).
+    #[doc(hidden)]
     #[inline(always)]
     fn get_pushed_at(&self, index: usize, stored_len: usize) -> Option<&T> {
         let pushed = self.pushed();
@@ -188,16 +58,17 @@ where
         pushed.get(offset)
     }
 
-    /// Returns the length including both stored and pushed (uncommitted) values.
+    // ── Length / state queries ────────────────────────────────────────
+
+    /// Total length including stored and pushed (uncommitted) values.
     ///
-    /// Named `len_` to avoid conflict with `AnyVec::len`.
-    /// Total length = stored_len() + pushed_len()
+    /// Named `len_` to avoid conflict with `AnyVec::len` (which returns the same value).
     #[inline]
     fn len_(&self) -> usize {
         self.stored_len() + self.pushed_len()
     }
 
-    /// Returns the number of pushed (uncommitted) values in the memory buffer.
+    /// Number of pushed (uncommitted) values in the memory buffer.
     #[inline]
     fn pushed_len(&self) -> usize {
         self.pushed().len()
@@ -209,13 +80,13 @@ where
         self.pushed_len() == 0
     }
 
-    /// Returns true if the index is within the length.
+    /// Returns true if the typed index is within bounds.
     #[inline]
     fn has(&self, index: I) -> bool {
         self.has_at(index.to_usize())
     }
 
-    /// Returns true if the usize index is within the length.
+    /// Returns true if the usize index is within bounds.
     #[inline]
     fn has_at(&self, index: usize) -> bool {
         index < self.len_()
@@ -370,7 +241,7 @@ where
 
         // Reset to fresh state - clear rollback history
         *self.mut_prev_stored_len() = 0;
-        *self.mut_prev_pushed() = vec![];
+        self.mut_prev_pushed().clear();
         self.update_stamp(Stamp::default());
 
         // Remove changes directory if it exists
@@ -491,7 +362,7 @@ where
 
         // Update prev_ fields to reflect the PERSISTED state after flush
         *self.mut_prev_stored_len() = self.stored_len();
-        *self.mut_prev_pushed() = vec![];
+        self.mut_prev_pushed().clear();
 
         Ok(())
     }
@@ -641,38 +512,30 @@ where
         Ok(())
     }
 
-    /// Gets a stored value for serialization purposes.
-    /// Default implementation reads directly from disk.
-    /// RawVecInner overrides to check prev_updated first.
-    #[doc(hidden)]
-    fn get_stored_value_for_serialization(&self, index: usize, reader: &Reader) -> Result<T> {
-        self.unchecked_read_at(index, reader)
-    }
-
     /// Default implementation of serialize_changes.
     /// Serializes: stamp, prev_stored_len, stored_len, truncated_count, truncated_values,
     /// prev_pushed, pushed.
     /// RawVecInner calls this and appends holes/updated data.
     #[doc(hidden)]
     fn default_serialize_changes(&self) -> Result<Vec<u8>> {
-        let mut bytes = vec![];
-        let reader = self.create_reader();
-
-        bytes.extend(self.stamp().to_bytes());
-
         let prev_stored_len = self.prev_stored_len();
         let stored_len = self.stored_len();
+        let truncated = prev_stored_len.checked_sub(stored_len).unwrap_or_default();
+
+        // Pre-allocate: 4 headers + truncated_count + prev_pushed_len + pushed_len (6 × 8 bytes)
+        // + truncated values + prev_pushed values + pushed values
+        let value_count = truncated + self.prev_pushed().len() + self.pushed().len();
+        let mut bytes = Vec::with_capacity(6 * SIZE_OF_U64 + value_count * Self::SIZE_OF_T);
+
+        bytes.extend(self.stamp().to_bytes());
 
         bytes.extend(prev_stored_len.to_bytes());
         bytes.extend(stored_len.to_bytes());
 
-        let truncated = prev_stored_len.checked_sub(stored_len).unwrap_or_default();
         bytes.extend(truncated.to_bytes());
 
         if truncated > 0 {
-            let truncated_vals = (stored_len..prev_stored_len)
-                .map(|i| self.get_stored_value_for_serialization(i, &reader))
-                .collect::<Result<Vec<_>>>()?;
+            let truncated_vals = self.collect_stored_range(stored_len, prev_stored_len)?;
             self.write_values_to(&truncated_vals, &mut bytes);
         }
 
@@ -683,10 +546,5 @@ where
         self.write_values_to(self.pushed(), &mut bytes);
 
         Ok(bytes)
-    }
-
-    /// Returns the region name for this vector.
-    fn vec_region_name(&self) -> String {
-        vec_region_name_with::<I>(self.name())
     }
 }

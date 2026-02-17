@@ -1,10 +1,8 @@
 use crate::{CompressedVecInner, Format, impl_vec_wrapper};
 
-mod iterators;
 mod strategy;
 mod value;
 
-pub use iterators::*;
 pub use strategy::*;
 pub use value::*;
 
@@ -29,8 +27,5 @@ impl_vec_wrapper!(
     ZstdVec,
     CompressedVecInner<I, T, ZstdStrategy<T>>,
     ZstdVecValue,
-    ZstdVecIterator,
-    CleanZstdVecIterator,
-    DirtyZstdVecIterator,
     Format::Zstd
 );

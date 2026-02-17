@@ -1,7 +1,7 @@
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, AnyVec, CollectableVec, Database, GenericStoredVec, ImportableVec, Pco, PcoVec,
-    Version,
+    AnyStoredVec, AnyVec, Database, GenericStoredVec, ImportableVec, Pco, PcoVec,
+    ScannableVec, Version,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Pco)]

@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use zstd::{decode_all, encode_all};
 
-use crate::{RawStrategy, Result};
+use crate::{Result, impl_bytes_raw_strategy};
 
 use super::{super::inner::CompressionStrategy, value::ZstdVecValue};
 
@@ -14,25 +14,7 @@ const ZSTD_COMPRESSION_LEVEL: i32 = 3;
 #[derive(Debug, Clone, Copy)]
 pub struct ZstdStrategy<T>(PhantomData<T>);
 
-impl<T> RawStrategy<T> for ZstdStrategy<T>
-where
-    T: ZstdVecValue,
-{
-    #[inline(always)]
-    fn read(bytes: &[u8]) -> Result<T> {
-        T::from_bytes(bytes)
-    }
-
-    #[inline(always)]
-    fn write_to_vec(value: &T, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(value.to_bytes().as_ref());
-    }
-
-    #[inline(always)]
-    fn write_to_slice(value: &T, dst: &mut [u8]) {
-        dst.copy_from_slice(value.to_bytes().as_ref());
-    }
-}
+impl_bytes_raw_strategy!(ZstdStrategy, ZstdVecValue);
 
 impl<T> CompressionStrategy<T> for ZstdStrategy<T>
 where
@@ -46,5 +28,10 @@ where
     fn decompress(bytes: &[u8], expected_len: usize) -> Result<Vec<T>> {
         let decompressed = decode_all(bytes)?;
         Self::bytes_to_values(&decompressed, expected_len)
+    }
+
+    fn decompress_into(bytes: &[u8], expected_len: usize, dst: &mut Vec<T>) -> Result<()> {
+        let decompressed = decode_all(bytes)?;
+        Self::bytes_to_values_into(&decompressed, expected_len, dst)
     }
 }

@@ -13,7 +13,7 @@ use std::{
 
 use rawdb::Database;
 use tempfile::TempDir;
-use vecdb::{AnyStoredVec, GenericStoredVec, ImportableVec, Result, Version};
+use vecdb::{AnyStoredVec, GenericStoredVec, ImportableVec, Result, ScannableVec, Version};
 
 #[cfg(feature = "pco")]
 use vecdb::PcoVec;
@@ -64,24 +64,16 @@ fn run_benchmark(config: &Config) -> Result<(usize, usize, usize)> {
                 while !stop.load(Ordering::Relaxed) {
                     let len = reader.stored_len();
                     if len > 0 {
-                        let reader_ref = reader.create_reader();
                         let idx = len - 1;
-                        match reader.get_pushed_or_read_at(idx, &reader_ref) {
-                            Ok(Some(v)) => {
-                                if v != idx as u64 {
-                                    eprintln!("ERROR: idx={} expected={} got={} len={}", idx, idx, v, len);
-                                    local_errors += 1;
-                                }
-                                local_reads += 1;
-                            }
-                            Ok(None) => {
-                                eprintln!("ERROR: None at idx={} len={}", idx, len);
+                        if let Some(v) = reader.collect_one(idx) {
+                            if v != idx as u64 {
+                                eprintln!("ERROR: idx={} expected={} got={} len={}", idx, idx, v, len);
                                 local_errors += 1;
                             }
-                            Err(e) => {
-                                eprintln!("ERROR: {:?} at idx={} len={}", e, idx, len);
-                                local_errors += 1;
-                            }
+                            local_reads += 1;
+                        } else {
+                            eprintln!("ERROR: empty collect at idx={} len={}", idx, len);
+                            local_errors += 1;
                         }
                     }
                     // Tight loop - no sleep

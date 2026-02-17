@@ -1,5 +1,5 @@
 use crate::{
-    AnyVec, Exit, GenericStoredVec, IterableVec, Result, StoredVec, VecIndex, VecValue, Version,
+    AnyVec, Exit, GenericStoredVec, ScannableVec, Result, StoredVec, VecIndex, VecValue, Version,
 };
 
 use super::EagerVec;
@@ -25,17 +25,14 @@ where
 
         self.repeat_until_complete(exit, |this| {
             let from = this.len();
-            if from >= to {
+            let end = this.batch_end(to);
+            if from >= end {
                 return Ok(());
             }
 
-            for i in from..to {
+            for i in from..end {
                 let (idx, val) = t(V::I::from(i));
                 this.checked_push(idx, val)?;
-
-                if this.batch_limit_reached() {
-                    break;
-                }
             }
 
             Ok(())
@@ -45,7 +42,7 @@ where
     pub fn compute_range<A, F>(
         &mut self,
         max_from: V::I,
-        other: &impl IterableVec<V::I, A>,
+        other: &impl ScannableVec<V::I, A>,
         t: F,
         exit: &Exit,
     ) -> Result<()>
@@ -59,7 +56,7 @@ where
     pub fn compute_from_index<A>(
         &mut self,
         max_from: V::I,
-        other: &impl IterableVec<V::I, A>,
+        other: &impl ScannableVec<V::I, A>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -78,7 +75,7 @@ where
     pub fn compute_transform<A, F>(
         &mut self,
         max_from: V::I,
-        other: &impl IterableVec<V::I, A>,
+        other: &impl ScannableVec<V::I, A>,
         mut t: F,
         exit: &Exit,
     ) -> Result<()>
@@ -92,27 +89,25 @@ where
 
         self.repeat_until_complete(exit, |this| {
             let skip = this.len();
-
-            for (i, b) in other.iter().enumerate().skip(skip) {
-                let (i, v) = t((V::I::from(i), b, this));
-                this.checked_push(i, v)?;
-
-                if this.batch_limit_reached() {
-                    break;
-                }
+            let end = this.batch_end(other.len());
+            if skip >= end {
+                return Ok(());
             }
 
-            Ok(())
-        })?;
-
-        Ok(())
+            let mut i = skip;
+            other.try_fold_range(skip, end, (), |(), b: A| {
+                let (idx, v) = t((V::I::from(i), b, &*this));
+                i += 1;
+                this.checked_push(idx, v)
+            })
+        })
     }
 
     pub fn compute_transform2<A, B, F>(
         &mut self,
         max_from: V::I,
-        other1: &impl IterableVec<V::I, A>,
-        other2: &impl IterableVec<V::I, B>,
+        other1: &impl ScannableVec<V::I, A>,
+        other2: &impl ScannableVec<V::I, B>,
         mut t: F,
         exit: &Exit,
     ) -> Result<()>
@@ -127,27 +122,30 @@ where
 
         self.repeat_until_complete(exit, |this| {
             let skip = this.len();
-            let mut iter2 = other2.iter().skip(skip);
-
-            for (i, b) in other1.iter().enumerate().skip(skip) {
-                let (i, v) = t((V::I::from(i), b, iter2.next().unwrap(), this));
-                this.checked_push(i, v)?;
-
-                if this.batch_limit_reached() {
-                    break;
-                }
+            let source_end = other1.len().min(other2.len());
+            let end = this.batch_end(source_end);
+            if skip >= end {
+                return Ok(());
             }
 
-            Ok(())
+            let batch2 = other2.collect_range(skip, end);
+            let mut iter2 = batch2.into_iter();
+            let mut i = skip;
+
+            other1.try_fold_range(skip, end, (), |(), b: A| {
+                let (idx, v) = t((V::I::from(i), b, iter2.next().unwrap(), &*this));
+                i += 1;
+                this.checked_push(idx, v)
+            })
         })
     }
 
     pub fn compute_transform3<A, B, C, F>(
         &mut self,
         max_from: V::I,
-        other1: &impl IterableVec<V::I, A>,
-        other2: &impl IterableVec<V::I, B>,
-        other3: &impl IterableVec<V::I, C>,
+        other1: &impl ScannableVec<V::I, A>,
+        other2: &impl ScannableVec<V::I, B>,
+        other3: &impl ScannableVec<V::I, C>,
         mut t: F,
         exit: &Exit,
     ) -> Result<()>
@@ -165,25 +163,29 @@ where
 
         self.repeat_until_complete(exit, |this| {
             let skip = this.len();
-            let mut iter2 = other2.iter().skip(skip);
-            let mut iter3 = other3.iter().skip(skip);
+            let source_end = other1.len().min(other2.len()).min(other3.len());
+            let end = this.batch_end(source_end);
+            if skip >= end {
+                return Ok(());
+            }
 
-            for (i, b) in other1.iter().enumerate().skip(skip) {
-                let (i, v) = t((
+            let batch2 = other2.collect_range(skip, end);
+            let batch3 = other3.collect_range(skip, end);
+            let mut iter2 = batch2.into_iter();
+            let mut iter3 = batch3.into_iter();
+            let mut i = skip;
+
+            other1.try_fold_range(skip, end, (), |(), b: A| {
+                let (idx, v) = t((
                     V::I::from(i),
                     b,
                     iter2.next().unwrap(),
                     iter3.next().unwrap(),
-                    this,
+                    &*this,
                 ));
-                this.checked_push(i, v)?;
-
-                if this.batch_limit_reached() {
-                    break;
-                }
-            }
-
-            Ok(())
+                i += 1;
+                this.checked_push(idx, v)
+            })
         })
     }
 
@@ -191,10 +193,10 @@ where
     pub fn compute_transform4<A, B, C, D, F>(
         &mut self,
         max_from: V::I,
-        other1: &impl IterableVec<V::I, A>,
-        other2: &impl IterableVec<V::I, B>,
-        other3: &impl IterableVec<V::I, C>,
-        other4: &impl IterableVec<V::I, D>,
+        other1: &impl ScannableVec<V::I, A>,
+        other2: &impl ScannableVec<V::I, B>,
+        other3: &impl ScannableVec<V::I, C>,
+        other4: &impl ScannableVec<V::I, D>,
         mut t: F,
         exit: &Exit,
     ) -> Result<()>
@@ -213,34 +215,43 @@ where
 
         self.repeat_until_complete(exit, |this| {
             let skip = this.len();
-            let mut iter2 = other2.iter().skip(skip);
-            let mut iter3 = other3.iter().skip(skip);
-            let mut iter4 = other4.iter().skip(skip);
+            let source_end = other1
+                .len()
+                .min(other2.len())
+                .min(other3.len())
+                .min(other4.len());
+            let end = this.batch_end(source_end);
+            if skip >= end {
+                return Ok(());
+            }
 
-            for (i, b) in other1.iter().enumerate().skip(skip) {
-                let (i, v) = t((
+            let batch2 = other2.collect_range(skip, end);
+            let batch3 = other3.collect_range(skip, end);
+            let batch4 = other4.collect_range(skip, end);
+            let mut iter2 = batch2.into_iter();
+            let mut iter3 = batch3.into_iter();
+            let mut iter4 = batch4.into_iter();
+            let mut i = skip;
+
+            other1.try_fold_range(skip, end, (), |(), b: A| {
+                let (idx, v) = t((
                     V::I::from(i),
                     b,
                     iter2.next().unwrap(),
                     iter3.next().unwrap(),
                     iter4.next().unwrap(),
-                    this,
+                    &*this,
                 ));
-                this.checked_push(i, v)?;
-
-                if this.batch_limit_reached() {
-                    break;
-                }
-            }
-
-            Ok(())
+                i += 1;
+                this.checked_push(idx, v)
+            })
         })
     }
 
     pub fn compute_coarser(
         &mut self,
         max_from: V::T,
-        other: &impl IterableVec<V::T, V::I>,
+        other: &impl ScannableVec<V::T, V::I>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -250,29 +261,30 @@ where
         self.validate_computed_version_or_reset(other.version())?;
 
         self.repeat_until_complete(exit, |this| {
-            let skip = this
-                .iter()
-                .last()
-                .map(|v| v.to_usize().min(max_from.to_usize()))
-                .unwrap_or(0);
+            let skip = if this.len() > 0 {
+                this.collect_last().unwrap()
+                    .to_usize()
+                    .min(max_from.to_usize())
+            } else {
+                0
+            };
+
+            let end = this.batch_end(other.len());
+            if skip >= end {
+                return Ok(());
+            }
 
             let mut prev_i = None;
-            for (v, i) in other.iter().enumerate().skip(skip) {
-                let v = V::T::from(v);
+            let batch = other.collect_range(skip, end);
+            for (j, i) in batch.into_iter().enumerate() {
+                let v = V::T::from(skip + j);
                 if prev_i.is_some_and(|prev_i| prev_i == i) {
                     continue;
                 }
-                if this
-                    .get_pushed_or_read_once(i)?
-                    .is_none_or(|old_v| old_v > v)
-                {
+                if this.collect_one(i.to_usize()).is_none_or(|old_v| old_v > v) {
                     this.truncate_push(i, v)?;
                 }
                 prev_i.replace(i);
-
-                if this.batch_limit_reached() {
-                    break;
-                }
             }
 
             Ok(())

@@ -6,7 +6,8 @@
 use rawdb::Database;
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, EagerVec, Exit, GenericStoredVec, ImportableVec, Result, StoredVec, Version,
+    AnyStoredVec, EagerVec, Exit, GenericStoredVec, ImportableVec, Result, ScannableVec, StoredVec,
+    Version,
 };
 
 // ============================================================================
@@ -60,7 +61,7 @@ where
 
     for i in 0..10 {
         let expected = ((i * 10) + (i * 5) + i) as u64;
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert_eq!(
             actual, expected,
             "Sum mismatch at index {}: expected {}, got {}",
@@ -97,7 +98,7 @@ where
 
     for i in 0..10 {
         let expected = (10 + i) as u64;
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert_eq!(
             actual, expected,
             "Min mismatch at index {}: expected {}, got {}",
@@ -134,7 +135,7 @@ where
 
     for i in 0..10 {
         let expected = (100 + i) as u64;
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert_eq!(
             actual, expected,
             "Max mismatch at index {}: expected {}, got {}",
@@ -164,7 +165,7 @@ where
     result.compute_previous_value(0, &source, 1, &exit)?;
     result.flush()?;
 
-    let actual_0 = result.read_at_unwrap_once(0);
+    let actual_0 = result.collect_first().unwrap();
     assert!(
         actual_0.is_nan(),
         "First element should be NaN when no previous value exists"
@@ -172,7 +173,7 @@ where
 
     let expected = [10.0, 20.0, 30.0, 40.0];
     for (i, v) in expected.into_iter().enumerate() {
-        let actual = result.read_at_unwrap_once(i + 1);
+        let actual = result.collect_one(i + 1).unwrap();
         assert_eq!(
             actual,
             v,
@@ -207,7 +208,7 @@ where
 
     let expected = [0, 10, 5, 5, 20];
     for (i, v) in expected.into_iter().enumerate() {
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert_eq!(
             actual, v,
             "Change mismatch at index {}: expected {}, got {}",
@@ -238,10 +239,10 @@ where
     result.compute_percentage_change(0, &source, 1, &exit)?;
     result.flush()?;
 
-    let actual_0 = result.read_at_unwrap_once(0);
-    let actual_1 = result.read_at_unwrap_once(1);
-    let actual_2 = result.read_at_unwrap_once(2);
-    let actual_3 = result.read_at_unwrap_once(3);
+    let actual_0 = result.collect_first().unwrap();
+    let actual_1 = result.collect_one(1).unwrap();
+    let actual_2 = result.collect_one(2).unwrap();
+    let actual_3 = result.collect_one(3).unwrap();
 
     assert!(
         actual_0.is_nan(),
@@ -275,7 +276,7 @@ where
 
     let expected = [3, 3, 4, 4, 5, 9, 9, 9];
     for (i, v) in expected.into_iter().enumerate() {
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert_eq!(
             actual, v,
             "Sliding window max mismatch at index {}: expected {}, got {}",
@@ -307,7 +308,7 @@ where
 
     let expected = [3, 1, 1, 1, 1, 1, 2, 2];
     for (i, v) in expected.into_iter().enumerate() {
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert_eq!(
             actual, v,
             "Sliding window min mismatch at index {}: expected {}, got {}",
@@ -339,7 +340,7 @@ where
 
     let expected = [10, 15, 15, 20, 20, 25, 25];
     for (i, v) in expected.into_iter().enumerate() {
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert_eq!(
             actual, v,
             "All-time high mismatch at index {}: expected {}, got {}",
@@ -371,7 +372,7 @@ where
 
     let expected = [10, 5, 5, 3, 3, 2, 2];
     for (i, v) in expected.into_iter().enumerate() {
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert_eq!(
             actual, v,
             "All-time low mismatch at index {}: expected {}, got {}",
@@ -402,7 +403,7 @@ where
     result.flush()?;
 
     for i in 0..5 {
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         let expected = 41.42;
         assert!(
             (actual - expected).abs() < 0.01,
@@ -442,7 +443,7 @@ where
 
     let expected = [0.0, 1.0, 2.0, 3.0];
     for (i, v) in expected.into_iter().enumerate() {
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert!(
             (actual - v).abs() < 0.01,
             "Z-score mismatch at index {}: expected {}, got {}",
@@ -474,7 +475,7 @@ where
     result.flush()?;
 
     for i in 0..5 {
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         let expected = (i * 10) as u32;
         assert_eq!(actual, expected);
     }
@@ -488,7 +489,7 @@ where
     result.flush()?;
 
     for i in 0..10 {
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         let expected = (i * 10) as u32;
         assert_eq!(actual, expected);
     }
@@ -519,7 +520,7 @@ where
 
     for i in 0..10 {
         let expected = (i * 10 + i * 5) as u64;
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert_eq!(actual, expected);
     }
 
@@ -549,7 +550,7 @@ where
 
     for i in 0..10 {
         let expected = (100 + i * 10 - i * 5) as u64;
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert_eq!(actual, expected);
     }
 
@@ -579,7 +580,7 @@ where
 
     for i in 0..10 {
         let expected = ((i + 1) * (i + 2)) as u32;
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert_eq!(actual, expected);
     }
 
@@ -609,7 +610,7 @@ where
 
     for i in 0..10 {
         let expected = (100.0 + i as f32 * 10.0) / (i as f32 + 1.0);
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert_f32_eq(actual, expected, 0.001, &format!("Divide at index {}", i));
     }
 
@@ -637,7 +638,7 @@ where
 
     for i in 0..10 {
         let expected = if i < 5 { (i * 10) as u64 } else { 40u64 };
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert_eq!(actual, expected, "Max at index {}", i);
     }
 
@@ -669,7 +670,7 @@ where
 
     for i in 0..10 {
         let expected = if i < 5 { (100 - i * 10) as u64 } else { 50u64 };
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert_eq!(actual, expected, "Min at index {}", i);
     }
 
@@ -697,7 +698,7 @@ where
     let mut expected_sum = 0u64;
     for i in 0..10 {
         expected_sum += (i + 1) as u64;
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert_eq!(actual, expected_sum, "Cumulative sum at index {}", i);
     }
 
@@ -724,7 +725,7 @@ where
     result.flush()?;
 
     for i in 0..10_u64 {
-        let actual = result.read_at_unwrap_once(i as usize);
+        let actual = result.collect_one(i as usize).unwrap();
         if i < 2 {
             let sum: u64 = (0..=i).map(|j| j * 10).sum();
             let expected = sum as f32 / (i + 1) as f32;
@@ -759,7 +760,7 @@ where
     result.flush()?;
 
     for i in 0..10 {
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert_f32_eq(actual, 100.0, 0.1, &format!("EMA at index {}", i));
     }
 
@@ -790,7 +791,7 @@ where
 
     for i in 0..10 {
         let expected = ((i + 1) as f32 / 10.0) * 100.0;
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert_f32_eq(
             actual,
             expected,
@@ -826,7 +827,7 @@ where
 
     for i in 0..10 {
         let expected = (((100 + i * 10) as f32 - 100.0) / 100.0) * 100.0;
-        let actual = result.read_at_unwrap_once(i);
+        let actual = result.collect_one(i).unwrap();
         assert_f32_eq(
             actual,
             expected,

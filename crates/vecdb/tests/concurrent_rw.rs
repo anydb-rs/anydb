@@ -26,8 +26,7 @@ use std::{
 use rawdb::Database;
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, AnyVec, BytesVec, GenericStoredVec, ImportableVec, Result, TypedVecIterator,
-    Version,
+    AnyStoredVec, AnyVec, BytesVec, GenericStoredVec, ImportableVec, Result, ScannableVec, Version,
 };
 
 #[cfg(feature = "pco")]
@@ -61,10 +60,10 @@ fn test_reader_sees_written_data_without_flush() -> Result<()> {
     assert_eq!(reader.stored_len(), 100);
     assert_eq!(reader.len(), 100);
 
-    let mut iter = reader.iter()?;
-    assert_eq!(iter.get(0), Some(0));
-    assert_eq!(iter.get(50), Some(50));
-    assert_eq!(iter.get(99), Some(99));
+    let r = reader.reader();
+    assert_eq!(r.get(0), 0);
+    assert_eq!(r.get(50), 50);
+    assert_eq!(r.get(99), 99);
 
     Ok(())
 }
@@ -104,9 +103,9 @@ fn test_reader_sees_new_data_after_write() -> Result<()> {
     assert_eq!(reader.stored_len(), 100);
 
     // And reader can read the new data from mmap
-    let mut iter = reader.iter()?;
-    assert_eq!(iter.get(99), Some(99));
-    assert_eq!(iter.get(75), Some(75));
+    let r = reader.reader();
+    assert_eq!(r.get(99), 99);
+    assert_eq!(r.get(75), 75);
 
     Ok(())
 }
@@ -137,10 +136,10 @@ fn test_concurrent_read_during_write() -> Result<()> {
         for _ in 0..100 {
             let len = reader.stored_len();
             if len > 0 {
-                let mut iter = reader.iter()?;
+                let r = reader.reader();
                 // Read some values - should never panic or return garbage
                 for i in 0..len.min(100) {
-                    let val = iter.get(i);
+                    let val = r.try_get(i);
                     assert!(val.is_some(), "Expected value at index {}", i);
                     assert_eq!(val.unwrap(), i as u64);
                 }
@@ -201,25 +200,25 @@ fn test_batched_writes_single_flush() -> Result<()> {
     assert_eq!(reader2.len(), 100);
     assert_eq!(reader3.len(), 100);
 
-    let mut iter1 = reader1.iter()?;
-    let mut iter2 = reader2.iter()?;
-    let mut iter3 = reader3.iter()?;
+    let r1 = reader1.reader();
+    let r2 = reader2.reader();
+    let r3 = reader3.reader();
 
-    assert_eq!(iter1.get(50), Some(50));
-    assert_eq!(iter2.get(50), Some(100));
-    assert_eq!(iter3.get(50), Some(150));
+    assert_eq!(r1.get(50), 50);
+    assert_eq!(r2.get(50), 100);
+    assert_eq!(r3.get(50), 150);
 
-    // Flush while iterators are still alive - no deadlock since
+    // Flush while readers are still alive - no deadlock since
     // dirty_range is in a separate Mutex from region metadata
     db.flush()?;
 
     // Data should still be readable
-    drop(iter1);
-    drop(iter2);
-    drop(iter3);
+    drop(r1);
+    drop(r2);
+    drop(r3);
 
-    let mut iter1 = reader1.iter()?;
-    assert_eq!(iter1.get(99), Some(99));
+    let r1 = reader1.reader();
+    assert_eq!(r1.get(99), 99);
 
     Ok(())
 }
@@ -249,10 +248,9 @@ fn test_pco_concurrent_read_write() -> Result<()> {
     // Reader should see all data
     assert_eq!(reader.stored_len(), 1000);
 
-    let mut iter = reader.iter()?;
-    assert_eq!(iter.get(0), Some(0));
-    assert_eq!(iter.get(500), Some(500));
-    assert_eq!(iter.get(999), Some(999));
+    assert_eq!(reader.collect_range(0, 1), vec![0]);
+    assert_eq!(reader.collect_range(500, 501), vec![500]);
+    assert_eq!(reader.collect_range(999, 1000), vec![999]);
 
     Ok(())
 }
@@ -288,9 +286,9 @@ fn test_reader_isolation_from_pushed() -> Result<()> {
     assert_eq!(reader.stored_len(), 50);
 
     // Reader can't access indices 50-99
-    let mut iter = reader.iter()?;
-    assert_eq!(iter.get(49), Some(49));
-    assert_eq!(iter.get(50), None);
+    let r = reader.reader();
+    assert_eq!(r.get(49), 49);
+    assert_eq!(r.try_get(50), None);
 
     Ok(())
 }
@@ -333,8 +331,8 @@ fn test_memory_ordering_len_vs_data() -> Result<()> {
                 // CRITICAL: If we see stored_len = N, we MUST be able to read index N-1
                 let last_idx = len - 1;
                 let reader_ref = reader.create_reader();
-                match reader.get_pushed_or_read_at(last_idx, &reader_ref) {
-                    Ok(Some(val)) => {
+                match reader.read_at(last_idx, &reader_ref) {
+                    Ok(val) => {
                         // Verify the value is correct (not garbage)
                         if val != last_idx as u64 {
                             eprintln!(
@@ -345,16 +343,8 @@ fn test_memory_ordering_len_vs_data() -> Result<()> {
                         }
                         reads_clone.fetch_add(1, Ordering::Relaxed);
                     }
-                    Ok(None) => {
-                        // This should NEVER happen - if stored_len says we have data, it must exist
-                        eprintln!(
-                            "ERROR: stored_len={} but no data at index {}",
-                            len, last_idx
-                        );
-                        errors_clone.fetch_add(1, Ordering::Relaxed);
-                    }
                     Err(e) => {
-                        eprintln!("ERROR: Read failed at index {}: {:?}", last_idx, e);
+                        eprintln!("ERROR: Read failed at index {} (stored_len={}): {:?}", last_idx, len, e);
                         errors_clone.fetch_add(1, Ordering::Relaxed);
                     }
                 }
@@ -436,17 +426,14 @@ fn test_length_data_consistency_stress() -> Result<()> {
                     if i >= len {
                         continue;
                     }
-                    match reader.get_pushed_or_read_at(i, &reader_ref) {
-                        Ok(Some(val)) => {
+                    match reader.read_at(i, &reader_ref) {
+                        Ok(val) => {
                             if val != i as u64 {
                                 errors_clone.fetch_add(1, Ordering::Relaxed);
                             }
                         }
-                        Ok(None) => {
-                            eprintln!("ERROR: No data at index {} (len={})", i, len);
-                            errors_clone.fetch_add(1, Ordering::Relaxed);
-                        }
-                        Err(_) => {
+                        Err(e) => {
+                            eprintln!("ERROR: Read failed at index {} (len={}): {:?}", i, len, e);
                             errors_clone.fetch_add(1, Ordering::Relaxed);
                         }
                     }
@@ -506,10 +493,10 @@ fn test_many_readers_one_writer() -> Result<()> {
                 b.wait();
                 for _ in 0..50 {
                     let len = reader.stored_len();
-                    let mut iter = reader.iter()?;
+                    let r = reader.reader();
                     // Verify data integrity
                     for i in 0..len.min(100) {
-                        let val = iter.get(i).unwrap();
+                        let val = r.get(i);
                         assert_eq!(val, i as u64);
                     }
                     thread::sleep(Duration::from_micros(10));
@@ -621,7 +608,7 @@ fn test_realworld_stress() -> Result<()> {
                         let reader_c_ref = r_c.create_reader();
 
                         // Check first element
-                        if let Ok(Some(v)) = r_a.get_pushed_or_read_at(0, &reader_a_ref)
+                        if let Ok(v) = r_a.read_at(0, &reader_a_ref)
                             && v != 0
                         {
                             local_errors += 1;
@@ -629,7 +616,7 @@ fn test_realworld_stress() -> Result<()> {
 
                         // Check last safe element
                         let safe_idx = min_len.saturating_sub(1);
-                        if let Ok(Some(v)) = r_a.get_pushed_or_read_at(safe_idx, &reader_a_ref)
+                        if let Ok(v) = r_a.read_at(safe_idx, &reader_a_ref)
                             && v != safe_idx as u64
                         {
                             eprintln!(
@@ -638,12 +625,12 @@ fn test_realworld_stress() -> Result<()> {
                             );
                             local_errors += 1;
                         }
-                        if let Ok(Some(v)) = r_b.get_pushed_or_read_at(safe_idx, &reader_b_ref)
+                        if let Ok(v) = r_b.read_at(safe_idx, &reader_b_ref)
                             && v != (safe_idx as u64) * 2
                         {
                             local_errors += 1;
                         }
-                        if let Ok(Some(v)) = r_c.get_pushed_or_read_at(safe_idx, &reader_c_ref)
+                        if let Ok(v) = r_c.read_at(safe_idx, &reader_c_ref)
                             && v != (safe_idx as u64) * 3
                         {
                             local_errors += 1;
@@ -651,7 +638,7 @@ fn test_realworld_stress() -> Result<()> {
 
                         // Check a middle element
                         let mid_idx = min_len / 2;
-                        if let Ok(Some(v)) = r_a.get_pushed_or_read_at(mid_idx, &reader_a_ref)
+                        if let Ok(v) = r_a.read_at(mid_idx, &reader_a_ref)
                             && v != mid_idx as u64
                         {
                             local_errors += 1;
@@ -747,9 +734,9 @@ fn test_realworld_stress() -> Result<()> {
     let reader_c_ref = vec_c.create_reader();
 
     for i in 0..expected_len {
-        let a = vec_a.get_pushed_or_read_at(i, &reader_a_ref)?.unwrap();
-        let b = vec_b.get_pushed_or_read_at(i, &reader_b_ref)?.unwrap();
-        let c = vec_c.get_pushed_or_read_at(i, &reader_c_ref)?.unwrap();
+        let a = vec_a.read_at(i, &reader_a_ref)?;
+        let b = vec_b.read_at(i, &reader_b_ref)?;
+        let c = vec_c.read_at(i, &reader_c_ref)?;
 
         assert_eq!(a, i as u64, "vec_a[{}] incorrect", i);
         assert_eq!(b, (i as u64) * 2, "vec_b[{}] incorrect", i);
@@ -798,36 +785,26 @@ fn test_extended_stress() -> Result<()> {
                 while !stop.load(Ordering::Relaxed) {
                     let len = reader.stored_len();
                     if len > 0 {
-                        let reader_ref = reader.create_reader();
-
                         // Check last element - most likely to catch races
                         let idx = len - 1;
-                        match reader.get_pushed_or_read_at(idx, &reader_ref) {
-                            Ok(Some(v)) => {
-                                if v != idx as u64 {
-                                    local_errors += 1;
-                                }
-                                local_reads += 1;
-                            }
-                            Ok(None) => {
-                                // This would be a serious error
+                        if let Some(v) = reader.collect_one(idx) {
+                            if v != idx as u64 {
                                 local_errors += 1;
                             }
-                            Err(_) => {
-                                local_errors += 1;
-                            }
+                            local_reads += 1;
+                        } else {
+                            local_errors += 1;
                         }
 
                         // Also check a random-ish index
                         let random_idx = (len * 7) / 11; // Pseudo-random
-                        if random_idx < len
-                            && let Ok(Some(v)) =
-                                reader.get_pushed_or_read_at(random_idx, &reader_ref)
-                        {
-                            if v != random_idx as u64 {
-                                local_errors += 1;
+                        if random_idx < len {
+                            if let Some(v) = reader.collect_one(random_idx) {
+                                if v != random_idx as u64 {
+                                    local_errors += 1;
+                                }
+                                local_reads += 1;
                             }
-                            local_reads += 1;
                         }
                     }
                     // Small sleep between reads
@@ -909,7 +886,6 @@ fn test_extended_stress() -> Result<()> {
 
     // Spot-check final data
     println!("Spot-checking final data...");
-    let reader_ref = writer.create_reader();
     for i in [
         0,
         100,
@@ -918,7 +894,7 @@ fn test_extended_stress() -> Result<()> {
         current_idx as usize - 1,
     ] {
         if i < writer.len() {
-            let v = writer.get_pushed_or_read_at(i, &reader_ref)?.unwrap();
+            let v = writer.collect_one(i).unwrap();
             assert_eq!(v, i as u64, "Value at {} incorrect", i);
         }
     }
@@ -967,15 +943,12 @@ fn test_extended_stress_bytes() -> Result<()> {
 
                         // Check last element - most likely to catch races
                         let idx = len - 1;
-                        match reader.get_pushed_or_read_at(idx, &reader_ref) {
-                            Ok(Some(v)) => {
+                        match reader.read_at(idx, &reader_ref) {
+                            Ok(v) => {
                                 if v != idx as u64 {
                                     local_errors += 1;
                                 }
                                 local_reads += 1;
-                            }
-                            Ok(None) => {
-                                local_errors += 1;
                             }
                             Err(_) => {
                                 local_errors += 1;
@@ -985,8 +958,8 @@ fn test_extended_stress_bytes() -> Result<()> {
                         // Also check a random-ish index
                         let random_idx = (len * 7) / 11;
                         if random_idx < len
-                            && let Ok(Some(v)) =
-                                reader.get_pushed_or_read_at(random_idx, &reader_ref)
+                            && let Ok(v) =
+                                reader.read_at(random_idx, &reader_ref)
                         {
                             if v != random_idx as u64 {
                                 local_errors += 1;
@@ -1076,7 +1049,7 @@ fn test_extended_stress_bytes() -> Result<()> {
         current_idx as usize - 1,
     ] {
         if i < writer.len() {
-            let v = writer.get_pushed_or_read_at(i, &reader_ref)?.unwrap();
+            let v = writer.read_at(i, &reader_ref)?;
             assert_eq!(v, i as u64, "Value at {} incorrect", i);
         }
     }

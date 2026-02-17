@@ -1,7 +1,7 @@
 use std::ops::Add;
 
 use crate::{
-    AnyVec, Error, Exit, GenericStoredVec, IterableVec, Result, StoredVec, VecIndex, VecValue,
+    AnyVec, Error, Exit, GenericStoredVec, ScannableVec, Result, StoredVec, VecIndex, VecValue,
     Version,
 };
 
@@ -19,8 +19,8 @@ where
         aggregate: F,
     ) -> Result<()>
     where
-        O: IterableVec<V::I, V::T>,
-        F: Fn(Box<dyn Iterator<Item = V::T> + '_>) -> V::T,
+        O: ScannableVec<V::I, V::T>,
+        F: Fn(&[Vec<V::T>], usize) -> V::T,
     {
         self.validate_computed_version_or_reset(others.iter().map(|v| v.version()).sum())?;
 
@@ -34,19 +34,20 @@ where
 
         self.repeat_until_complete(exit, |this| {
             let skip = this.len();
-            let mut others_iter = others
+            let source_end = others.iter().map(|v| v.len()).min().unwrap();
+            let end = this.batch_end(source_end);
+            if skip >= end {
+                return Ok(());
+            }
+
+            let batches: Vec<Vec<V::T>> = others
                 .iter()
-                .map(|v| v.iter().skip(skip))
-                .collect::<Vec<_>>();
+                .map(|v| v.collect_range(skip, end))
+                .collect();
 
-            for i in skip..others.first().unwrap().len() {
-                let values = Box::new(others_iter.iter_mut().map(|iter| iter.next().unwrap()));
-                let result = aggregate(values);
-                this.checked_push_at(i, result)?;
-
-                if this.batch_limit_reached() {
-                    break;
-                }
+            for j in 0..(end - skip) {
+                let i = skip + j;
+                this.checked_push_at(i, aggregate(&batches, j))?;
             }
 
             Ok(())
@@ -60,11 +61,11 @@ where
         exit: &Exit,
     ) -> Result<()>
     where
-        O: IterableVec<V::I, V::T>,
+        O: ScannableVec<V::I, V::T>,
         V::T: Add<V::T, Output = V::T>,
     {
-        self.compute_aggregate_of_others(max_from, others, exit, |values| {
-            values.reduce(|sum, v| sum + v).unwrap()
+        self.compute_aggregate_of_others(max_from, others, exit, |batches, j| {
+            batches.iter().map(|b| b[j].clone()).reduce(|sum, v| sum + v).unwrap()
         })
     }
 
@@ -75,10 +76,12 @@ where
         exit: &Exit,
     ) -> Result<()>
     where
-        O: IterableVec<V::I, V::T>,
+        O: ScannableVec<V::I, V::T>,
         V::T: Add<V::T, Output = V::T> + Ord,
     {
-        self.compute_aggregate_of_others(max_from, others, exit, |values| values.min().unwrap())
+        self.compute_aggregate_of_others(max_from, others, exit, |batches, j| {
+            batches.iter().map(|b| &b[j]).min().unwrap().clone()
+        })
     }
 
     pub fn compute_max_of_others<O>(
@@ -88,10 +91,12 @@ where
         exit: &Exit,
     ) -> Result<()>
     where
-        O: IterableVec<V::I, V::T>,
+        O: ScannableVec<V::I, V::T>,
         V::T: Add<V::T, Output = V::T> + Ord,
     {
-        self.compute_aggregate_of_others(max_from, others, exit, |values| values.max().unwrap())
+        self.compute_aggregate_of_others(max_from, others, exit, |batches, j| {
+            batches.iter().map(|b| &b[j]).max().unwrap().clone()
+        })
     }
 
     /// Computes weighted average: sum(weight_i * value_i) / sum(weight_i)
@@ -108,8 +113,8 @@ where
     ) -> Result<()>
     where
         W: VecValue + Into<f64>,
-        OW: IterableVec<V::I, W>,
-        OV: IterableVec<V::I, V::T>,
+        OW: ScannableVec<V::I, W>,
+        OV: ScannableVec<V::I, V::T>,
         V::T: Into<f64> + From<f64>,
     {
         if weights.len() != values.len() {
@@ -133,25 +138,36 @@ where
 
         self.repeat_until_complete(exit, |this| {
             let skip = this.len();
-            let mut weight_iters: Vec<_> =
-                weights.iter().map(|v| v.iter().skip(skip)).collect();
-            let mut value_iters: Vec<_> =
-                values.iter().map(|v| v.iter().skip(skip)).collect();
 
-            let end = weights
+            let source_end = weights
                 .iter()
                 .map(|w| w.len())
                 .chain(values.iter().map(|v| v.len()))
                 .min()
                 .unwrap_or(0);
+            let end = this.batch_end(source_end);
 
-            for i in skip..end {
+            if skip >= end {
+                return Ok(());
+            }
+
+            let weight_batches: Vec<Vec<W>> = weights
+                .iter()
+                .map(|w| w.collect_range(skip, end))
+                .collect();
+            let value_batches: Vec<Vec<V::T>> = values
+                .iter()
+                .map(|v| v.collect_range(skip, end))
+                .collect();
+
+            for j in 0..(end - skip) {
+                let i = skip + j;
                 let mut total_weight = 0.0_f64;
                 let mut weighted_sum = 0.0_f64;
 
-                for (w_iter, v_iter) in weight_iters.iter_mut().zip(value_iters.iter_mut()) {
-                    let weight: f64 = w_iter.next().unwrap().into();
-                    let value: f64 = v_iter.next().unwrap().into();
+                for (w_batch, v_batch) in weight_batches.iter().zip(value_batches.iter()) {
+                    let weight: f64 = w_batch[j].clone().into();
+                    let value: f64 = v_batch[j].clone().into();
 
                     if weight > 0.0 {
                         total_weight += weight;
@@ -166,10 +182,6 @@ where
                 };
 
                 this.checked_push_at(i, result)?;
-
-                if this.batch_limit_reached() {
-                    break;
-                }
             }
 
             Ok(())
@@ -179,9 +191,9 @@ where
     pub fn compute_sum_from_indexes<A, B>(
         &mut self,
         max_from: V::I,
-        first_indexes: &impl IterableVec<V::I, A>,
-        indexes_count: &impl IterableVec<V::I, B>,
-        source: &impl IterableVec<A, V::T>,
+        first_indexes: &impl ScannableVec<V::I, A>,
+        indexes_count: &impl ScannableVec<V::I, B>,
+        source: &impl ScannableVec<A, V::T>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -203,9 +215,9 @@ where
     pub fn compute_filtered_sum_from_indexes<A, B>(
         &mut self,
         max_from: V::I,
-        first_indexes: &impl IterableVec<V::I, A>,
-        indexes_count: &impl IterableVec<V::I, B>,
-        source: &impl IterableVec<A, V::T>,
+        first_indexes: &impl ScannableVec<V::I, A>,
+        indexes_count: &impl ScannableVec<V::I, B>,
+        source: &impl ScannableVec<A, V::T>,
         mut filter: impl FnMut(&V::T) -> bool,
         exit: &Exit,
     ) -> Result<()>
@@ -223,25 +235,37 @@ where
 
         self.repeat_until_complete(exit, |this| {
             let skip = this.len();
-            let mut source_iter = source.iter();
-
-            // Set position once - source indices are sequential
-            if let Some(starting_first_index) = first_indexes.iter().get(skip.into()) {
-                source_iter.set_position(starting_first_index);
+            let source_end = indexes_count.len();
+            let end = this.batch_end(source_end);
+            if skip >= end {
+                return Ok(());
             }
 
-            for (i, count) in indexes_count.iter().enumerate().skip(skip) {
-                let count = usize::from(count);
-                // Sequential read - iterator advances automatically
-                let sum = (&mut source_iter)
-                    .take(count)
-                    .filter(|v| filter(v))
-                    .fold(V::T::default(), |acc, val| acc.saturating_add(val));
-                this.checked_push_at(i, sum)?;
+            // Get the starting position in source
+            let pos = if skip < first_indexes.len() {
+                first_indexes.collect_one(skip).unwrap().to_usize()
+            } else {
+                return Ok(());
+            };
 
-                if this.batch_limit_reached() {
-                    break;
-                }
+            let counts_batch: Vec<usize> = indexes_count
+                .collect_range(skip, end)
+                .into_iter()
+                .map(usize::from)
+                .collect();
+            let total_count: usize = counts_batch.iter().sum();
+
+            // Single batch read instead of per-element allocations
+            let all_values = source.collect_range(pos, pos + total_count);
+            let mut offset = 0;
+            for (j, &count) in counts_batch.iter().enumerate() {
+                let i = skip + j;
+                let sum = all_values[offset..offset + count]
+                    .iter()
+                    .filter(|v| filter(v))
+                    .fold(V::T::default(), |acc, val| acc.saturating_add(val.clone()));
+                offset += count;
+                this.checked_push_at(i, sum)?;
             }
 
             Ok(())
@@ -251,8 +275,8 @@ where
     pub fn compute_count_from_indexes<A, B>(
         &mut self,
         max_from: V::I,
-        first_indexes: &impl IterableVec<V::I, A>,
-        other_to_else: &impl IterableVec<A, B>,
+        first_indexes: &impl ScannableVec<V::I, A>,
+        other_to_else: &impl ScannableVec<A, B>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -279,8 +303,8 @@ where
     pub fn compute_filtered_count_from_indexes<A, B>(
         &mut self,
         max_from: V::I,
-        first_indexes: &impl IterableVec<V::I, A>,
-        other_to_else: &impl IterableVec<A, B>,
+        first_indexes: &impl ScannableVec<V::I, A>,
+        other_to_else: &impl ScannableVec<A, B>,
         mut filter: impl FnMut(A) -> bool,
         exit: &Exit,
     ) -> Result<()>
@@ -302,21 +326,26 @@ where
 
         self.repeat_until_complete(exit, |this| {
             let skip = this.len();
-            let mut other_iter = first_indexes.iter();
+            let source_end = first_indexes.len();
+            let end = this.batch_end(source_end);
+            if skip >= end {
+                return Ok(());
+            }
 
-            for (i, first_index) in first_indexes.iter().enumerate().skip(skip) {
-                let end = other_iter
-                    .get_at(i + 1)
-                    .map(|v| v.to_usize())
-                    .unwrap_or_else(|| other_to_else.len());
+            let fi_batch = first_indexes.collect_range(skip, end);
+            for (j, first_index) in fi_batch.iter().enumerate() {
+                let i = skip + j;
+                let next_first = if i + 1 < first_indexes.len() {
+                    fi_batch.get(j + 1).map(|fi| fi.to_usize()).unwrap_or_else(|| {
+                        first_indexes.collect_one(i + 1).unwrap().to_usize()
+                    })
+                } else {
+                    other_to_else.len()
+                };
 
-                let range = first_index.to_usize()..end;
+                let range = first_index.to_usize()..next_first;
                 let count = range.into_iter().filter(|i| filter(A::from(*i))).count();
                 this.checked_push_at(i, V::T::from(A::from(count)))?;
-
-                if this.batch_limit_reached() {
-                    break;
-                }
             }
 
             Ok(())

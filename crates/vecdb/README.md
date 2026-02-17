@@ -31,8 +31,8 @@ cargo add vecdb
 
 ```rust
 use vecdb::{
-    AnyStoredVec, BytesVec, Database, GenericStoredVec,
-    ImportableVec, Result, Version
+    AnyStoredVec, AnyVec, BytesVec, Database, GenericStoredVec,
+    ImportableVec, ScannableVec, Result, Version
 };
 use std::path::Path;
 
@@ -53,16 +53,13 @@ fn main() -> Result<()> {
     vec.flush()?;  // Calls write() internally then flushes region
     db.flush()?;   // Syncs database metadata
 
-    // Sequential iteration
-    let mut sum = 0u64;
-    for value in vec.iter()? {
-        sum = sum.wrapping_add(value);
-    }
+    // Sequential scan via fold
+    let sum = vec.fold_range(0, vec.len(), 0u64, |acc, v| acc.wrapping_add(v));
 
-    // Random access
-    let view = vec.view();
+    // Random access via reader
+    let reader = vec.reader();
     for i in [500, 1000, 10] {
-        println!("vec[{}] = {}", i, view.get(i));
+        println!("vec[{}] = {}", i, reader.get(i));
     }
 
     Ok(())
@@ -157,14 +154,14 @@ use vecdb::LazyVecFrom1;
 let lazy = LazyVecFrom1::init(
     "computed",
     Version::TWO,
-    source.boxed(),
-    |i, source_iter| source_iter.get(i).map(|v| v * 2)
+    Box::new(source.clone()),  // ScannableBoxedVec
+    |v| v * 2,
 );
 
-// Computed during iteration, not stored
-for value in lazy.iter() {
+// Computed on-the-fly via ScannableVec trait, not stored
+lazy.for_each(|value| {
     // ...
-}
+});
 ```
 
 ## Core Operations

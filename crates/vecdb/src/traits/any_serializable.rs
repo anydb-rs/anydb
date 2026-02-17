@@ -33,20 +33,26 @@ where
         let from_idx = from.unwrap_or(0);
         let to_idx = to.unwrap_or(len).min(len);
 
-        let vec: Vec<V::T> = self.collect_small_range(from_idx, to_idx);
-
-        #[cfg(feature = "sonic-rs")]
-        sonic_rs::to_writer(buf, &vec)?;
-        #[cfg(all(feature = "serde_json", not(feature = "sonic-rs")))]
-        serde_json::to_writer(buf, &vec)?;
+        buf.push(b'[');
+        let mut first = true;
+        self.for_each_range_dyn(from_idx, to_idx, &mut |value: V::T| {
+            if !first {
+                buf.push(b',');
+            }
+            first = false;
+            #[cfg(feature = "sonic-rs")]
+            sonic_rs::to_writer(&mut *buf, &value).expect("json serialization failed");
+            #[cfg(all(feature = "serde_json", not(feature = "sonic-rs")))]
+            serde_json::to_writer(&mut *buf, &value).expect("json serialization failed");
+        });
+        buf.push(b']');
 
         Ok(())
     }
 
     fn write_json_value(&self, from: Option<usize>, buf: &mut Vec<u8>) -> crate::Result<()> {
-        let from_idx = from.unwrap_or(0);
-
-        if let Some(value) = self.iter_small_range(from_idx, from_idx + 1).next() {
+        let idx = from.unwrap_or(0);
+        if let Some(value) = self.collect_one(idx) {
             #[cfg(feature = "sonic-rs")]
             sonic_rs::to_writer(buf, &value)?;
             #[cfg(all(feature = "serde_json", not(feature = "sonic-rs")))]

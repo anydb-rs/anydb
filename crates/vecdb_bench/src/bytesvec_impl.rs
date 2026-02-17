@@ -1,7 +1,7 @@
 use anyhow::Result;
 use rayon::prelude::*;
 use std::path::Path;
-use vecdb::{AnyStoredVec, BytesVec, Database, GenericStoredVec, ImportableVec, Version};
+use vecdb::{AnyStoredVec, AnyVec, BytesVec, Database, GenericStoredVec, ImportableVec, ScannableVec, Version};
 
 use crate::database::DatabaseBenchmark;
 
@@ -33,31 +33,24 @@ impl DatabaseBenchmark for BytesVecBench {
     }
 
     fn read_sequential(&self) -> Result<u64> {
-        let mut sum = 0u64;
-
-        for value in self.vec.clean_iter()? {
-            sum = sum.wrapping_add(value);
-        }
-
-        Ok(sum)
+        Ok(self.vec.fold_range(0, self.vec.len(), 0u64, |acc, v| acc.wrapping_add(v)))
     }
 
     fn read_random(&self, indices: &[u64]) -> Result<u64> {
         let mut sum = 0u64;
-        let view = self.vec.view();
+        let reader = self.vec.reader();
         for &idx in indices {
-            sum = sum.wrapping_add(view.get(idx as usize));
+            sum = sum.wrapping_add(reader.get(idx as usize));
         }
         Ok(sum)
     }
 
     fn read_random_rayon(&self, indices: &[u64]) -> Result<u64> {
-        let view = self.vec.view();
+        let reader = self.vec.reader();
         let sum = indices
             .par_iter()
-            .map(|&idx| view.get(idx as usize))
+            .map(|&idx| reader.get(idx as usize))
             .reduce(|| 0, |a, b| a.wrapping_add(b));
-
         Ok(sum)
     }
 

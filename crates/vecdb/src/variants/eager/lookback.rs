@@ -1,4 +1,6 @@
-use crate::{AnyVec, Error, Exit, GenericStoredVec, IterableVec, Result, StoredVec, VecValue};
+use crate::{
+    AnyVec, Error, Exit, GenericStoredVec, ScannableVec, Result, StoredVec, VecIndex, VecValue,
+};
 
 use super::{CheckedSub, EagerVec};
 
@@ -10,7 +12,7 @@ where
     fn compute_with_lookback<A, F>(
         &mut self,
         max_from: V::I,
-        source: &impl IterableVec<V::I, A>,
+        source: &impl ScannableVec<V::I, A>,
         lookback_len: usize,
         exit: &Exit,
         transform: F,
@@ -25,26 +27,44 @@ where
 
         self.repeat_until_complete(exit, |this| {
             let skip = this.len();
-            let mut lookback = source.create_lookback(skip, lookback_len, 0);
-
-            for (i, current) in source.iter().enumerate().skip(skip) {
-                let previous = lookback.get_and_push(i, current.clone(), A::default());
-                let result = transform(i, current, previous);
-                this.checked_push_at(i, result)?;
-
-                if this.batch_limit_reached() {
-                    break;
-                }
+            let end = this.batch_end(source.len());
+            if skip >= end {
+                return Ok(());
             }
 
-            Ok(())
+            // Collect only the values that will be looked back to during this batch.
+            // At position i, we need source[i - lookback_len] (when i >= lookback_len).
+            // Reads batch_size elements instead of lookback_len.
+            let prev_start = skip.saturating_sub(lookback_len);
+            let prev_end = end.saturating_sub(lookback_len);
+            let prev_batch = if prev_end > prev_start {
+                source.collect_range(prev_start, prev_end)
+            } else {
+                vec![]
+            };
+
+            let mut prev_idx = 0;
+            let mut i = skip;
+            source.try_fold_range(skip, end, (), |(), current: A| {
+                let previous = if i >= lookback_len {
+                    let val = prev_batch[prev_idx].clone();
+                    prev_idx += 1;
+                    val
+                } else {
+                    A::default()
+                };
+                let result = transform(i, current, previous);
+                this.checked_push_at(i, result)?;
+                i += 1;
+                Ok(())
+            })
         })
     }
 
     pub fn compute_previous_value<A>(
         &mut self,
         max_from: V::I,
-        source: &impl IterableVec<V::I, A>,
+        source: &impl ScannableVec<V::I, A>,
         len: usize,
         exit: &Exit,
     ) -> Result<()>
@@ -54,7 +74,6 @@ where
         V::T: From<f32>,
     {
         self.compute_with_lookback(max_from, source, len, exit, |i, _, previous| {
-            // If there's no previous value (i < len), return NaN
             if i < len {
                 V::T::from(f32::NAN)
             } else {
@@ -68,7 +87,7 @@ where
     pub fn compute_change<A>(
         &mut self,
         max_from: V::I,
-        source: &impl IterableVec<V::I, A>,
+        source: &impl ScannableVec<V::I, A>,
         len: usize,
         exit: &Exit,
     ) -> Result<()>
@@ -90,7 +109,7 @@ where
     pub fn compute_percentage_change<A>(
         &mut self,
         max_from: V::I,
-        source: &impl IterableVec<V::I, A>,
+        source: &impl ScannableVec<V::I, A>,
         len: usize,
         exit: &Exit,
     ) -> Result<()>
@@ -100,7 +119,6 @@ where
         V::T: From<f32>,
     {
         self.compute_with_lookback(max_from, source, len, exit, |i, current, previous| {
-            // If there's no previous value (i < len), return NaN
             if i < len {
                 V::T::from(f32::NAN)
             } else {
@@ -111,10 +129,108 @@ where
         })
     }
 
+    /// Shared helper for rolling computations using variable window starts.
+    fn compute_rolling_from_window_starts<A, F>(
+        &mut self,
+        max_from: V::I,
+        window_starts: &impl ScannableVec<V::I, V::I>,
+        values: &impl ScannableVec<V::I, A>,
+        exit: &Exit,
+        compute: F,
+    ) -> Result<()>
+    where
+        A: VecValue,
+        f64: From<A>,
+        V::T: From<f64>,
+        F: Fn(f64, f64) -> f64,
+    {
+        self.validate_computed_version_or_reset(window_starts.version() + values.version())?;
+
+        self.truncate_if_needed(max_from)?;
+
+        self.repeat_until_complete(exit, |this| {
+            let skip = this.len();
+            let source_len = window_starts.len().min(values.len());
+            let end = this.batch_end(source_len);
+            if skip >= end {
+                return Ok(());
+            }
+
+            let starts_batch = window_starts.collect_range(skip, end);
+            let values_batch = values.collect_range(skip, end);
+
+            let mut cached_start = usize::MAX;
+            let mut cached_prev = f64::NAN;
+
+            for (j, (start, current)) in starts_batch.into_iter().zip(values_batch).enumerate() {
+                let i = skip + j;
+                let start_usize = start.to_usize();
+                let result = if start_usize >= i {
+                    compute(f64::from(current), f64::NAN)
+                } else {
+                    if start_usize != cached_start {
+                        cached_prev = f64::from(values.collect_one(start_usize).unwrap());
+                        cached_start = start_usize;
+                    }
+                    compute(f64::from(current), cached_prev)
+                };
+                this.checked_push_at(i, V::T::from(result))?;
+            }
+
+            Ok(())
+        })
+    }
+
+    /// Compute percentage change using variable window starts (lookback vec).
+    /// For each index i, computes `(values[i] / values[window_starts[i]] - 1) * 100`.
+    pub fn compute_rolling_percentage_change<A>(
+        &mut self,
+        max_from: V::I,
+        window_starts: &impl ScannableVec<V::I, V::I>,
+        values: &impl ScannableVec<V::I, A>,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        A: VecValue,
+        f64: From<A>,
+        V::T: From<f64>,
+    {
+        self.compute_rolling_from_window_starts(max_from, window_starts, values, exit, |current, previous| {
+            if previous.is_nan() || previous == 0.0 {
+                f64::NAN
+            } else {
+                (current / previous - 1.0) * 100.0
+            }
+        })
+    }
+
+    /// Compute change using variable window starts (lookback vec).
+    /// For each index i, computes `values[i] - values[window_starts[i]]`.
+    pub fn compute_rolling_change<A>(
+        &mut self,
+        max_from: V::I,
+        window_starts: &impl ScannableVec<V::I, V::I>,
+        values: &impl ScannableVec<V::I, A>,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        A: VecValue,
+        f64: From<A>,
+        V::T: From<f64>,
+    {
+        self.compute_rolling_from_window_starts(max_from, window_starts, values, exit, |current, previous| {
+            if previous.is_nan() {
+                0.0
+            } else {
+                current - previous
+            }
+        })
+    }
+
     pub fn compute_cagr<A>(
         &mut self,
         max_from: V::I,
-        percentage_returns: &impl IterableVec<V::I, A>,
+        percentage_returns: &impl ScannableVec<V::I, A>,
         days: usize,
         exit: &Exit,
     ) -> Result<()>

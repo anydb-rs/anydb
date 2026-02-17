@@ -1,8 +1,6 @@
 use std::time::Instant;
 
-use vecdb::{
-    AnyStoredVec, BytesVec, Database, GenericStoredVec, ImportableVec, VecIterator, Version,
-};
+use vecdb::{AnyStoredVec, BytesVec, Database, GenericStoredVec, ImportableVec, ScannableVec, Version};
 
 const VALUE_COUNT: usize = 10_000_000_000; // 10B u64s = 80GB
 const BATCH_SIZE: usize = 100_000_000;
@@ -13,8 +11,7 @@ const SEED: u64 = 42;
 fn main() {
     let dir = tempfile::tempdir().unwrap();
     let db = Database::open(dir.path()).unwrap();
-    let mut vec: BytesVec<usize, u64> =
-        BytesVec::import(&db, "bench", Version::TWO).unwrap();
+    let mut vec: BytesVec<usize, u64> = BytesVec::import(&db, "bench", Version::TWO).unwrap();
 
     // --- Write 80GB ---
     println!(
@@ -43,31 +40,11 @@ fn main() {
     // === Full sequential read (80GB) ===
     println!("=== Full sequential read (80 GB) ===\n");
 
-    // iter: single file handle, buffered sequential I/O
     {
-        print!("  iter         ...  ");
+        print!("  fold_range   ...  ");
         flush();
         let start = Instant::now();
-        let mut sum = 0u64;
-        let it = vec.clean_iter().unwrap();
-        for v in it {
-            sum = sum.wrapping_add(v);
-        }
-        std::hint::black_box(sum);
-        let elapsed = start.elapsed();
-        println!("{elapsed:?} ({:.2} GB/s)", 80.0 / elapsed.as_secs_f64());
-    }
-
-    // mmap: view iteration
-    {
-        print!("  view (iter)  ...  ");
-        flush();
-        let start = Instant::now();
-        let mut sum = 0u64;
-        let view = vec.view();
-        for v in view.iter() {
-            sum = sum.wrapping_add(v);
-        }
+        let sum = vec.fold_range(0, VALUE_COUNT, 0u64, |acc, v: u64| acc.wrapping_add(v));
         std::hint::black_box(sum);
         let elapsed = start.elapsed();
         println!("{elapsed:?} ({:.2} GB/s)", 80.0 / elapsed.as_secs_f64());
@@ -87,44 +64,19 @@ fn main() {
 
     println!("\n=== {REPEATS}x (fixed 1M + random-start 1M) ===\n");
 
-    // iter: reuse single file handle, reposition with set_position_to + take
     {
-        print!("  iter (reuse) ...  ");
+        print!("  fold_range   ...  ");
         flush();
         let start = Instant::now();
         let mut sum = 0u64;
-        let mut it = vec.clean_iter().unwrap();
         for i in 0..REPEATS {
-            it.set_position_to(fixed_from);
-            for v in it.by_ref().take(RANGE_SIZE) {
-                sum = sum.wrapping_add(v);
-            }
+            sum = vec.fold_range(fixed_from, fixed_from + RANGE_SIZE, sum, |acc, v: u64| {
+                acc.wrapping_add(v)
+            });
             let from = random_starts[i];
-            it.set_position_to(from);
-            for v in it.by_ref().take(RANGE_SIZE) {
-                sum = sum.wrapping_add(v);
-            }
-        }
-        std::hint::black_box(sum);
-        let elapsed = start.elapsed();
-        println!("{elapsed:?} ({:?}/iter)", elapsed / REPEATS as u32);
-    }
-
-    // view: range access
-    {
-        print!("  view (range) ...  ");
-        flush();
-        let start = Instant::now();
-        let mut sum = 0u64;
-        let view = vec.view();
-        for i in 0..REPEATS {
-            for v in view.range(fixed_from..fixed_from + RANGE_SIZE) {
-                sum = sum.wrapping_add(v);
-            }
-            let from = random_starts[i];
-            for v in view.range(from..from + RANGE_SIZE) {
-                sum = sum.wrapping_add(v);
-            }
+            sum = vec.fold_range(from, from + RANGE_SIZE, sum, |acc, v: u64| {
+                acc.wrapping_add(v)
+            });
         }
         std::hint::black_box(sum);
         let elapsed = start.elapsed();

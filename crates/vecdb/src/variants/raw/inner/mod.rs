@@ -1,5 +1,4 @@
 use std::{
-    cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     fs,
     marker::PhantomData,
@@ -8,14 +7,13 @@ use std::{
 };
 
 use log::{debug, info};
-use rawdb::{Database, Reader, Region, unlikely};
+use rawdb::{Database, Reader, Region, likely, unlikely};
 
 use crate::{
-    AnyStoredVec, AnyVec, BUFFER_SIZE, BaseVec, BoxedVecIterator, Bytes, BytesExt,
-    CleanRawVecIterator, DirtyRawVecIterator, Error, Format, GenericStoredVec, HEADER_OFFSET,
-    Header, ImportOptions, IterableVec, RawVecIterator, RawVecView, Result, SIZE_OF_U64, Stamp,
-    TypedVec, VecIndex, VecIterator, VecValue, Version, WithPrev, short_type_name,
-    vec_region_name_with,
+    AnyStoredVec, AnyVec, BUFFER_SIZE, BaseVec, Bytes, BytesExt, Error, Format, GenericStoredVec,
+    HEADER_OFFSET, Header, ImportOptions, RawIoSource, RawMmapSource, Result, SIZE_OF_U64,
+    ScannableVec, Stamp, TypedVec, VecIndex, VecReader, VecValue, Version, WithPrev,
+    short_type_name, vec_region_name_with,
 };
 
 mod strategy;
@@ -117,7 +115,7 @@ where
         Ok(this)
     }
 
-    pub fn write_header_if_needed(&mut self) -> Result<()> {
+    fn write_header_if_needed(&mut self) -> Result<()> {
         if self.header().modified() {
             let r = self.region().clone();
             self.mut_header().write(&r)?;
@@ -127,7 +125,7 @@ where
 
     /// Returns optimal buffer size for I/O operations, aligned to SIZE_OF_T boundary.
     #[inline]
-    pub const fn aligned_buffer_size() -> usize {
+    pub(crate) const fn aligned_buffer_size() -> usize {
         (BUFFER_SIZE / Self::SIZE_OF_T) * Self::SIZE_OF_T
     }
 
@@ -171,11 +169,6 @@ where
     }
 
     #[inline(always)]
-    pub fn mut_prev_holes(&mut self) -> &mut BTreeSet<usize> {
-        self.holes.previous_mut()
-    }
-
-    #[inline(always)]
     pub fn updated(&self) -> &BTreeMap<usize, T> {
         self.updated.current()
     }
@@ -190,27 +183,22 @@ where
         self.updated.previous()
     }
 
-    #[inline(always)]
-    pub fn mut_prev_updated(&mut self) -> &mut BTreeMap<usize, T> {
-        self.updated.previous_mut()
-    }
+    // ── Point reads (all layers: holes, updated, pushed, stored) ────
 
-    /// Gets value checking all layers: updated, pushed, and storage.
+    /// Gets a value checking all dirty-state layers.
     ///
-    /// Returns `None` if index is in holes or beyond length.
+    /// Checks in order: holes → pushed → updated → stored.
+    /// Returns `None` if the index is a hole or beyond length.
+    /// This is the most complete single-value read for raw vecs.
     #[inline]
     pub fn get_any_or_read(&self, index: I, reader: &Reader) -> Result<Option<T>> {
         self.get_any_or_read_at(index.to_usize(), reader)
     }
 
-    /// Gets value from any layer, creating a temporary reader if needed.
-    #[inline]
-    pub fn get_any_or_read_once(&self, index: I) -> Result<Option<T>> {
-        self.get_any_or_read(index, &self.create_reader())
-    }
-
-    /// Gets value from any layer at usize index using provided reader.
-    /// Returns None if index is in holes or beyond available data.
+    /// Gets a value checking all dirty-state layers at a usize index.
+    ///
+    /// Checks: holes → pushed → updated → stored.
+    /// Returns `None` if the index is a hole or beyond length.
     #[inline]
     pub fn get_any_or_read_at(&self, index: usize, reader: &Reader) -> Result<Option<T>> {
         // Check holes first
@@ -234,30 +222,6 @@ where
 
         // Fall back to reading from storage
         Ok(Some(self.unchecked_read_at(index, reader)?))
-    }
-
-    /// Gets value from any layer at usize index, creating a temporary reader.
-    #[inline]
-    pub fn get_any_or_read_at_once(&self, index: usize) -> Result<Option<T>> {
-        self.get_any_or_read_at(index, &self.create_reader())
-    }
-
-    /// Gets value checking all layers, unwrapping the result.
-    /// Panics if the read fails or if the value doesn't exist.
-    #[inline]
-    pub fn get_any_or_read_unwrap(&self, index: I, reader: &Reader) -> T {
-        self.get_any_or_read(index, reader)
-            .expect("Failed to read value")
-            .expect("Value doesn't exist")
-    }
-
-    /// Gets value from any layer at usize index, unwrapping the result.
-    /// Panics if the read fails or if the value doesn't exist.
-    #[inline]
-    pub fn get_any_or_read_at_unwrap(&self, index: usize, reader: &Reader) -> T {
-        self.get_any_or_read_at(index, reader)
-            .expect("Failed to read value")
-            .expect("Value doesn't exist")
     }
 
     /// Updates the value at the given index.
@@ -291,25 +255,6 @@ where
         self.mut_updated().insert(index, value);
 
         Ok(())
-    }
-
-    /// Updates the value at the given index if it exists, or pushes it if the index equals length.
-    #[inline]
-    pub fn update_or_push(&mut self, index: I, value: T) -> Result<()> {
-        let len = self.len();
-        let index_usize = index.to_usize();
-        match len.cmp(&index_usize) {
-            Ordering::Less => Err(Error::IndexTooHigh {
-                index: index_usize,
-                len,
-                name: self.name().to_string(),
-            }),
-            Ordering::Equal => {
-                self.push(value);
-                Ok(())
-            }
-            Ordering::Greater => self.update(index, value),
-        }
     }
 
     /// Returns the first empty index (either the first hole or the length).
@@ -381,20 +326,16 @@ where
 
     /// Collects all values into a Vec, with None for holes.
     pub fn collect_holed(&self) -> Result<Vec<Option<T>>> {
-        self.collect_holed_range(None, None)
+        self.collect_holed_range(0, self.len())
     }
 
-    /// Collects values in the given range into a Vec, with None for holes.
-    pub fn collect_holed_range(
-        &self,
-        from: Option<usize>,
-        to: Option<usize>,
-    ) -> Result<Vec<Option<T>>> {
+    /// Collects values in `[from, to)` into a Vec, with None for holes.
+    pub fn collect_holed_range(&self, from: usize, to: usize) -> Result<Vec<Option<T>>> {
         let len = self.len();
-        let from = from.unwrap_or_default();
-        let to = to.map_or(len, |to| to.min(len));
+        let from = from.min(len);
+        let to = to.min(len);
 
-        if from >= len || from >= to {
+        if from >= to {
             return Ok(vec![]);
         }
 
@@ -406,23 +347,42 @@ where
     }
 
     #[inline]
-    pub fn len_(&self) -> usize {
-        self.stored_len() + self.pushed_len()
-    }
-
-    #[inline]
-    fn pushed_len(&self) -> usize {
-        self.base.pushed().len()
-    }
-
-    #[inline]
-    fn is_pushed_empty(&self) -> bool {
-        self.base.pushed().is_empty()
-    }
-
-    #[inline]
     pub fn create_reader(&self) -> Reader {
         self.base.region().create_reader()
+    }
+
+    /// Reads a stored value at `index` without bounds checking.
+    #[inline(always)]
+    pub fn unchecked_read_at(&self, index: usize, reader: &Reader) -> Result<T> {
+        let bytes = reader.prefixed((index * Self::SIZE_OF_T) + HEADER_OFFSET);
+        S::read(&bytes[..Self::SIZE_OF_T])
+    }
+
+    /// Reads a stored value at `index` using the provided reader.
+    #[inline(always)]
+    pub fn read_at(&self, index: usize, reader: &Reader) -> Result<T> {
+        let len = self.len_();
+        if likely(index < len) {
+            self.unchecked_read_at(index, reader)
+        } else {
+            Err(Error::IndexTooHigh {
+                index,
+                len,
+                name: self.name().to_string(),
+            })
+        }
+    }
+
+    /// Reads a stored value at `index`, creating a temporary reader.
+    #[inline]
+    pub fn read_at_once(&self, index: usize) -> Result<T> {
+        self.read_at(index, &self.create_reader())
+    }
+
+    /// Reads a stored value at the typed index, creating a temporary reader.
+    #[inline]
+    pub fn read_once(&self, index: I) -> Result<T> {
+        self.read_at_once(index.to_usize())
     }
 
     #[inline]
@@ -440,33 +400,162 @@ where
         vec_region_name_with::<I>(self.name())
     }
 
-    /// Returns a read-only view for fast mmap-backed random access and range iteration.
+    /// Creates a `VecReader` for O(1) random access to stored values.
+    #[inline]
+    pub fn reader(&self) -> VecReader<I, T, S> {
+        VecReader::new(self)
+    }
+
+    // ── Source helpers (internal, for ScannableVec) ──────────────────
+
+    /// Fold over stored data using auto-selected source (mmap or IO).
+    fn fold_source<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, f: F) -> B {
+        let range_bytes = to.saturating_sub(from) * size_of::<T>();
+        if range_bytes > crate::MMAP_CROSSOVER_BYTES {
+            RawIoSource::new(self, from, to).fold(init, f)
+        } else {
+            RawMmapSource::new(self, from, to).fold(init, f)
+        }
+    }
+
+    /// Fallible fold over stored data using auto-selected source.
+    fn try_fold_source<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
+        &self,
+        from: usize,
+        to: usize,
+        init: B,
+        f: F,
+    ) -> std::result::Result<B, E> {
+        let range_bytes = to.saturating_sub(from) * size_of::<T>();
+        if range_bytes > crate::MMAP_CROSSOVER_BYTES {
+            RawIoSource::new(self, from, to).try_fold(init, f)
+        } else {
+            RawMmapSource::new(self, from, to).try_fold(init, f)
+        }
+    }
+
+    // ── Public source-specific folds (for benchmarking) ──────────────
+
+    /// Fold over stored data using buffered file I/O.
     ///
-    /// The view only sees stored (persisted) values. Call `write()` first
-    /// if you need pushed values to be visible.
-    #[inline]
-    pub fn view(&self) -> RawVecView<I, T, S> {
-        RawVecView::new(self.create_reader(), self.base.stored_len())
+    /// Only reads stored (persisted) values — ignores holes, updates, and pushed.
+    /// Useful for benchmarking I/O strategy vs mmap.
+    pub fn fold_stored_io<B, F: FnMut(B, T) -> B>(
+        &self,
+        from: usize,
+        to: usize,
+        init: B,
+        f: F,
+    ) -> B {
+        let stored_len = self.stored_len();
+        let from = from.min(stored_len);
+        let to = to.min(stored_len);
+        if from >= to {
+            return init;
+        }
+        RawIoSource::new(self, from, to).fold(init, f)
     }
 
-    #[inline]
-    pub fn iter(&self) -> Result<RawVecIterator<'_, I, T, S>> {
-        RawVecIterator::new(self)
+    /// Fold over stored data using memory-mapped access.
+    ///
+    /// Only reads stored (persisted) values — ignores holes, updates, and pushed.
+    /// Useful for benchmarking mmap strategy vs I/O.
+    pub fn fold_stored_mmap<B, F: FnMut(B, T) -> B>(
+        &self,
+        from: usize,
+        to: usize,
+        init: B,
+        f: F,
+    ) -> B {
+        let stored_len = self.stored_len();
+        let from = from.min(stored_len);
+        let to = to.min(stored_len);
+        if from >= to {
+            return init;
+        }
+        RawMmapSource::new(self, from, to).fold(init, f)
     }
 
-    #[inline]
-    pub fn clean_iter(&self) -> Result<CleanRawVecIterator<'_, I, T, S>> {
-        CleanRawVecIterator::new(self)
+    /// Element-by-element fold handling dirty state (holes, updates, pushed).
+    fn fold_dirty<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, mut f: F) -> B {
+        let stored_len = self.stored_len();
+        let has_holes = !self.holes().is_empty();
+        let has_updates = !self.updated().is_empty();
+        let reader = self.create_reader();
+        let mut acc = init;
+
+        let stored_to = to.min(stored_len);
+        for i in from..stored_to {
+            if has_holes && self.holes().contains(&i) {
+                continue;
+            }
+            let val = if has_updates {
+                if let Some(v) = self.updated().get(&i) {
+                    v.clone()
+                } else {
+                    self.unchecked_read_at(i, &reader).unwrap()
+                }
+            } else {
+                self.unchecked_read_at(i, &reader).unwrap()
+            };
+            acc = f(acc, val);
+        }
+
+        let push_from = from.max(stored_len);
+        for i in push_from..to {
+            if has_holes && self.holes().contains(&i) {
+                continue;
+            }
+            if let Some(v) = self.get_pushed_at(i, stored_len) {
+                acc = f(acc, v.clone());
+            }
+        }
+
+        acc
     }
 
-    #[inline]
-    pub fn dirty_iter(&self) -> Result<DirtyRawVecIterator<'_, I, T, S>> {
-        DirtyRawVecIterator::new(self)
-    }
+    /// Element-by-element fallible fold handling dirty state.
+    fn try_fold_dirty<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
+        &self,
+        from: usize,
+        to: usize,
+        init: B,
+        mut f: F,
+    ) -> std::result::Result<B, E> {
+        let stored_len = self.stored_len();
+        let has_holes = !self.holes().is_empty();
+        let has_updates = !self.updated().is_empty();
+        let reader = self.create_reader();
+        let mut acc = init;
 
-    #[inline]
-    pub fn boxed_iter(&self) -> Result<BoxedVecIterator<'_, I, T>> {
-        Ok(Box::new(self.iter()?))
+        let stored_to = to.min(stored_len);
+        for i in from..stored_to {
+            if has_holes && self.holes().contains(&i) {
+                continue;
+            }
+            let val = if has_updates {
+                if let Some(v) = self.updated().get(&i) {
+                    v.clone()
+                } else {
+                    self.unchecked_read_at(i, &reader).unwrap()
+                }
+            } else {
+                self.unchecked_read_at(i, &reader).unwrap()
+            };
+            acc = f(acc, val)?;
+        }
+
+        let push_from = from.max(stored_len);
+        for i in push_from..to {
+            if has_holes && self.holes().contains(&i) {
+                continue;
+            }
+            if let Some(v) = self.get_pushed_at(i, stored_len) {
+                acc = f(acc, v.clone())?;
+            }
+        }
+
+        Ok(acc)
     }
 }
 
@@ -596,9 +685,10 @@ where
             if unlikely(expanded) {
                 // After rollback, updates may extend beyond current disk length.
                 // Use write_at which handles extension (slower but necessary).
+                let mut bytes = Vec::with_capacity(Self::SIZE_OF_T);
                 for (index, value) in updated {
                     let offset = index * Self::SIZE_OF_T + HEADER_OFFSET;
-                    let mut bytes = Vec::with_capacity(Self::SIZE_OF_T);
+                    bytes.clear();
                     S::write_to_vec(&value, &mut bytes);
                     region.write_at(&bytes, offset)?;
                 }
@@ -694,10 +784,19 @@ where
     T: VecValue,
     S: RawStrategy<T>,
 {
-    #[inline(always)]
-    fn unchecked_read_at(&self, index: usize, reader: &Reader) -> Result<T> {
-        let bytes = reader.prefixed((index * Self::SIZE_OF_T) + HEADER_OFFSET);
-        S::read(&bytes[..Self::SIZE_OF_T])
+    fn collect_stored_range(&self, from: usize, to: usize) -> Result<Vec<T>> {
+        // Must use reader directly — fold_source clamps to stored_len,
+        // but this method may read truncated values still on disk.
+        let reader = self.create_reader();
+        (from..to)
+            .map(|i| {
+                if let Some(val) = self.prev_updated().get(&i) {
+                    Ok(val.clone())
+                } else {
+                    self.unchecked_read_at(i, &reader)
+                }
+            })
+            .collect()
     }
 
     #[inline(always)]
@@ -747,14 +846,6 @@ where
 
         // Use default reset for common cleanup
         self.default_reset()
-    }
-
-    fn get_stored_value_for_serialization(&self, index: usize, reader: &Reader) -> Result<T> {
-        // Prefer prev_updated, then read from disk
-        if let Some(val) = self.prev_updated().get(&index) {
-            return Ok(val.clone());
-        }
-        self.unchecked_read_at(index, reader)
     }
 
     fn restore_truncated_value(&mut self, index: usize, value: T) {
@@ -880,35 +971,79 @@ where
     }
 }
 
-impl<'a, I, T, S> IntoIterator for &'a RawVecInner<I, T, S>
+impl<I, T, S> ScannableVec<I, T> for RawVecInner<I, T, S>
 where
     I: VecIndex,
     T: VecValue,
     S: RawStrategy<T>,
 {
-    type Item = T;
-    type IntoIter = RawVecIterator<'a, I, T, S>;
+    fn for_each_range_dyn(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
+        let len = self.len_();
+        let from = from.min(len);
+        let to = to.min(len);
+        if from >= to {
+            return;
+        }
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter().expect("RawVecIterator::new(self) to work")
+        let stored_len = self.stored_len();
+        let is_clean =
+            self.holes().is_empty() && self.updated().is_empty() && self.pushed().is_empty();
+
+        if is_clean && to <= stored_len {
+            self.fold_source(from, to, (), |(), v| f(v));
+        } else {
+            self.fold_dirty(from, to, (), |(), v| f(v));
+        }
     }
-}
 
-impl<I, T, S> IterableVec<I, T> for RawVecInner<I, T, S>
-where
-    I: VecIndex,
-    T: VecValue,
-    S: RawStrategy<T>,
-{
-    fn iter(&self) -> BoxedVecIterator<'_, I, T> {
-        Box::new(self.into_iter())
+    fn fold_range<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, f: F) -> B
+    where
+        Self: Sized,
+    {
+        let len = self.len_();
+        let from = from.min(len);
+        let to = to.min(len);
+        if from >= to {
+            return init;
+        }
+
+        let stored_len = self.stored_len();
+        let is_clean =
+            self.holes().is_empty() && self.updated().is_empty() && self.pushed().is_empty();
+
+        if is_clean && to <= stored_len {
+            self.fold_source(from, to, init, f)
+        } else {
+            self.fold_dirty(from, to, init, f)
+        }
     }
 
-    fn iter_small_range(&self, from: usize, to: usize) -> BoxedVecIterator<'_, I, T> {
-        let mut view = self.view();
-        view.set_position_to(from);
-        view.set_end_to(to);
-        Box::new(view)
+    fn try_fold_range<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
+        &self,
+        from: usize,
+        to: usize,
+        init: B,
+        f: F,
+    ) -> std::result::Result<B, E>
+    where
+        Self: Sized,
+    {
+        let len = self.len_();
+        let from = from.min(len);
+        let to = to.min(len);
+        if from >= to {
+            return Ok(init);
+        }
+
+        let stored_len = self.stored_len();
+        let is_clean =
+            self.holes().is_empty() && self.updated().is_empty() && self.pushed().is_empty();
+
+        if is_clean && to <= stored_len {
+            self.try_fold_source(from, to, init, f)
+        } else {
+            self.try_fold_dirty(from, to, init, f)
+        }
     }
 }
 
