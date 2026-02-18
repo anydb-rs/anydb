@@ -1,6 +1,6 @@
 use std::ops::{Add, AddAssign};
 
-use crate::{AnyVec, Exit, GenericStoredVec, ScannableVec, Result, StoredVec, VecIndex, VecValue};
+use crate::{AnyVec, Exit, WritableVec, ReadableVec, Result, StoredVec, VecIndex, VecValue};
 
 use super::EagerVec;
 
@@ -15,18 +15,14 @@ where
     pub fn compute_cumulative<S>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, S>,
+        source: &impl ReadableVec<V::I, S>,
         exit: &Exit,
     ) -> Result<()>
     where
         S: VecValue + Into<V::T>,
         V::T: From<usize> + AddAssign + Copy,
     {
-        self.validate_computed_version_or_reset(source.version())?;
-
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+        self.compute_init(source.version(), max_from, exit, |this| {
             let skip = this.len();
             let end = this.batch_end(source.len());
             if skip >= end {
@@ -56,8 +52,8 @@ where
     pub fn compute_cumulative_binary<S1, S2>(
         &mut self,
         max_from: V::I,
-        source1: &impl ScannableVec<V::I, S1>,
-        source2: &impl ScannableVec<V::I, S2>,
+        source1: &impl ReadableVec<V::I, S1>,
+        source2: &impl ReadableVec<V::I, S2>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -81,8 +77,8 @@ where
     pub fn compute_cumulative_transformed_binary<S1, S2, F>(
         &mut self,
         max_from: V::I,
-        source1: &impl ScannableVec<V::I, S1>,
-        source2: &impl ScannableVec<V::I, S2>,
+        source1: &impl ReadableVec<V::I, S1>,
+        source2: &impl ReadableVec<V::I, S2>,
         mut transform: F,
         exit: &Exit,
     ) -> Result<()>
@@ -92,14 +88,9 @@ where
         V::T: From<usize> + AddAssign + Copy,
         F: FnMut(S1, S2) -> V::T,
     {
-        let combined_version = source1.version() + source2.version();
-        self.validate_computed_version_or_reset(combined_version)?;
-
-        self.truncate_if_needed(max_from)?;
-
         let target_len = source1.len().min(source2.len());
 
-        self.repeat_until_complete(exit, |this| {
+        self.compute_init(source1.version() + source2.version(), max_from, exit, |this| {
             let skip = this.len();
             let end = this.batch_end(target_len);
             if skip >= end {
@@ -133,7 +124,7 @@ where
     pub fn compute_cumulative_count<S, P>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, S>,
+        source: &impl ReadableVec<V::I, S>,
         predicate: P,
         exit: &Exit,
     ) -> Result<()>
@@ -149,7 +140,7 @@ where
     pub fn compute_rolling_count<S, P>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, S>,
+        source: &impl ReadableVec<V::I, S>,
         window_size: usize,
         predicate: P,
         exit: &Exit,
@@ -159,10 +150,7 @@ where
         V::T: From<usize> + Into<usize> + Copy,
         P: Fn(&S) -> bool,
     {
-        self.validate_computed_version_or_reset(source.version())?;
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+        self.compute_init(source.version(), max_from, exit, |this| {
             let skip = this.len();
             let end = this.batch_end(source.len());
             if skip >= end {
@@ -214,7 +202,7 @@ where
     pub fn compute_cumulative_count_from<S, P>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, S>,
+        source: &impl ReadableVec<V::I, S>,
         from: V::I,
         predicate: P,
         exit: &Exit,

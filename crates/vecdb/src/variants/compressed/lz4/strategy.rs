@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 
-use crate::{Result, impl_bytes_raw_strategy};
+use crate::{Result, impl_bytes_value_strategy};
 
 use super::{super::inner::CompressionStrategy, value::LZ4VecValue};
 
@@ -10,7 +10,7 @@ use super::{super::inner::CompressionStrategy, value::LZ4VecValue};
 #[derive(Debug, Clone, Copy)]
 pub struct LZ4Strategy<T>(PhantomData<T>);
 
-impl_bytes_raw_strategy!(LZ4Strategy, LZ4VecValue);
+impl_bytes_value_strategy!(LZ4Strategy, LZ4VecValue);
 
 impl<T> CompressionStrategy<T> for LZ4Strategy<T>
 where

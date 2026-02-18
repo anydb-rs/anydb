@@ -35,6 +35,5 @@ const SIZE_OF_U64: usize = std::mem::size_of::<u64>();
 
 /// Crossover threshold in bytes for choosing IO vs mmap iteration strategy.
 /// Ranges smaller than this use mmap (zero-copy), larger use buffered IO.
-/// Benchmarks show mmap wins at all tested sizes (up to 800 MB).
-/// IO is kept for truly massive (> RAM) databases.
-pub(crate) const MMAP_CROSSOVER_BYTES: usize = 4 * 1024 * 1024 * 1024; // 4 GiB
+/// IO is kept for truly massive datasets that may exceed available address space.
+pub(crate) const MMAP_CROSSOVER_BYTES: usize = 1024 * 1024 * 1024; // 1 GiB

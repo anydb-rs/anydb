@@ -249,7 +249,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### `vecdb`
 - Added `RawStrategy::write_to_slice()` method for direct serialization into fixed-size byte slices without allocation ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/vecdb/src/variants/raw/inner/strategy.rs))
-- Added `GenericStoredVec::fill_to()` to extend vector to target length with a value, batching writes in ~1GB chunks to avoid memory explosion ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/vecdb/src/traits/generic.rs))
+- Added `WritableVec::fill_to()` to extend vector to target length with a value, batching writes in ~1GB chunks to avoid memory explosion ([source](https://github.com/anydb-rs/anydb/blob/v0.5.0/crates/vecdb/src/traits/generic.rs))
 
 ### Bug Fixes
 #### `rawdb`
@@ -452,7 +452,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `save()`, `restore()`, `swap()` methods for rollback support
 - Added `BaseVec` internal struct for common stored vector fields ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/variants/base/mod.rs))
 - Added `impl_vec_wrapper!` macro to reduce boilerplate for vector implementations ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/src/variants/macros.rs))
-  - Generates `Deref`, `DerefMut`, `ImportableVec`, `AnyVec`, `TypedVec`, `AnyStoredVec`, `GenericStoredVec`, `IntoIterator`, `IterableVec` implementations
+  - Generates `Deref`, `DerefMut`, `ImportableVec`, `AnyVec`, `TypedVec`, `AnyStoredVec`, `WritableVec`, `IntoIterator`, `IterableVec` implementations
 - Added optional feature flags for dependencies ([source](https://github.com/anydb-rs/anydb/blob/v0.4.0/crates/vecdb/Cargo.toml))
   - `zerocopy`, `pco`, `lz4`, `zstd` for storage formats
   - `serde`, `serde_json`, `sonic-rs` for serialization

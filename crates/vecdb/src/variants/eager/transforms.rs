@@ -1,5 +1,5 @@
 use crate::{
-    AnyVec, Exit, GenericStoredVec, ScannableVec, Result, StoredVec, VecIndex, VecValue, Version,
+    AnyVec, Exit, WritableVec, ReadableVec, Result, StoredVec, VecIndex, VecValue, Version,
 };
 
 use super::EagerVec;
@@ -19,11 +19,7 @@ where
     where
         F: FnMut(V::I) -> (V::I, V::T),
     {
-        self.validate_computed_version_or_reset(version)?;
-
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+        self.compute_init(version, max_from, exit, |this| {
             let from = this.len();
             let end = this.batch_end(to);
             if from >= end {
@@ -42,7 +38,7 @@ where
     pub fn compute_range<A, F>(
         &mut self,
         max_from: V::I,
-        other: &impl ScannableVec<V::I, A>,
+        other: &impl ReadableVec<V::I, A>,
         t: F,
         exit: &Exit,
     ) -> Result<()>
@@ -56,7 +52,7 @@ where
     pub fn compute_from_index<A>(
         &mut self,
         max_from: V::I,
-        other: &impl ScannableVec<V::I, A>,
+        other: &impl ReadableVec<V::I, A>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -75,7 +71,7 @@ where
     pub fn compute_transform<A, F>(
         &mut self,
         max_from: V::I,
-        other: &impl ScannableVec<V::I, A>,
+        other: &impl ReadableVec<V::I, A>,
         mut t: F,
         exit: &Exit,
     ) -> Result<()>
@@ -83,11 +79,7 @@ where
         A: VecValue,
         F: FnMut((V::I, A, &Self)) -> (V::I, V::T),
     {
-        self.validate_computed_version_or_reset(other.version())?;
-
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+        self.compute_init(other.version(), max_from, exit, |this| {
             let skip = this.len();
             let end = this.batch_end(other.len());
             if skip >= end {
@@ -106,8 +98,8 @@ where
     pub fn compute_transform2<A, B, F>(
         &mut self,
         max_from: V::I,
-        other1: &impl ScannableVec<V::I, A>,
-        other2: &impl ScannableVec<V::I, B>,
+        other1: &impl ReadableVec<V::I, A>,
+        other2: &impl ReadableVec<V::I, B>,
         mut t: F,
         exit: &Exit,
     ) -> Result<()>
@@ -116,11 +108,7 @@ where
         B: VecValue,
         F: FnMut((V::I, A, B, &Self)) -> (V::I, V::T),
     {
-        self.validate_computed_version_or_reset(other1.version() + other2.version())?;
-
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+        self.compute_init(other1.version() + other2.version(), max_from, exit, |this| {
             let skip = this.len();
             let source_end = other1.len().min(other2.len());
             let end = this.batch_end(source_end);
@@ -143,9 +131,9 @@ where
     pub fn compute_transform3<A, B, C, F>(
         &mut self,
         max_from: V::I,
-        other1: &impl ScannableVec<V::I, A>,
-        other2: &impl ScannableVec<V::I, B>,
-        other3: &impl ScannableVec<V::I, C>,
+        other1: &impl ReadableVec<V::I, A>,
+        other2: &impl ReadableVec<V::I, B>,
+        other3: &impl ReadableVec<V::I, C>,
         mut t: F,
         exit: &Exit,
     ) -> Result<()>
@@ -155,13 +143,11 @@ where
         C: VecValue,
         F: FnMut((V::I, A, B, C, &Self)) -> (V::I, V::T),
     {
-        self.validate_computed_version_or_reset(
+        self.compute_init(
             other1.version() + other2.version() + other3.version(),
-        )?;
-
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+            max_from,
+            exit,
+            |this| {
             let skip = this.len();
             let source_end = other1.len().min(other2.len()).min(other3.len());
             let end = this.batch_end(source_end);
@@ -193,10 +179,10 @@ where
     pub fn compute_transform4<A, B, C, D, F>(
         &mut self,
         max_from: V::I,
-        other1: &impl ScannableVec<V::I, A>,
-        other2: &impl ScannableVec<V::I, B>,
-        other3: &impl ScannableVec<V::I, C>,
-        other4: &impl ScannableVec<V::I, D>,
+        other1: &impl ReadableVec<V::I, A>,
+        other2: &impl ReadableVec<V::I, B>,
+        other3: &impl ReadableVec<V::I, C>,
+        other4: &impl ReadableVec<V::I, D>,
         mut t: F,
         exit: &Exit,
     ) -> Result<()>
@@ -207,13 +193,11 @@ where
         D: VecValue,
         F: FnMut((V::I, A, B, C, D, &Self)) -> (V::I, V::T),
     {
-        self.validate_computed_version_or_reset(
+        self.compute_init(
             other1.version() + other2.version() + other3.version() + other4.version(),
-        )?;
-
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+            max_from,
+            exit,
+            |this| {
             let skip = this.len();
             let source_end = other1
                 .len()
@@ -251,7 +235,7 @@ where
     pub fn compute_coarser(
         &mut self,
         max_from: V::T,
-        other: &impl ScannableVec<V::T, V::I>,
+        other: &impl ReadableVec<V::T, V::I>,
         exit: &Exit,
     ) -> Result<()>
     where

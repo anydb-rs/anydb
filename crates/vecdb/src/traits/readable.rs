@@ -1,6 +1,6 @@
 use crate::{AnyVec, VecIndex, VecValue};
 
-/// High-performance scanning over vector values.
+/// High-performance reading of vector values.
 ///
 /// This is the primary trait for reading data from any vec type — stored, compressed,
 /// lazy, or computed. All methods see the full state including uncommitted (pushed) values.
@@ -13,7 +13,7 @@ use crate::{AnyVec, VecIndex, VecValue};
 /// | `fold` / `fold_range` | Accumulating a result (SIMD-optimized on stored vecs) |
 /// | `collect` / `collect_range` | Materializing values into a `Vec<T>` |
 /// | `collect_one` / `collect_first` / `collect_last` | Materializing a single value |
-/// | `for_each_range_dyn` | Trait-object contexts (`&dyn ScannableVec`) |
+/// | `for_each_range_dyn` | Trait-object contexts (`&dyn ReadableVec`) |
 /// | `try_fold_range` | Fold with early exit on error |
 ///
 /// # Point reads
@@ -30,13 +30,13 @@ use crate::{AnyVec, VecIndex, VecValue};
 /// `&mut dyn FnMut` — fast, but not SIMD-friendly.
 ///
 /// For maximum throughput on stored vecs, prefer `fold_range` / `for_each_range`
-/// with static dispatch (`&impl ScannableVec` or concrete type).
-pub trait ScannableVec<I: VecIndex, T: VecValue>: AnyVec {
+/// with static dispatch (`&impl ReadableVec` or concrete type).
+pub trait ReadableVec<I: VecIndex, T: VecValue>: AnyVec {
     // ── Required ─────────────────────────────────────────────────────
 
     /// Iterates over `[from, to)`, calling `f` for each value.
     ///
-    /// Object-safe: callable on `&dyn ScannableVec`. Stored vecs implement this
+    /// Object-safe: callable on `&dyn ReadableVec`. Stored vecs implement this
     /// by folding their internal source with a `&mut dyn FnMut` callback.
     fn for_each_range_dyn(&self, from: usize, to: usize, f: &mut dyn FnMut(T));
 
@@ -123,7 +123,18 @@ pub trait ScannableVec<I: VecIndex, T: VecValue>: AnyVec {
 
     /// Collects values in `[from, to)` into a `Vec<T>`.
     #[inline]
-    fn collect_range(&self, from: usize, to: usize) -> Vec<T> {
+    fn collect_range(&self, from: usize, to: usize) -> Vec<T>
+    where
+        Self: Sized,
+    {
+        let mut v = Vec::with_capacity(to.saturating_sub(from));
+        self.for_each_range(from, to, |val| v.push(val));
+        v
+    }
+
+    /// Collects values in `[from, to)` into a `Vec<T>` (object-safe).
+    #[inline]
+    fn collect_range_dyn(&self, from: usize, to: usize) -> Vec<T> {
         let mut v = Vec::with_capacity(to.saturating_sub(from));
         self.for_each_range_dyn(from, to, &mut |val| v.push(val));
         v
@@ -131,7 +142,10 @@ pub trait ScannableVec<I: VecIndex, T: VecValue>: AnyVec {
 
     /// Collects all values into a `Vec<T>`.
     #[inline]
-    fn collect(&self) -> Vec<T> {
+    fn collect(&self) -> Vec<T>
+    where
+        Self: Sized,
+    {
         self.collect_range(0, self.len())
     }
 
@@ -155,27 +169,53 @@ pub trait ScannableVec<I: VecIndex, T: VecValue>: AnyVec {
         let len = self.len();
         if len > 0 { self.collect_one(len - 1) } else { None }
     }
+
+    /// Collects values using signed indices. Negative indices count from the end
+    /// (Python-style): `-1` is the last element, `-2` is second-to-last, etc.
+    #[inline]
+    fn collect_signed_range(&self, from: Option<i64>, to: Option<i64>) -> Vec<T>
+    where
+        Self: Sized,
+    {
+        let from = from.map(|i| self.i64_to_usize(i)).unwrap_or(0);
+        let to = to.map(|i| self.i64_to_usize(i)).unwrap_or_else(|| self.len());
+        self.collect_range(from, to)
+    }
+
+    /// Collects values using signed indices (object-safe).
+    #[inline]
+    fn collect_signed_range_dyn(&self, from: Option<i64>, to: Option<i64>) -> Vec<T> {
+        let from = from.map(|i| self.i64_to_usize(i)).unwrap_or(0);
+        let to = to.map(|i| self.i64_to_usize(i)).unwrap_or_else(|| self.len());
+        self.collect_range_dyn(from, to)
+    }
+
+    /// Collects all values into a `Vec<T>` (object-safe).
+    #[inline]
+    fn collect_dyn(&self) -> Vec<T> {
+        self.collect_range_dyn(0, self.len())
+    }
 }
 
-/// Trait for scannable vectors that can be cloned as trait objects.
-pub trait ScannableCloneableVec<I: VecIndex, T: VecValue>: ScannableVec<I, T> {
-    fn boxed_clone(&self) -> Box<dyn ScannableCloneableVec<I, T>>;
+/// Trait for readable vectors that can be cloned as trait objects.
+pub trait ReadableCloneableVec<I: VecIndex, T: VecValue>: ReadableVec<I, T> {
+    fn boxed_clone(&self) -> Box<dyn ReadableCloneableVec<I, T>>;
 }
 
-impl<I: VecIndex, T: VecValue, U> ScannableCloneableVec<I, T> for U
+impl<I: VecIndex, T: VecValue, U> ReadableCloneableVec<I, T> for U
 where
-    U: 'static + ScannableVec<I, T> + Clone,
+    U: 'static + ReadableVec<I, T> + Clone,
 {
-    fn boxed_clone(&self) -> Box<dyn ScannableCloneableVec<I, T>> {
+    fn boxed_clone(&self) -> Box<dyn ReadableCloneableVec<I, T>> {
         Box::new(self.clone())
     }
 }
 
-impl<I: VecIndex, T: VecValue> Clone for Box<dyn ScannableCloneableVec<I, T>> {
+impl<I: VecIndex, T: VecValue> Clone for Box<dyn ReadableCloneableVec<I, T>> {
     fn clone(&self) -> Self {
         self.boxed_clone()
     }
 }
 
-/// Type alias for boxed cloneable scannable vectors.
-pub type ScannableBoxedVec<I, T> = Box<dyn ScannableCloneableVec<I, T>>;
+/// Type alias for boxed cloneable readable vectors.
+pub type ReadableBoxedVec<I, T> = Box<dyn ReadableCloneableVec<I, T>>;

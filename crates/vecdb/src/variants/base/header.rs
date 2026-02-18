@@ -151,15 +151,25 @@ impl HeaderInner {
         Ok(header)
     }
 
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(HEADER_OFFSET);
-        bytes.extend(self.header_version.to_bytes());
-        bytes.extend(self.vec_version.to_bytes());
-        bytes.extend(self.computed_version.to_bytes());
-        bytes.extend(self.stamp.to_bytes());
-        bytes.extend(self.format.to_bytes());
-        bytes.extend_from_slice(&self.padding);
-        bytes
+    fn to_bytes(&self) -> [u8; HEADER_OFFSET] {
+        let mut buf = [0u8; HEADER_OFFSET];
+        let mut pos = 0;
+        let hv = self.header_version.to_bytes();
+        buf[pos..pos + hv.len()].copy_from_slice(&hv);
+        pos += hv.len();
+        let vv = self.vec_version.to_bytes();
+        buf[pos..pos + vv.len()].copy_from_slice(&vv);
+        pos += vv.len();
+        let cv = self.computed_version.to_bytes();
+        buf[pos..pos + cv.len()].copy_from_slice(&cv);
+        pos += cv.len();
+        let s = self.stamp.to_bytes();
+        buf[pos..pos + s.len()].copy_from_slice(&s);
+        pos += s.len();
+        let f = self.format.to_bytes();
+        buf[pos..pos + f.len()].copy_from_slice(&f);
+        // remaining bytes are already zero (padding)
+        buf
     }
 
     fn from_bytes(bytes: &[u8]) -> Result<Self> {

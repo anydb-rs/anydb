@@ -20,7 +20,7 @@ pub struct CompressedIoSource<'a, I, T, S> {
     region_start: u64,
     buffer: Vec<u8>,
     buffer_len: usize,
-    buffer_page_start: usize,
+    buffer_start_offset: u64,
     decoded_values: Vec<T>,
     decoded_page_index: usize,
     pages: RwLockReadGuard<'a, Pages>,
@@ -55,7 +55,7 @@ where
             region_start,
             buffer: vec![0; BUFFER_SIZE],
             buffer_len: 0,
-            buffer_page_start: 0,
+            buffer_start_offset: 0,
             decoded_values: Vec::with_capacity(Self::PER_PAGE),
             decoded_page_index: Self::NO_PAGE,
             pages,
@@ -75,8 +75,6 @@ where
     }
 
     fn refill_buffer(&mut self, starting_page_index: usize) -> Option<()> {
-        self.buffer_page_start = starting_page_index;
-
         let start_page = self.pages.get(starting_page_index)?;
         let start_offset = start_page.start;
 
@@ -111,6 +109,7 @@ where
             .read_exact(&mut self.buffer[..total_bytes])
             .unwrap();
         self.buffer_len = total_bytes;
+        self.buffer_start_offset = start_offset;
         self.file_position += total_bytes as u64;
 
         Some(())
@@ -123,9 +122,7 @@ where
         compressed_size: usize,
         values_count: usize,
     ) -> Option<()> {
-        let buffer_start_page = self.pages.get(self.buffer_page_start)?;
-        let buffer_start_offset = buffer_start_page.start;
-        let in_buffer_offset = (compressed_offset - buffer_start_offset) as usize;
+        let in_buffer_offset = (compressed_offset - self.buffer_start_offset) as usize;
         let compressed_data = &self.buffer[in_buffer_offset..in_buffer_offset + compressed_size];
 
         S::decompress_into(compressed_data, values_count, &mut self.decoded_values).ok()?;
@@ -145,11 +142,9 @@ where
         let values_count = page.values as usize;
 
         if self.buffer_len > 0 {
-            let buffer_start_page = self.pages.get(self.buffer_page_start)?;
-            let buffer_start_offset = buffer_start_page.start;
-            let buffer_end_offset = buffer_start_offset + self.buffer_len as u64;
+            let buffer_end_offset = self.buffer_start_offset + self.buffer_len as u64;
 
-            if compressed_offset >= buffer_start_offset
+            if compressed_offset >= self.buffer_start_offset
                 && compressed_offset + compressed_size as u64 <= buffer_end_offset
             {
                 return self.decompress_from_buffer(
@@ -165,22 +160,30 @@ where
         self.decompress_from_buffer(page_index, compressed_offset, compressed_size, values_count)
     }
 
-    /// Fold all remaining elements — page-at-a-time bulk decode.
+    /// Fold all remaining elements — tight pointer loop per page so LLVM can vectorize.
     #[inline]
     pub(crate) fn fold<B, F: FnMut(B, T) -> B>(mut self, init: B, mut f: F) -> B {
+        let per_page = Self::PER_PAGE;
+        let end_index = self.end_index;
+        let mut page_index = self.index / per_page;
+        let mut page_start = page_index * per_page;
+        let mut in_page_offset = self.index - page_start;
         let mut accum = init;
-        while self.index < self.end_index {
-            let page_index = self.index / Self::PER_PAGE;
-            let in_page_offset = self.index % Self::PER_PAGE;
+        while self.index < end_index {
             if self.ensure_page_decoded(page_index).is_none() {
                 break;
             }
-            let page_start = page_index * Self::PER_PAGE;
-            let in_page_end = (self.end_index - page_start).min(self.decoded_values.len());
-            for value in &self.decoded_values[in_page_offset..in_page_end] {
-                accum = f(accum, value.clone());
+            let page_end = (end_index - page_start).min(self.decoded_values.len());
+            let ptr = self.decoded_values.as_ptr();
+            let mut i = in_page_offset;
+            while i < page_end {
+                accum = f(accum, unsafe { ptr.add(i).read() });
+                i += 1;
             }
-            self.index = page_start + in_page_end;
+            self.index = page_start + page_end;
+            page_index += 1;
+            page_start += per_page;
+            in_page_offset = 0;
         }
         accum
     }
@@ -192,19 +195,24 @@ where
         init: B,
         mut f: F,
     ) -> std::result::Result<B, E> {
+        let per_page = Self::PER_PAGE;
+        let end_index = self.end_index;
+        let mut page_index = self.index / per_page;
+        let mut page_start = page_index * per_page;
+        let mut in_page_offset = self.index - page_start;
         let mut accum = init;
-        while self.index < self.end_index {
-            let page_index = self.index / Self::PER_PAGE;
-            let in_page_offset = self.index % Self::PER_PAGE;
+        while self.index < end_index {
             if self.ensure_page_decoded(page_index).is_none() {
                 break;
             }
-            let page_start = page_index * Self::PER_PAGE;
-            let in_page_end = (self.end_index - page_start).min(self.decoded_values.len());
-            for value in &self.decoded_values[in_page_offset..in_page_end] {
+            let page_end = (end_index - page_start).min(self.decoded_values.len());
+            for value in &self.decoded_values[in_page_offset..page_end] {
                 accum = f(accum, value.clone())?;
             }
-            self.index = page_start + in_page_end;
+            self.index = page_start + page_end;
+            page_index += 1;
+            page_start += per_page;
+            in_page_offset = 0;
         }
         Ok(accum)
     }

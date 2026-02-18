@@ -16,7 +16,6 @@ use super::super::{RawStrategy, RawVecInner};
 pub struct VecReader<I, T, S> {
     _reader: Reader,
     data: *const u8,
-    data_len: usize,
     stored_len: usize,
     _marker: PhantomData<(I, T, S)>,
 }
@@ -37,23 +36,15 @@ where
     {
         let reader = vec.region().create_reader();
         let stored_len = vec.stored_len();
-        let data_len = stored_len * Self::SIZE_OF_T;
         let slice = reader.prefixed(HEADER_OFFSET);
         let ptr = slice.as_ptr();
 
         Self {
             _reader: reader,
             data: ptr,
-            data_len,
             stored_len,
             _marker: PhantomData,
         }
-    }
-
-    /// Returns the pre-computed data slice covering all stored values.
-    #[inline(always)]
-    fn data(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.data, self.data_len) }
     }
 
     /// Returns the value at `index`.
@@ -67,9 +58,8 @@ where
             "index {index} out of bounds (len {})",
             self.stored_len
         );
-        let offset = index * Self::SIZE_OF_T;
-        S::read(&self.data()[offset..offset + Self::SIZE_OF_T])
-            .expect("Failed to deserialize value")
+        // SAFETY: index < stored_len guarantees offset + SIZE_OF_T <= data_len
+        unsafe { S::read_from_ptr(self.data, index * Self::SIZE_OF_T) }
     }
 
     /// Returns the value at `index`, or `None` if out of bounds.
@@ -78,11 +68,8 @@ where
         if index >= self.stored_len {
             return None;
         }
-        let offset = index * Self::SIZE_OF_T;
-        Some(
-            S::read(&self.data()[offset..offset + Self::SIZE_OF_T])
-                .expect("Failed to deserialize value"),
-        )
+        // SAFETY: index < stored_len guarantees offset + SIZE_OF_T <= data_len
+        Some(unsafe { S::read_from_ptr(self.data, index * Self::SIZE_OF_T) })
     }
 
     /// Returns the number of stored values.

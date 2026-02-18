@@ -26,7 +26,7 @@ use std::{
 use rawdb::Database;
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, AnyVec, BytesVec, GenericStoredVec, ImportableVec, Result, ScannableVec, Version,
+    AnyStoredVec, AnyVec, BytesVec, WritableVec, ImportableVec, Result, ReadableVec, Version,
 };
 
 #[cfg(feature = "pco")]

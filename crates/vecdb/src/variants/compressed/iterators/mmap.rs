@@ -70,22 +70,30 @@ where
         Some(())
     }
 
-    /// Fold all remaining elements — page-at-a-time bulk decode.
+    /// Fold all remaining elements — tight pointer loop per page so LLVM can vectorize.
     #[inline]
     pub(crate) fn fold<B, F: FnMut(B, T) -> B>(mut self, init: B, mut f: F) -> B {
+        let per_page = Self::PER_PAGE;
+        let end = self.end;
+        let mut page_index = self.pos / per_page;
+        let mut page_start = page_index * per_page;
+        let mut in_page_offset = self.pos - page_start;
         let mut accum = init;
-        while self.pos < self.end {
-            let page_index = self.pos / Self::PER_PAGE;
-            let in_page_offset = self.pos % Self::PER_PAGE;
+        while self.pos < end {
             if self.ensure_page_decoded(page_index).is_none() {
                 break;
             }
-            let page_start = page_index * Self::PER_PAGE;
-            let in_page_end = (self.end - page_start).min(self.page_buf.len());
-            for value in &self.page_buf[in_page_offset..in_page_end] {
-                accum = f(accum, value.clone());
+            let page_end = (end - page_start).min(self.page_buf.len());
+            let ptr = self.page_buf.as_ptr();
+            let mut i = in_page_offset;
+            while i < page_end {
+                accum = f(accum, unsafe { ptr.add(i).read() });
+                i += 1;
             }
-            self.pos = page_start + in_page_end;
+            self.pos = page_start + page_end;
+            page_index += 1;
+            page_start += per_page;
+            in_page_offset = 0;
         }
         accum
     }
@@ -97,19 +105,24 @@ where
         init: B,
         mut f: F,
     ) -> std::result::Result<B, E> {
+        let per_page = Self::PER_PAGE;
+        let end = self.end;
+        let mut page_index = self.pos / per_page;
+        let mut page_start = page_index * per_page;
+        let mut in_page_offset = self.pos - page_start;
         let mut accum = init;
-        while self.pos < self.end {
-            let page_index = self.pos / Self::PER_PAGE;
-            let in_page_offset = self.pos % Self::PER_PAGE;
+        while self.pos < end {
             if self.ensure_page_decoded(page_index).is_none() {
                 break;
             }
-            let page_start = page_index * Self::PER_PAGE;
-            let in_page_end = (self.end - page_start).min(self.page_buf.len());
-            for value in &self.page_buf[in_page_offset..in_page_end] {
+            let page_end = (end - page_start).min(self.page_buf.len());
+            for value in &self.page_buf[in_page_offset..page_end] {
                 accum = f(accum, value.clone())?;
             }
-            self.pos = page_start + in_page_end;
+            self.pos = page_start + page_end;
+            page_index += 1;
+            page_start += per_page;
+            in_page_offset = 0;
         }
         Ok(accum)
     }

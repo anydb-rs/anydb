@@ -9,8 +9,8 @@ use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, GenericStoredVec, ImportOptions, ImportableVec, RawStrategy, RawVecInner, Reader,
-    Result, ScannableVec, Stamp, StoredVec, Version,
+    AnyStoredVec, WritableVec, ImportOptions, ImportableVec, RawStrategy, RawVecInner, Reader,
+    Result, ReadableVec, Stamp, StoredVec, Version,
 };
 
 // ============================================================================
@@ -56,7 +56,7 @@ where
     }
 
     fn stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()> {
-        GenericStoredVec::stamped_write_with_changes(self, stamp)
+        WritableVec::stamped_write_with_changes(self, stamp)
     }
 
     fn stamp(&self) -> Stamp {
@@ -64,7 +64,7 @@ where
     }
 
     fn collect(&self) -> Vec<u32> {
-        ScannableVec::collect(self)
+        ReadableVec::collect(self)
     }
 
     fn collect_holed(&self) -> Result<Vec<Option<u32>>> {
@@ -147,7 +147,7 @@ fn compute_directory_hash(dir: &Path) -> Result<String, Box<dyn std::error::Erro
 /// 3. Redo operations produce the same readable state
 fn run_data_integrity_rollback_flush_reopen<V>() -> Result<(), Box<dyn std::error::Error>>
 where
-    V: IntegrityVec + GenericStoredVec<usize, u32>,
+    V: IntegrityVec + WritableVec<usize, u32>,
     <V as Deref>::Target: IntegrityOps,
 {
     println!("=== Data Integrity Test: Rollback + Flush + Reopen ===\n");

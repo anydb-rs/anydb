@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use vecdb::{AnyStoredVec, BytesVec, Database, GenericStoredVec, ImportableVec, ScannableVec, Version};
+use vecdb::{AnyStoredVec, BytesVec, Database, WritableVec, ImportableVec, ReadableVec, Version};
 
 const VALUE_COUNT: usize = 10_000_000_000; // 10B u64s = 80GB
 const BATCH_SIZE: usize = 100_000_000;

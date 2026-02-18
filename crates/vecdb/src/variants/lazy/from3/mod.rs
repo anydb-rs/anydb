@@ -1,11 +1,9 @@
-use std::marker::PhantomData;
-
 use crate::{
-    AnyVec, ScannableBoxedVec, ScannableVec, TypedVec, VecIndex,
+    AnyVec, ReadableBoxedVec, ReadableVec, TypedVec, VecIndex,
     VecValue, Version, short_type_name,
 };
 
-pub type ComputeFrom3<T, S1T, S2T, S3T> = fn(S1T, S2T, S3T) -> T;
+pub type ComputeFrom3<I, T, S1T, S2T, S3T> = fn(I, S1T, S2T, S3T) -> T;
 
 /// Lazily computed vector deriving values from three source vectors.
 ///
@@ -23,14 +21,13 @@ where
 {
     name: String,
     base_version: Version,
-    source1: ScannableBoxedVec<S1I, S1T>,
-    source2: ScannableBoxedVec<S2I, S2T>,
-    source3: ScannableBoxedVec<S3I, S3T>,
-    compute: ComputeFrom3<T, S1T, S2T, S3T>,
+    source1: ReadableBoxedVec<S1I, S1T>,
+    source2: ReadableBoxedVec<S2I, S2T>,
+    source3: ReadableBoxedVec<S3I, S3T>,
+    compute: ComputeFrom3<I, T, S1T, S2T, S3T>,
     s1_counts: bool,
     s2_counts: bool,
     s3_counts: bool,
-    _index: PhantomData<fn() -> I>,
 }
 
 impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> LazyVecFrom3<I, T, S1I, S1T, S2I, S2T, S3I, S3T>
@@ -47,10 +44,10 @@ where
     pub fn init(
         name: &str,
         version: Version,
-        source1: ScannableBoxedVec<S1I, S1T>,
-        source2: ScannableBoxedVec<S2I, S2T>,
-        source3: ScannableBoxedVec<S3I, S3T>,
-        compute: ComputeFrom3<T, S1T, S2T, S3T>,
+        source1: ReadableBoxedVec<S1I, S1T>,
+        source2: ReadableBoxedVec<S2I, S2T>,
+        source3: ReadableBoxedVec<S3I, S3T>,
+        compute: ComputeFrom3<I, T, S1T, S2T, S3T>,
     ) -> Self {
         let target = I::to_string();
         let s1 = source1.index_type_to_string();
@@ -80,13 +77,9 @@ where
             s1_counts,
             s2_counts,
             s3_counts,
-            _index: PhantomData,
         }
     }
 
-    fn version(&self) -> Version {
-        self.base_version + self.source1.version() + self.source2.version() + self.source3.version()
-    }
 }
 
 impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> AnyVec for LazyVecFrom3<I, T, S1I, S1T, S2I, S2T, S3I, S3T>
@@ -101,7 +94,7 @@ where
     S3T: VecValue,
 {
     fn version(&self) -> Version {
-        self.version()
+        self.base_version + self.source1.version() + self.source2.version() + self.source3.version()
     }
 
     fn name(&self) -> &str {
@@ -131,11 +124,11 @@ where
 
     #[inline]
     fn region_names(&self) -> Vec<String> {
-        vec![]
+        Vec::new()
     }
 }
 
-impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> ScannableVec<I, T>
+impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> ReadableVec<I, T>
     for LazyVecFrom3<I, T, S1I, S1T, S2I, S2T, S3I, S3T>
 where
     I: VecIndex,
@@ -147,16 +140,20 @@ where
     S3I: VecIndex,
     S3T: VecValue,
 {
+    #[inline]
     fn for_each_range_dyn(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
+        let to = to.min(self.len());
         let compute = self.compute;
-        let s2_vals = self.source2.collect_range(from, to);
-        let s3_vals = self.source3.collect_range(from, to);
+        let s2_vals = self.source2.collect_range_dyn(from, to);
+        let s3_vals = self.source3.collect_range_dyn(from, to);
         let mut s2_iter = s2_vals.into_iter();
         let mut s3_iter = s3_vals.into_iter();
+        let mut i = from;
         self.source1.for_each_range_dyn(from, to, &mut |v1| {
             let v2 = s2_iter.next().unwrap();
             let v3 = s3_iter.next().unwrap();
-            f(compute(v1, v2, v3));
+            f(compute(I::from(i), v1, v2, v3));
+            i += 1;
         });
     }
 }

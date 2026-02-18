@@ -1,7 +1,7 @@
 use std::ops::Add;
 
 use crate::{
-    AnyVec, Error, Exit, GenericStoredVec, ScannableVec, Result, StoredVec, VecIndex, VecValue,
+    AnyVec, Error, Exit, WritableVec, ReadableVec, Result, StoredVec, VecIndex, VecValue,
     Version,
 };
 
@@ -19,20 +19,16 @@ where
         aggregate: F,
     ) -> Result<()>
     where
-        O: ScannableVec<V::I, V::T>,
+        O: ReadableVec<V::I, V::T>,
         F: Fn(&[Vec<V::T>], usize) -> V::T,
     {
-        self.validate_computed_version_or_reset(others.iter().map(|v| v.version()).sum())?;
-
         if others.is_empty() {
             return Err(Error::InvalidArgument(
                 "others must have at least one element",
             ));
         }
 
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+        self.compute_init(others.iter().map(|v| v.version()).sum(), max_from, exit, |this| {
             let skip = this.len();
             let source_end = others.iter().map(|v| v.len()).min().unwrap();
             let end = this.batch_end(source_end);
@@ -61,7 +57,7 @@ where
         exit: &Exit,
     ) -> Result<()>
     where
-        O: ScannableVec<V::I, V::T>,
+        O: ReadableVec<V::I, V::T>,
         V::T: Add<V::T, Output = V::T>,
     {
         self.compute_aggregate_of_others(max_from, others, exit, |batches, j| {
@@ -76,7 +72,7 @@ where
         exit: &Exit,
     ) -> Result<()>
     where
-        O: ScannableVec<V::I, V::T>,
+        O: ReadableVec<V::I, V::T>,
         V::T: Add<V::T, Output = V::T> + Ord,
     {
         self.compute_aggregate_of_others(max_from, others, exit, |batches, j| {
@@ -91,7 +87,7 @@ where
         exit: &Exit,
     ) -> Result<()>
     where
-        O: ScannableVec<V::I, V::T>,
+        O: ReadableVec<V::I, V::T>,
         V::T: Add<V::T, Output = V::T> + Ord,
     {
         self.compute_aggregate_of_others(max_from, others, exit, |batches, j| {
@@ -113,8 +109,8 @@ where
     ) -> Result<()>
     where
         W: VecValue + Into<f64>,
-        OW: ScannableVec<V::I, W>,
-        OV: ScannableVec<V::I, V::T>,
+        OW: ReadableVec<V::I, W>,
+        OV: ReadableVec<V::I, V::T>,
         V::T: Into<f64> + From<f64>,
     {
         if weights.len() != values.len() {
@@ -129,14 +125,12 @@ where
             ));
         }
 
-        self.validate_computed_version_or_reset(
+        self.compute_init(
             weights.iter().map(|v| v.version()).sum::<Version>()
                 + values.iter().map(|v| v.version()).sum(),
-        )?;
-
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+            max_from,
+            exit,
+            |this| {
             let skip = this.len();
 
             let source_end = weights
@@ -191,9 +185,9 @@ where
     pub fn compute_sum_from_indexes<A, B>(
         &mut self,
         max_from: V::I,
-        first_indexes: &impl ScannableVec<V::I, A>,
-        indexes_count: &impl ScannableVec<V::I, B>,
-        source: &impl ScannableVec<A, V::T>,
+        first_indexes: &impl ReadableVec<V::I, A>,
+        indexes_count: &impl ReadableVec<V::I, B>,
+        source: &impl ReadableVec<A, V::T>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -215,9 +209,9 @@ where
     pub fn compute_filtered_sum_from_indexes<A, B>(
         &mut self,
         max_from: V::I,
-        first_indexes: &impl ScannableVec<V::I, A>,
-        indexes_count: &impl ScannableVec<V::I, B>,
-        source: &impl ScannableVec<A, V::T>,
+        first_indexes: &impl ReadableVec<V::I, A>,
+        indexes_count: &impl ReadableVec<V::I, B>,
+        source: &impl ReadableVec<A, V::T>,
         mut filter: impl FnMut(&V::T) -> bool,
         exit: &Exit,
     ) -> Result<()>
@@ -227,13 +221,11 @@ where
         B: VecValue,
         usize: From<B>,
     {
-        self.validate_computed_version_or_reset(
+        self.compute_init(
             first_indexes.version() + indexes_count.version() + source.version(),
-        )?;
-
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+            max_from,
+            exit,
+            |this| {
             let skip = this.len();
             let source_end = indexes_count.len();
             let end = this.batch_end(source_end);
@@ -275,8 +267,8 @@ where
     pub fn compute_count_from_indexes<A, B>(
         &mut self,
         max_from: V::I,
-        first_indexes: &impl ScannableVec<V::I, A>,
-        other_to_else: &impl ScannableVec<A, B>,
+        first_indexes: &impl ReadableVec<V::I, A>,
+        other_to_else: &impl ReadableVec<A, B>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -303,8 +295,8 @@ where
     pub fn compute_filtered_count_from_indexes<A, B>(
         &mut self,
         max_from: V::I,
-        first_indexes: &impl ScannableVec<V::I, A>,
-        other_to_else: &impl ScannableVec<A, B>,
+        first_indexes: &impl ReadableVec<V::I, A>,
+        other_to_else: &impl ReadableVec<A, B>,
         mut filter: impl FnMut(A) -> bool,
         exit: &Exit,
     ) -> Result<()>
@@ -320,11 +312,7 @@ where
         B: VecValue,
         <A as TryInto<V::T>>::Error: core::error::Error + 'static,
     {
-        self.validate_computed_version_or_reset(first_indexes.version() + other_to_else.version())?;
-
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+        self.compute_init(first_indexes.version() + other_to_else.version(), max_from, exit, |this| {
             let skip = this.len();
             let source_end = first_indexes.len();
             let end = this.batch_end(source_end);

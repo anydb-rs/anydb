@@ -31,8 +31,8 @@ cargo add vecdb
 
 ```rust
 use vecdb::{
-    AnyStoredVec, AnyVec, BytesVec, Database, GenericStoredVec,
-    ImportableVec, ScannableVec, Result, Version
+    AnyStoredVec, AnyVec, BytesVec, Database, WritableVec,
+    ImportableVec, ReadableVec, Result, Version
 };
 use std::path::Path;
 
@@ -155,10 +155,10 @@ let lazy = LazyVecFrom1::init(
     "computed",
     Version::TWO,
     Box::new(source.clone()),  // ScannableBoxedVec
-    |v| v * 2,
+    |_i, v| v * 2,
 );
 
-// Computed on-the-fly via ScannableVec trait, not stored
+// Computed on-the-fly via ReadableVec trait, not stored
 lazy.for_each(|value| {
     // ...
 });
@@ -295,29 +295,27 @@ cargo run --example zerocopy --features zerocopy
 cargo run --example pcodec --features pco
 ```
 
-## Performance
+## Benchmarks
 
-See [vecdb_bench](../vecdb_bench/README.md) for detailed benchmarks.
+> 10B sequential `u64` values (80 GB), Apple Silicon, `--release`. Compression ratios reflect sequential data — real-world ratios will vary.
 
-vecdb is significantly faster than general-purpose embedded databases for fixed-size data workloads.
+| Type | Disk | Write | Read |
+|------|------|-------|------|
+| `BytesVec` | 80.0 GB | 1.8 GB/s | 6.7 GB/s |
+| `ZeroCopyVec` | 80.0 GB | 1.7 GB/s | 6.7 GB/s |
+| `PcoVec` | 181 MB | 0.4 GB/s | 7.7 GB/s |
+| `LZ4Vec` | 40.1 GB | 0.4 GB/s | 3.0 GB/s |
+| `ZstdVec` | 10.4 GB | 0.5 GB/s | 1.0 GB/s |
 
-### PcoVec SIMD Optimization
-
-For best `PcoVec` decompression performance on x86_64, compile with BMI and AVX2 instructions enabled:
-
-```toml
-# .cargo/config.toml
-[target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "target-feature=+bmi1,+bmi2,+avx2"]
-
-[target.x86_64-apple-darwin]
-rustflags = ["-C", "target-feature=+bmi1,+bmi2,+avx2"]
-
-[target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+bmi1,+bmi2,+avx2"]
+```bash
+cargo run --release --example bench -p vecdb --features pco,lz4,zstd,zerocopy
+BENCH_COUNT=100_000_000 cargo run ...  # smaller dataset
 ```
 
-Or build with:
+### PcoVec SIMD (x86_64)
+
+For best `PcoVec` decompression on x86_64, enable BMI and AVX2:
+
 ```bash
 RUSTFLAGS="-C target-feature=+bmi1,+bmi2,+avx2" cargo build --release
 ```

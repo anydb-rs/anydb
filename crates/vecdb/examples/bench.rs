@@ -1,11 +1,13 @@
 use std::time::{Duration, Instant};
 
 use vecdb::{
-    BytesVec, Database, GenericStoredVec, ImportableVec, PcoVec, ScannableVec, Version,
+    AnyStoredVec, BytesVec, Database, ImportableVec, LZ4Vec, PcoVec, ReadableVec,
+    Version, WritableVec, ZeroCopyVec, ZstdVec,
 };
 
 const DEFAULT_VALUE_COUNT: usize = 10_000_000_000; // 10B u64s = 80 GB
 const BATCH_SIZE: usize = 10_000_000;
+const MAX_RANGE_BYTES: usize = 8 * 1024 * 1024 * 1024; // 8 GB
 
 fn value_count() -> usize {
     std::env::var("BENCH_COUNT")
@@ -14,21 +16,26 @@ fn value_count() -> usize {
         .unwrap_or(DEFAULT_VALUE_COUNT)
 }
 
-fn range_sizes(count: usize) -> Vec<usize> {
-    [
-        1_000,
-        10_000,
-        100_000,
-        1_000_000,
-        10_000_000,
-        50_000_000,
-        100_000_000,
-        500_000_000,
-        1_000_000_000,
-    ]
-    .into_iter()
-    .filter(|&r| r <= count)
-    .collect()
+fn range_passes() -> usize {
+    std::env::var("BENCH_PASSES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(5)
+}
+
+fn range_sizes(count: usize, value_size: usize) -> Vec<usize> {
+    let max_elements = (MAX_RANGE_BYTES / value_size).min(count);
+    let mut sizes = Vec::new();
+    let mut n = 1_000;
+    while n <= max_elements {
+        sizes.push(n);
+        let next5 = n * 5;
+        if next5 <= max_elements && next5 != n * 10 {
+            sizes.push(next5);
+        }
+        n *= 10;
+    }
+    sizes
 }
 
 fn repetitions(range_size: usize) -> usize {
@@ -37,7 +44,8 @@ fn repetitions(range_size: usize) -> usize {
         n if n < 100_000 => 1_000,
         n if n < 1_000_000 => 100,
         n if n < 10_000_000 => 20,
-        _ => 3,
+        n if n < 100_000_000 => 5,
+        _ => 1,
     }
 }
 
@@ -80,10 +88,12 @@ fn format_duration(d: Duration) -> String {
     }
 }
 
+fn throughput_str(bytes: usize, d: Duration) -> String {
+    format!("{:.1} GB/s", bytes as f64 / d.as_secs_f64() / 1e9)
+}
+
 // --- Page cache eviction ---
 
-/// Try to drop the OS page cache. Returns true if successful.
-/// macOS: requires `purge` (needs root). Linux: writes to drop_caches (needs root).
 fn drop_caches() -> bool {
     #[cfg(target_os = "macos")]
     {
@@ -95,7 +105,6 @@ fn drop_caches() -> bool {
     }
     #[cfg(target_os = "linux")]
     {
-        // sync first, then drop caches
         std::process::Command::new("sync").status().ok();
         std::fs::write("/proc/sys/vm/drop_caches", "3").is_ok()
     }
@@ -105,21 +114,38 @@ fn drop_caches() -> bool {
     }
 }
 
-/// Check once whether cache eviction works and print status.
 fn check_cache_eviction() -> bool {
     let ok = drop_caches();
     if ok {
-        eprintln!("  Cache eviction: available (cold-cache benchmarks)");
+        println!("  Cache eviction: available (cold-cache benchmarks)");
     } else {
-        eprintln!("  Cache eviction: unavailable (warm-cache benchmarks)");
-        eprintln!("  Hint: run with sudo for cold-cache results");
+        println!("  Cache eviction: unavailable (warm-cache benchmarks)");
+        println!("  Hint: run with sudo for cold-cache results");
     }
     ok
 }
 
+// --- Vec size ---
+
+fn print_vec_size(vec: &dyn AnyStoredVec, label: &str) {
+    let region_bytes = vec.region().meta().len();
+    let logical_bytes = vec.len() * vec.value_type_to_size_of();
+    let ratio = if logical_bytes > 0 {
+        region_bytes as f64 / logical_bytes as f64
+    } else {
+        0.0
+    };
+    eprintln!(
+        "  {label} on disk: {} (logical: {}, ratio: {:.2}x)",
+        format_bytes(region_bytes),
+        format_bytes(logical_bytes),
+        ratio,
+    );
+}
+
 // --- Populate ---
 
-fn populate<V: GenericStoredVec<usize, u64> + ImportableVec>(
+fn populate<V: WritableVec<usize, u64> + ImportableVec + AnyStoredVec>(
     db: &Database,
     label: &str,
     count: usize,
@@ -143,243 +169,300 @@ fn populate<V: GenericStoredVec<usize, u64> + ImportableVec>(
     }
     db.flush().unwrap();
     eprintln!("\r  Populated {label} ({:?})       ", start.elapsed());
+    print_vec_size(&vec, label);
     vec
 }
 
-// --- Generic fold benchmark ---
+// --- Benchmark helpers ---
 
-/// Benchmarks a fold operation over a set of random ranges.
-/// `fold_fn(from, to, acc) -> acc` is called for each start in `starts`,
-/// with range `[start, start + range_size)`.
-/// Returns the average duration per range.
-fn bench_fold_fn<F: FnMut(usize, usize, u64) -> u64>(
-    range_size: usize,
-    starts: &[usize],
-    mut fold_fn: F,
-) -> Duration {
-    let reps = starts.len();
-    let mut sum = 0u64;
-    let start = Instant::now();
-    for &s in starts {
-        sum = fold_fn(s, s + range_size, sum);
-    }
-    let elapsed = start.elapsed();
-    std::hint::black_box(sum);
-    elapsed / reps as u32
+
+// --- Benchmark runners ---
+
+struct BenchResult {
+    name: &'static str,
+    duration: Duration,
 }
 
-/// Benchmarks a single fold over the full range `[0, count)`.
-fn bench_full_fold<F: FnMut(usize, usize, u64) -> u64>(
+fn print_full_results(results: &[BenchResult], total_bytes: usize) {
+    let best = results.iter().min_by_key(|r| r.duration).unwrap().duration;
+    for r in results {
+        let pct = if r.duration > best {
+            let overhead = (r.duration.as_secs_f64() / best.as_secs_f64() - 1.0) * 100.0;
+            format!("(+{overhead:.0}%)")
+        } else {
+            String::new()
+        };
+        println!(
+            "  {:<20} {} ({}) {}",
+            r.name,
+            format_duration(r.duration),
+            throughput_str(total_bytes, r.duration),
+            pct,
+        );
+    }
+}
+
+fn print_range_header(columns: &[&str]) {
+    print!("{:>12} {:>10}", "range", "bytes");
+    for col in columns {
+        print!(" {:>14}", col);
+    }
+    println!("  {:<8}", "winner");
+    let width = 24 + columns.len() * 15 + 10;
+    println!("{}", "-".repeat(width));
+}
+
+fn print_range_row(range_size: usize, results: &[BenchResult]) {
+    let range_bytes = range_size * 8;
+    print!("{:>12} {:>10}", range_size, format_bytes(range_bytes));
+    let best = results.iter().min_by_key(|r| r.duration).unwrap();
+    for r in results {
+        print!(" {:>14}", format_duration(r.duration));
+    }
+    println!("  {:<8}", best.name);
+}
+
+// --- StoredFold trait for IO/mmap access ---
+
+trait StoredFold {
+    fn fold_stored_io_sum(&self, from: usize, to: usize, acc: u64) -> u64;
+    fn fold_stored_mmap_sum(&self, from: usize, to: usize, acc: u64) -> u64;
+}
+
+impl StoredFold for BytesVec<usize, u64> {
+    fn fold_stored_io_sum(&self, from: usize, to: usize, acc: u64) -> u64 {
+        self.fold_stored_io(from, to, acc, |a, v: u64| a.wrapping_add(v))
+    }
+    fn fold_stored_mmap_sum(&self, from: usize, to: usize, acc: u64) -> u64 {
+        self.fold_stored_mmap(from, to, acc, |a, v: u64| a.wrapping_add(v))
+    }
+}
+
+impl StoredFold for ZeroCopyVec<usize, u64> {
+    fn fold_stored_io_sum(&self, from: usize, to: usize, acc: u64) -> u64 {
+        self.fold_stored_io(from, to, acc, |a, v: u64| a.wrapping_add(v))
+    }
+    fn fold_stored_mmap_sum(&self, from: usize, to: usize, acc: u64) -> u64 {
+        self.fold_stored_mmap(from, to, acc, |a, v: u64| a.wrapping_add(v))
+    }
+}
+
+impl StoredFold for LZ4Vec<usize, u64> {
+    fn fold_stored_io_sum(&self, from: usize, to: usize, acc: u64) -> u64 {
+        self.fold_stored_io(from, to, acc, |a, v: u64| a.wrapping_add(v))
+    }
+    fn fold_stored_mmap_sum(&self, from: usize, to: usize, acc: u64) -> u64 {
+        self.fold_stored_mmap(from, to, acc, |a, v: u64| a.wrapping_add(v))
+    }
+}
+
+impl StoredFold for PcoVec<usize, u64> {
+    fn fold_stored_io_sum(&self, from: usize, to: usize, acc: u64) -> u64 {
+        self.fold_stored_io(from, to, acc, |a, v: u64| a.wrapping_add(v))
+    }
+    fn fold_stored_mmap_sum(&self, from: usize, to: usize, acc: u64) -> u64 {
+        self.fold_stored_mmap(from, to, acc, |a, v: u64| a.wrapping_add(v))
+    }
+}
+
+impl StoredFold for ZstdVec<usize, u64> {
+    fn fold_stored_io_sum(&self, from: usize, to: usize, acc: u64) -> u64 {
+        self.fold_stored_io(from, to, acc, |a, v: u64| a.wrapping_add(v))
+    }
+    fn fold_stored_mmap_sum(&self, from: usize, to: usize, acc: u64) -> u64 {
+        self.fold_stored_mmap(from, to, acc, |a, v: u64| a.wrapping_add(v))
+    }
+}
+
+// --- Unified benchmark ---
+
+fn bench_vec<V: ReadableVec<usize, u64> + StoredFold + AnyStoredVec>(
+    vec: &V,
+    label: &str,
     count: usize,
-    mut fold_fn: F,
-) -> Duration {
+    can_purge: bool,
+) {
+    let total_bytes = count * 8;
+    let disk_bytes = vec.region().meta().len();
+    let ratio = if total_bytes > 0 {
+        disk_bytes as f64 / total_bytes as f64
+    } else {
+        0.0
+    };
+    let ranges = range_sizes(count, 8);
+
+    println!(
+        "\n=== {label} — {count} values ({}, disk: {}, {:.2}x) ===\n",
+        format_bytes(total_bytes),
+        format_bytes(disk_bytes),
+        ratio,
+    );
+
+    // Full scan — multiple passes in random method order to eliminate cache bias.
+    let full_passes = range_passes();
+    println!("--- Full scan ({full_passes} passes, random order) ---");
+
+    let method_names: [&str; 5] = [
+        "fold_stored_io", "fold_stored_mmap", "fold_range", "try_fold_range", "for_each_range_dyn",
+    ];
+    let mut times = [Duration::ZERO; 5];
     let mut sum = 0u64;
-    let start = Instant::now();
-    sum = fold_fn(0, count, sum);
-    let elapsed = start.elapsed();
+    let mut rng = 0xCAFEu64;
+
+    for _pass in 0..full_passes {
+        let mut order = [0usize, 1, 2, 3, 4];
+        for i in (1..5).rev() {
+            let j = xorshift(&mut rng) as usize % (i + 1);
+            order.swap(i, j);
+        }
+
+        for &method in &order {
+            if can_purge { drop_caches(); }
+            let t = Instant::now();
+            match method {
+                0 => sum = vec.fold_stored_io_sum(0, count, sum),
+                1 => sum = vec.fold_stored_mmap_sum(0, count, sum),
+                2 => sum = vec.fold_range(0, count, sum, |a, v: u64| a.wrapping_add(v)),
+                3 => sum = vec.try_fold_range(0, count, sum, |a, v: u64| Ok::<_, ()>(a.wrapping_add(v))).unwrap(),
+                4 => vec.for_each_range_dyn(0, count, &mut |v: u64| sum = sum.wrapping_add(v)),
+                _ => unreachable!(),
+            }
+            times[method] += t.elapsed();
+        }
+    }
+
     std::hint::black_box(sum);
-    elapsed
-}
 
-// --- BytesVec benchmarks ---
+    let results: Vec<BenchResult> = (0..5)
+        .map(|i| BenchResult {
+            name: method_names[i],
+            duration: times[i] / full_passes as u32,
+        })
+        .collect();
+    print_full_results(&results, total_bytes);
 
-fn bench_bytes_vec(vec: &BytesVec<usize, u64>, count: usize, can_purge: bool) {
-    let total_bytes = count * 8;
-    let ranges = range_sizes(count);
-
-    println!(
-        "\n=== BytesVec<usize, u64> — {} values ({}) ===\n",
-        count,
-        format_bytes(total_bytes),
-    );
-
-    // Full scan
-    println!("--- Full scan ---");
-    let throughput = |d: Duration| total_bytes as f64 / d.as_secs_f64() / 1e9;
-
-    if can_purge {
-        drop_caches();
-    }
-    let io = bench_full_fold(count, |from, to, acc| {
-        vec.fold_stored_io(from, to, acc, |a, v: u64| a.wrapping_add(v))
-    });
-    println!(
-        "  IO:   {} ({:.1} GB/s)",
-        format_duration(io),
-        throughput(io)
-    );
-
-    if can_purge {
-        drop_caches();
-    }
-    let mmap = bench_full_fold(count, |from, to, acc| {
-        vec.fold_stored_mmap(from, to, acc, |a, v: u64| a.wrapping_add(v))
-    });
-    println!(
-        "  Mmap: {} ({:.1} GB/s)",
-        format_duration(mmap),
-        throughput(mmap)
-    );
-
-    if can_purge {
-        drop_caches();
-    }
-    let auto = bench_full_fold(count, |from, to, acc| {
-        vec.fold_range(from, to, acc, |a, v: u64| a.wrapping_add(v))
-    });
-    println!(
-        "  Auto: {} ({:.1} GB/s)",
-        format_duration(auto),
-        throughput(auto)
-    );
-
-    // Range scans
-    println!("\n--- Range scans ---");
-    println!(
-        "{:>12} {:>10} {:>14} {:>14} {:>14}  {:<8}",
-        "range", "bytes", "IO", "Mmap", "Auto", "winner"
-    );
-    println!("{}", "-".repeat(82));
+    // Range scans — multiple passes in random method order to eliminate cache bias.
+    let passes = range_passes();
+    println!("\n--- Range scans ({passes} passes, random order) ---");
+    let columns: Vec<&str> = vec!["IO", "Mmap", "fold", "try_fold", "dyn"];
+    print_range_header(&columns);
 
     for &range_size in &ranges {
         let reps = repetitions(range_size);
         let max_start = count.saturating_sub(range_size);
         let starts = random_starts(reps, max_start);
 
-        if can_purge {
-            drop_caches();
+        let mut times = [Duration::ZERO; 5];
+        let mut sum = 0u64;
+        let mut rng = range_size as u64 ^ 0xDEAD;
+
+        for _pass in 0..passes {
+            // Shuffle method order using Fisher-Yates.
+            let mut order = [0usize, 1, 2, 3, 4];
+            for i in (1..5).rev() {
+                let j = xorshift(&mut rng) as usize % (i + 1);
+                order.swap(i, j);
+            }
+
+            for &method in &order {
+                if can_purge { drop_caches(); }
+                let t = Instant::now();
+                for &s in &starts {
+                    let from = s;
+                    let to = s + range_size;
+                    match method {
+                        0 => sum = vec.fold_stored_io_sum(from, to, sum),
+                        1 => sum = vec.fold_stored_mmap_sum(from, to, sum),
+                        2 => sum = vec.fold_range(from, to, sum, |a, v: u64| a.wrapping_add(v)),
+                        3 => sum = vec.try_fold_range(from, to, sum, |a, v: u64| Ok::<_, ()>(a.wrapping_add(v))).unwrap(),
+                        4 => vec.for_each_range_dyn(from, to, &mut |v: u64| sum = sum.wrapping_add(v)),
+                        _ => unreachable!(),
+                    }
+                }
+                times[method] += t.elapsed();
+            }
         }
-        let io_per = bench_fold_fn(range_size, &starts, |from, to, acc| {
-            vec.fold_stored_io(from, to, acc, |a, v: u64| a.wrapping_add(v))
-        });
 
-        if can_purge {
-            drop_caches();
-        }
-        let mmap_per = bench_fold_fn(range_size, &starts, |from, to, acc| {
-            vec.fold_stored_mmap(from, to, acc, |a, v: u64| a.wrapping_add(v))
-        });
+        std::hint::black_box(sum);
 
-        if can_purge {
-            drop_caches();
-        }
-        let auto_per = bench_fold_fn(range_size, &starts, |from, to, acc| {
-            vec.fold_range(from, to, acc, |a, v: u64| a.wrapping_add(v))
-        });
-
-        let times = [("IO", io_per), ("Mmap", mmap_per), ("Auto", auto_per)];
-        let winner = times.iter().min_by_key(|(_, d)| *d).unwrap().0;
-
-        let range_bytes = range_size * 8;
-        println!(
-            "{:>12} {:>10} {:>14} {:>14} {:>14}  {:<8}",
-            range_size,
-            format_bytes(range_bytes),
-            format_duration(io_per),
-            format_duration(mmap_per),
-            format_duration(auto_per),
-            winner,
-        );
+        let divisor = (reps * passes) as u32;
+        let row = vec![
+            BenchResult { name: "IO", duration: times[0] / divisor },
+            BenchResult { name: "Mmap", duration: times[1] / divisor },
+            BenchResult { name: "fold", duration: times[2] / divisor },
+            BenchResult { name: "try_fold", duration: times[3] / divisor },
+            BenchResult { name: "dyn", duration: times[4] / divisor },
+        ];
+        print_range_row(range_size, &row);
     }
 }
 
-// --- PcoVec benchmarks ---
+/// Fixed bench directory — cleaned up at start so Ctrl+C leftovers don't accumulate.
+fn bench_dir() -> std::path::PathBuf {
+    std::env::temp_dir().join("vecdb_bench")
+}
 
-fn bench_pco_vec(vec: &PcoVec<usize, u64>, count: usize, can_purge: bool) {
-    let total_bytes = count * 8;
-    let ranges = range_sizes(count);
-
-    println!(
-        "\n=== PcoVec<usize, u64> — {} values ({}) ===\n",
-        count,
-        format_bytes(total_bytes),
-    );
-
-    // Full scan
-    println!("--- Full scan ---");
-    let throughput = |d: Duration| total_bytes as f64 / d.as_secs_f64() / 1e9;
-
-    if can_purge {
-        drop_caches();
+fn cleanup_bench_dir() {
+    let dir = bench_dir();
+    if dir.exists() {
+        eprint!("  Cleaning up previous bench data...");
+        flush();
+        std::fs::remove_dir_all(&dir).ok();
+        eprintln!(" done");
     }
-    let auto = bench_full_fold(count, |from, to, acc| {
-        vec.fold_range(from, to, acc, |a, v: u64| a.wrapping_add(v))
-    });
-    println!(
-        "  Auto: {} ({:.1} GB/s)",
-        format_duration(auto),
-        throughput(auto)
-    );
+}
 
-    // Range scans
-    println!("\n--- Range scans ---");
-    println!(
-        "{:>12} {:>10} {:>14}",
-        "range", "bytes", "Auto"
-    );
-    println!("{}", "-".repeat(40));
-
-    for &range_size in &ranges {
-        let reps = repetitions(range_size);
-        let max_start = count.saturating_sub(range_size);
-        let starts = random_starts(reps, max_start);
-
-        if can_purge {
-            drop_caches();
-        }
-        let auto_per = bench_fold_fn(range_size, &starts, |from, to, acc| {
-            vec.fold_range(from, to, acc, |a, v: u64| a.wrapping_add(v))
-        });
-
-        let range_bytes = range_size * 8;
-        println!(
-            "{:>12} {:>10} {:>14}",
-            range_size,
-            format_bytes(range_bytes),
-            format_duration(auto_per),
-        );
-    }
+fn run_bench<V: ReadableVec<usize, u64> + StoredFold + AnyStoredVec + WritableVec<usize, u64> + ImportableVec>(
+    label: &str,
+    count: usize,
+    can_purge: bool,
+) {
+    cleanup_bench_dir();
+    let dir = bench_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = Database::open(&dir).unwrap();
+    let vec = populate::<V>(&db, label, count);
+    bench_vec(&vec, label, count, can_purge);
+    drop(vec);
+    drop(db);
+    std::fs::remove_dir_all(&dir).ok();
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let mode = args.get(1).map(|s| s.as_str()).unwrap_or("both");
+    let mode = args.get(1).map(|s| s.as_str()).unwrap_or("all");
     let count = value_count();
 
-    println!("BENCH_COUNT={count} (set env to override, e.g. BENCH_COUNT=1_000_000_000)");
+    println!("BENCH_COUNT={count} (set env to override, e.g. BENCH_COUNT=1_000_000)");
     let can_purge = check_cache_eviction();
     println!();
 
-    match mode {
-        "bytes" => {
-            let dir = tempfile::tempdir().unwrap();
-            let db = Database::open(dir.path()).unwrap();
-            let vec = populate::<BytesVec<usize, u64>>(&db, "BytesVec", count);
-            bench_bytes_vec(&vec, count, can_purge);
-        }
-        "pco" => {
-            let dir = tempfile::tempdir().unwrap();
-            let db = Database::open(dir.path()).unwrap();
-            let vec = populate::<PcoVec<usize, u64>>(&db, "PcoVec", count);
-            bench_pco_vec(&vec, count, can_purge);
-        }
-        "both" | _ => {
-            {
-                let dir = tempfile::tempdir().unwrap();
-                let db = Database::open(dir.path()).unwrap();
-                let vec = populate::<BytesVec<usize, u64>>(&db, "BytesVec", count);
-                bench_bytes_vec(&vec, count, can_purge);
-            }
-            {
-                let dir = tempfile::tempdir().unwrap();
-                let db = Database::open(dir.path()).unwrap();
-                let vec = populate::<PcoVec<usize, u64>>(&db, "PcoVec", count);
-                bench_pco_vec(&vec, count, can_purge);
-            }
-        }
+    let run_bytes = matches!(mode, "all" | "bytes" | "raw");
+    let run_zerocopy = matches!(mode, "all" | "zerocopy" | "raw");
+    let run_lz4 = matches!(mode, "all" | "lz4" | "compressed");
+    let run_pco = matches!(mode, "all" | "pco" | "compressed");
+    let run_zstd = matches!(mode, "all" | "zstd" | "compressed");
+
+    if run_bytes {
+        run_bench::<BytesVec<usize, u64>>("BytesVec<usize, u64>", count, can_purge);
     }
+    if run_zerocopy {
+        run_bench::<ZeroCopyVec<usize, u64>>("ZeroCopyVec<usize, u64>", count, can_purge);
+    }
+    if run_lz4 {
+        run_bench::<LZ4Vec<usize, u64>>("LZ4Vec<usize, u64>", count, can_purge);
+    }
+    if run_pco {
+        run_bench::<PcoVec<usize, u64>>("PcoVec<usize, u64>", count, can_purge);
+    }
+    if run_zstd {
+        run_bench::<ZstdVec<usize, u64>>("ZstdVec<usize, u64>", count, can_purge);
+    }
+
+    cleanup_bench_dir();
 }
 
 fn flush() {
     std::io::Write::flush(&mut std::io::stderr()).ok();
+    std::io::Write::flush(&mut std::io::stdout()).ok();
 }

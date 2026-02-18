@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    AnyVec, Error, Exit, GenericStoredVec, Result, ScannableVec, StoredVec, VecIndex, VecValue,
+    AnyVec, Error, Exit, WritableVec, Result, ReadableVec, StoredVec, VecIndex, VecValue,
     Version,
 };
 
@@ -17,7 +17,7 @@ where
     fn compute_monotonic_window<A, F>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         window: usize,
         exit: &Exit,
         should_pop: F,
@@ -52,18 +52,14 @@ where
             deque.push_back((i, value));
         }
 
-        self.validate_computed_version_or_reset(source.version())?;
-
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+        self.compute_init(source.version(), max_from, exit, |this| {
             let skip = this.len();
             let end = this.batch_end(source.len());
             if skip >= end {
                 return Ok(());
             }
 
-            let mut deque: VecDeque<(usize, A)> = VecDeque::new();
+            let mut deque: VecDeque<(usize, A)> = VecDeque::with_capacity(window.min(1024));
 
             // Rebuild deque state from source
             let rebuild_start = skip.checked_sub(window).unwrap_or_default();
@@ -89,7 +85,7 @@ where
     pub fn compute_max<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         window: usize,
         exit: &Exit,
     ) -> Result<()>
@@ -103,7 +99,7 @@ where
     pub fn compute_min<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         window: usize,
         exit: &Exit,
     ) -> Result<()>
@@ -117,7 +113,7 @@ where
     pub fn compute_sum<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         window: usize,
         exit: &Exit,
     ) -> Result<()>
@@ -125,11 +121,7 @@ where
         V::T: std::ops::Add<V::T, Output = V::T> + From<A> + Default + CheckedSub,
         A: VecValue,
     {
-        self.validate_computed_version_or_reset(Version::new(2) + source.version())?;
-
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+        self.compute_init(Version::new(2) + source.version(), max_from, exit, |this| {
             let skip = this.len();
             let end = this.batch_end(source.len());
             if skip >= end {
@@ -181,19 +173,15 @@ where
     pub fn compute_rolling_sum<A>(
         &mut self,
         max_from: V::I,
-        window_starts: &impl ScannableVec<V::I, V::I>,
-        values: &impl ScannableVec<V::I, A>,
+        window_starts: &impl ReadableVec<V::I, V::I>,
+        values: &impl ReadableVec<V::I, A>,
         exit: &Exit,
     ) -> Result<()>
     where
         A: VecValue,
         V::T: From<A> + Default + AddAssign + SubAssign,
     {
-        self.validate_computed_version_or_reset(window_starts.version() + values.version())?;
-
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+        self.compute_init(window_starts.version() + values.version(), max_from, exit, |this| {
             let skip = this.len();
             let source_len = window_starts.len().min(values.len());
             let end = this.batch_end(source_len);
@@ -240,8 +228,8 @@ where
     pub fn compute_rolling_average<A>(
         &mut self,
         max_from: V::I,
-        window_starts: &impl ScannableVec<V::I, V::I>,
-        values: &impl ScannableVec<V::I, A>,
+        window_starts: &impl ReadableVec<V::I, V::I>,
+        values: &impl ReadableVec<V::I, A>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -249,11 +237,7 @@ where
         f64: From<A> + From<V::T>,
         V::T: From<f64> + Default,
     {
-        self.validate_computed_version_or_reset(window_starts.version() + values.version())?;
-
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+        self.compute_init(window_starts.version() + values.version(), max_from, exit, |this| {
             let skip = this.len();
             let source_len = window_starts.len().min(values.len());
             let end = this.batch_end(source_len);
@@ -305,9 +289,9 @@ where
     pub fn compute_rolling_ratio<A, B>(
         &mut self,
         max_from: V::I,
-        window_starts: &impl ScannableVec<V::I, V::I>,
-        numerator: &impl ScannableVec<V::I, A>,
-        denominator: &impl ScannableVec<V::I, B>,
+        window_starts: &impl ReadableVec<V::I, V::I>,
+        numerator: &impl ReadableVec<V::I, A>,
+        denominator: &impl ReadableVec<V::I, B>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -316,13 +300,11 @@ where
         f64: From<A> + From<B> + From<V::T>,
         V::T: From<f64>,
     {
-        self.validate_computed_version_or_reset(
+        self.compute_init(
             window_starts.version() + numerator.version() + denominator.version(),
-        )?;
-
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+            max_from,
+            exit,
+            |this| {
             let skip = this.len();
             let source_len = window_starts
                 .len()
@@ -398,7 +380,7 @@ where
     pub fn compute_sma<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         sma: usize,
         exit: &Exit,
     ) -> Result<()>
@@ -413,7 +395,7 @@ where
     pub fn compute_sma_<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         window: usize,
         exit: &Exit,
         min_i: Option<V::I>,
@@ -423,11 +405,7 @@ where
         A: VecValue,
         f32: From<V::T> + From<A>,
     {
-        self.validate_computed_version_or_reset(Version::new(2) + source.version())?;
-
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+        self.compute_init(Version::new(2) + source.version(), max_from, exit, |this| {
             let skip = this.len();
             let end = this.batch_end(source.len());
             if skip >= end {
@@ -487,7 +465,7 @@ where
     pub fn compute_rolling_median<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         window: usize,
         exit: &Exit,
     ) -> Result<()>
@@ -509,11 +487,7 @@ where
             }
         }
 
-        self.validate_computed_version_or_reset(Version::new(2) + source.version())?;
-
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+        self.compute_init(Version::new(2) + source.version(), max_from, exit, |this| {
             let skip = this.len();
             let end = this.batch_end(source.len());
             if skip >= end {
@@ -547,7 +521,7 @@ where
     pub fn compute_ema<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         ema: usize,
         exit: &Exit,
     ) -> Result<()>
@@ -562,7 +536,7 @@ where
     pub fn compute_ema_<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         ema: usize,
         exit: &Exit,
         min_i: Option<V::I>,
@@ -582,7 +556,7 @@ where
     pub fn compute_rma<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         period: usize,
         exit: &Exit,
     ) -> Result<()>
@@ -602,7 +576,7 @@ where
     fn compute_exponential_smoothing<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         period: usize,
         version: Version,
         k: f32,
@@ -614,12 +588,9 @@ where
         A: VecValue,
         f32: From<A> + From<V::T>,
     {
-        self.validate_computed_version_or_reset(version + source.version())?;
-        self.truncate_if_needed(max_from)?;
-
         let one_minus_k = 1.0 - k;
 
-        self.repeat_until_complete(exit, |this| {
+        self.compute_init(version + source.version(), max_from, exit, |this| {
             let skip = this.len();
             let end = this.batch_end(source.len());
             if skip >= end {
@@ -663,7 +634,7 @@ where
     fn compute_all_time_extreme<A, F>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         exit: &Exit,
         compare: F,
         exclude_default: bool,
@@ -710,7 +681,7 @@ where
     pub fn compute_all_time_high<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -725,7 +696,7 @@ where
     pub fn compute_all_time_low<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -740,7 +711,7 @@ where
     pub fn compute_all_time_low_<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         exit: &Exit,
         exclude_default: bool,
     ) -> Result<()>
@@ -762,7 +733,7 @@ where
     pub fn compute_all_time_high_from<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         from: V::I,
         exit: &Exit,
     ) -> Result<()>
@@ -778,7 +749,7 @@ where
     pub fn compute_all_time_low_from<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         from: V::I,
         exit: &Exit,
     ) -> Result<()>
@@ -792,7 +763,7 @@ where
     fn compute_all_time_extreme_from<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         from: V::I,
         exit: &Exit,
         compare: fn(V::T, V::T) -> V::T,
@@ -827,9 +798,9 @@ where
     pub fn compute_zscore<A, B, C>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
-        sma: &impl ScannableVec<V::I, B>,
-        sd: &impl ScannableVec<V::I, C>,
+        source: &impl ReadableVec<V::I, A>,
+        sma: &impl ReadableVec<V::I, B>,
+        sd: &impl ReadableVec<V::I, C>,
         exit: &Exit,
     ) -> Result<()>
     where

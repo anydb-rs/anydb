@@ -49,7 +49,7 @@ impl<T> WithPrev<T> {
     where
         T: Clone,
     {
-        self.previous = self.current.clone();
+        self.previous.clone_from(&self.current);
     }
 
     /// Restores the previous value to current.
@@ -58,7 +58,7 @@ impl<T> WithPrev<T> {
     where
         T: Clone,
     {
-        self.current = self.previous.clone();
+        self.current.clone_from(&self.previous);
     }
 
     /// Swaps current and previous values.

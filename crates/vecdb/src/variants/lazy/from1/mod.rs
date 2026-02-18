@@ -1,7 +1,5 @@
-use std::marker::PhantomData;
-
 use crate::{
-    AnyVec, ScannableBoxedVec, ScannableVec, TypedVec,
+    AnyVec, ReadableBoxedVec, ReadableVec, TypedVec,
     VecIndex, VecValue, Version, short_type_name,
 };
 
@@ -9,7 +7,7 @@ mod transform;
 
 pub use transform::*;
 
-pub type ComputeFrom1<T, S1T> = fn(S1T) -> T;
+pub type ComputeFrom1<I, T, S1T> = fn(I, S1T) -> T;
 
 /// Lazily computed vector deriving values on-the-fly from one source vector.
 ///
@@ -28,9 +26,8 @@ where
 {
     name: String,
     base_version: Version,
-    source: ScannableBoxedVec<S1I, S1T>,
-    compute: ComputeFrom1<T, S1T>,
-    _index: PhantomData<fn() -> I>,
+    source: ReadableBoxedVec<S1I, S1T>,
+    compute: ComputeFrom1<I, T, S1T>,
 }
 
 impl<I, T, S1I, S1T> LazyVecFrom1<I, T, S1I, S1T>
@@ -43,8 +40,8 @@ where
     pub fn init(
         name: &str,
         version: Version,
-        source: ScannableBoxedVec<S1I, S1T>,
-        compute: ComputeFrom1<T, S1T>,
+        source: ReadableBoxedVec<S1I, S1T>,
+        compute: ComputeFrom1<I, T, S1T>,
     ) -> Self {
         assert_eq!(
             I::to_string(),
@@ -59,12 +56,7 @@ where
             base_version: version,
             source,
             compute,
-            _index: PhantomData,
         }
-    }
-
-    fn version(&self) -> Version {
-        self.base_version + self.source.version()
     }
 
 }
@@ -77,7 +69,7 @@ where
     S1T: VecValue,
 {
     fn version(&self) -> Version {
-        self.version()
+        self.base_version + self.source.version()
     }
 
     fn name(&self) -> &str {
@@ -104,20 +96,25 @@ where
 
     #[inline]
     fn region_names(&self) -> Vec<String> {
-        vec![]
+        Vec::new()
     }
 }
 
-impl<I, T, S1I, S1T> ScannableVec<I, T> for LazyVecFrom1<I, T, S1I, S1T>
+impl<I, T, S1I, S1T> ReadableVec<I, T> for LazyVecFrom1<I, T, S1I, S1T>
 where
     I: VecIndex,
     T: VecValue,
     S1I: VecIndex,
     S1T: VecValue,
 {
+    #[inline]
     fn for_each_range_dyn(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
         let compute = self.compute;
-        self.source.for_each_range_dyn(from, to, &mut |v| f(compute(v)));
+        let mut i = from;
+        self.source.for_each_range_dyn(from, to, &mut |v| {
+            f(compute(I::from(i), v));
+            i += 1;
+        });
     }
 }
 
@@ -143,8 +140,8 @@ where
     pub fn transformed<F: UnaryTransform<S1T, T>>(
         name: &str,
         version: Version,
-        source: ScannableBoxedVec<I, S1T>,
+        source: ReadableBoxedVec<I, S1T>,
     ) -> Self {
-        Self::init(name, version, source, F::apply)
+        Self::init(name, version, source, |_, v| F::apply(v))
     }
 }

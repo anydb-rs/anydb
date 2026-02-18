@@ -97,31 +97,3 @@ impl_bytes_for_array!(
     1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26,
     27, 28, 29, 30, 31, 32, 33, 64, 65
 );
-
-// Extension trait to add to_bytes() method for slices and Vec
-pub trait BytesExt {
-    fn to_bytes(&self) -> Vec<u8>;
-}
-
-impl<T: Bytes> BytesExt for [T] {
-    fn to_bytes(&self) -> Vec<u8> {
-        let byte_len = size_of_val(self);
-        let mut buf = Vec::with_capacity(byte_len);
-        if T::IS_NATIVE_LAYOUT {
-            // Byte representation == memory representation. Single memcpy.
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    self.as_ptr() as *const u8,
-                    buf.as_mut_ptr(),
-                    byte_len,
-                );
-                buf.set_len(byte_len);
-            }
-        } else {
-            for item in self {
-                buf.extend_from_slice(item.to_bytes().as_ref());
-            }
-        }
-        buf
-    }
-}

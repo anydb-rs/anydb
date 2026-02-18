@@ -38,10 +38,12 @@ pub trait AnyStoredVec: AnyVec {
     /// The effective stored length (may differ from real_stored_len during truncation).
     fn stored_len(&self) -> usize;
 
+    #[inline]
     fn update_stamp(&mut self, stamp: Stamp) {
         self.mut_header().update_stamp(stamp);
     }
 
+    #[inline]
     fn stamp(&self) -> Stamp {
         self.header().stamp()
     }
@@ -54,7 +56,7 @@ pub trait AnyStoredVec: AnyVec {
     }
 
     /// Flushes with the given stamp, saving changes to enable rollback.
-    /// Named with trailing underscore to avoid conflict with GenericStoredVec method.
+    /// Prefixed with `any_` to avoid conflict with `WritableVec::stamped_write_with_changes`.
     fn any_stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()>;
 
     /// Flushes with the given stamp, optionally saving changes for rollback.

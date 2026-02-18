@@ -16,8 +16,8 @@
 /// - `AnyVec`
 /// - `TypedVec`
 /// - `AnyStoredVec`
-/// - `GenericStoredVec`
-/// - `ScannableVec` (delegates `for_each_range_dyn` / `fold_range` to inner)
+/// - `WritableVec`
+/// - `ReadableVec` (delegates `for_each_range_dyn` / `fold_range` to inner)
 macro_rules! impl_vec_wrapper {
     ($wrapper:ident, $inner:ty, $value_trait:ident, $format:expr) => {
         impl<I, T> ::std::ops::Deref for $wrapper<I, T> {
@@ -176,7 +176,7 @@ macro_rules! impl_vec_wrapper {
                 &mut self,
                 stamp: $crate::Stamp,
             ) -> $crate::Result<()> {
-                $crate::GenericStoredVec::stamped_write_with_changes(&mut self.0, stamp)
+                $crate::WritableVec::stamped_write_with_changes(&mut self.0, stamp)
             }
 
             fn remove(self) -> $crate::Result<()> {
@@ -184,82 +184,33 @@ macro_rules! impl_vec_wrapper {
             }
 
             fn any_reset(&mut self) -> $crate::Result<()> {
-                $crate::GenericStoredVec::reset(self)
+                $crate::WritableVec::reset(self)
             }
         }
 
-        impl<I, T> $crate::GenericStoredVec<I, T> for $wrapper<I, T>
+        impl<I, T> $crate::WritableVec<I, T> for $wrapper<I, T>
         where
             I: $crate::VecIndex,
             T: $value_trait,
         {
             #[inline]
-            fn collect_stored_range(
-                &self,
-                from: usize,
-                to: usize,
-            ) -> $crate::Result<Vec<T>> {
-                self.0.collect_stored_range(from, to)
-            }
-
-            #[inline(always)]
-            fn read_value_from_bytes(&self, bytes: &[u8]) -> $crate::Result<T> {
-                self.0.read_value_from_bytes(bytes)
-            }
-
-            #[inline]
-            fn write_value_to(&self, value: &T, buf: &mut Vec<u8>) {
-                self.0.write_value_to(value, buf)
+            fn push(&mut self, value: T) {
+                $crate::WritableVec::push(&mut self.0, value)
             }
 
             #[inline]
             fn pushed(&self) -> &[T] {
-                self.0.pushed()
-            }
-
-            #[inline]
-            fn mut_pushed(&mut self) -> &mut Vec<T> {
-                self.0.mut_pushed()
-            }
-
-            #[inline]
-            fn prev_pushed(&self) -> &[T] {
-                self.0.prev_pushed()
-            }
-
-            #[inline]
-            fn mut_prev_pushed(&mut self) -> &mut Vec<T> {
-                self.0.mut_prev_pushed()
-            }
-
-            #[inline]
-            fn update_stored_len(&self, val: usize) {
-                self.0.update_stored_len(val)
-            }
-
-            #[inline]
-            fn prev_stored_len(&self) -> usize {
-                self.0.prev_stored_len()
-            }
-
-            #[inline]
-            fn mut_prev_stored_len(&mut self) -> &mut usize {
-                self.0.mut_prev_stored_len()
-            }
-
-            #[inline]
-            fn reset(&mut self) -> $crate::Result<()> {
-                self.0.reset()
-            }
-
-            #[inline]
-            fn restore_truncated_value(&mut self, index: usize, value: T) {
-                self.0.restore_truncated_value(index, value)
+                $crate::WritableVec::pushed(&self.0)
             }
 
             #[inline]
             fn truncate_if_needed_at(&mut self, index: usize) -> $crate::Result<()> {
                 self.0.truncate_if_needed_at(index)
+            }
+
+            #[inline]
+            fn reset(&mut self) -> $crate::Result<()> {
+                self.0.reset()
             }
 
             #[inline]
@@ -273,8 +224,11 @@ macro_rules! impl_vec_wrapper {
             }
 
             #[inline]
-            fn rollback_before(&mut self, stamp: $crate::Stamp) -> $crate::Result<$crate::Stamp> {
-                self.0.rollback_before(stamp)
+            fn stamped_write_with_changes(
+                &mut self,
+                stamp: $crate::Stamp,
+            ) -> $crate::Result<()> {
+                self.0.stamped_write_with_changes(stamp)
             }
 
             #[inline]
@@ -282,20 +236,23 @@ macro_rules! impl_vec_wrapper {
                 self.0.rollback()
             }
 
-            #[inline]
-            fn deserialize_then_undo_changes(&mut self, bytes: &[u8]) -> $crate::Result<()> {
-                self.0.deserialize_then_undo_changes(bytes)
+            fn find_rollback_files(&self) -> $crate::Result<::std::collections::BTreeMap<$crate::Stamp, ::std::path::PathBuf>> {
+                self.0.find_rollback_files()
+            }
+
+            fn save_rollback_state(&mut self) {
+                self.0.save_rollback_state()
             }
         }
 
-        impl<I, T> $crate::ScannableVec<I, T> for $wrapper<I, T>
+        impl<I, T> $crate::ReadableVec<I, T> for $wrapper<I, T>
         where
             I: $crate::VecIndex,
             T: $value_trait,
         {
             #[inline]
             fn for_each_range_dyn(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
-                $crate::ScannableVec::<I, T>::for_each_range_dyn(&self.0, from, to, f)
+                $crate::ReadableVec::<I, T>::for_each_range_dyn(&self.0, from, to, f)
             }
 
             #[inline]
@@ -303,7 +260,7 @@ macro_rules! impl_vec_wrapper {
             where
                 Self: Sized,
             {
-                $crate::ScannableVec::<I, T>::fold_range(&self.0, from, to, init, f)
+                $crate::ReadableVec::<I, T>::fold_range(&self.0, from, to, init, f)
             }
 
             #[inline]
@@ -317,7 +274,7 @@ macro_rules! impl_vec_wrapper {
             where
                 Self: Sized,
             {
-                $crate::ScannableVec::<I, T>::try_fold_range(&self.0, from, to, init, f)
+                $crate::ReadableVec::<I, T>::try_fold_range(&self.0, from, to, init, f)
             }
         }
 

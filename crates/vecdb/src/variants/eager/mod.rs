@@ -1,4 +1,4 @@
-use std::{fmt::Debug, path::PathBuf};
+use std::{collections::BTreeMap, fmt::Debug, path::PathBuf};
 
 use log::info;
 use rawdb::{Database, Region};
@@ -16,10 +16,10 @@ pub use checked_sub::*;
 pub use saturating_add::*;
 
 use crate::{
-    AnyStoredVec, AnyVec, Exit, GenericStoredVec, Header, ImportOptions,
-    ImportableVec, ScannableVec, Result, Stamp, StoredVec, TypedVec,
+    AnyStoredVec, AnyVec, Exit, WritableVec, Header, ImportOptions,
+    ImportableVec, ReadableVec, Result, Stamp, StoredVec, TypedVec,
     Version,
-    traits::generic::MAX_CACHE_SIZE,
+    traits::writable::MAX_CACHE_SIZE,
 };
 
 /// Wrapper for computing and storing derived values from source vectors.
@@ -65,6 +65,16 @@ impl<V> EagerVec<V>
 where
     V: StoredVec,
 {
+    /// Validates version, truncates to `max_from`, then runs `f` in batched writes.
+    fn compute_init<F>(&mut self, version: Version, max_from: V::I, exit: &Exit, f: F) -> Result<()>
+    where
+        F: FnMut(&mut Self) -> Result<()>,
+    {
+        self.validate_computed_version_or_reset(version)?;
+        self.truncate_if_needed(max_from)?;
+        self.repeat_until_complete(exit, f)
+    }
+
     /// Max end index for one batch, capped at `max_end`.
     /// Ensures `pushed_len * SIZE_OF_T >= MAX_CACHE_SIZE` so `batch_limit_reached()` fires.
     #[inline]
@@ -211,68 +221,60 @@ where
     }
 }
 
-impl<V> GenericStoredVec<V::I, V::T> for EagerVec<V>
+impl<V> WritableVec<V::I, V::T> for EagerVec<V>
 where
     V: StoredVec,
 {
     #[inline]
-    fn collect_stored_range(&self, from: usize, to: usize) -> Result<Vec<V::T>> {
-        self.0.collect_stored_range(from, to)
-    }
-
-    #[inline(always)]
-    fn read_value_from_bytes(&self, bytes: &[u8]) -> Result<V::T> {
-        self.0.read_value_from_bytes(bytes)
-    }
-
-    #[inline]
-    fn write_value_to(&self, value: &V::T, buf: &mut Vec<u8>) {
-        self.0.write_value_to(value, buf)
+    fn push(&mut self, value: V::T) {
+        self.0.push(value);
     }
 
     #[inline]
     fn pushed(&self) -> &[V::T] {
         self.0.pushed()
     }
-    #[inline]
-    fn mut_pushed(&mut self) -> &mut Vec<V::T> {
-        self.0.mut_pushed()
-    }
-    #[inline]
-    fn prev_pushed(&self) -> &[V::T] {
-        self.0.prev_pushed()
-    }
-    #[inline]
-    fn mut_prev_pushed(&mut self) -> &mut Vec<V::T> {
-        self.0.mut_prev_pushed()
-    }
 
     #[inline]
-    #[doc(hidden)]
-    fn update_stored_len(&self, val: usize) {
-        self.0.update_stored_len(val);
-    }
-    #[inline]
-    fn prev_stored_len(&self) -> usize {
-        self.0.prev_stored_len()
-    }
-    #[inline]
-    fn mut_prev_stored_len(&mut self) -> &mut usize {
-        self.0.mut_prev_stored_len()
-    }
-
-    #[inline]
-    fn truncate_if_needed(&mut self, index: V::I) -> Result<()> {
-        self.0.truncate_if_needed(index)
+    fn truncate_if_needed_at(&mut self, index: usize) -> Result<()> {
+        self.0.truncate_if_needed_at(index)
     }
 
     #[inline]
     fn reset(&mut self) -> Result<()> {
         self.0.reset()
     }
+
+    #[inline]
+    fn reset_unsaved(&mut self) {
+        self.0.reset_unsaved()
+    }
+
+    #[inline]
+    fn is_dirty(&self) -> bool {
+        self.0.is_dirty()
+    }
+
+    #[inline]
+    fn stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()> {
+        self.0.stamped_write_with_changes(stamp)
+    }
+
+    #[inline]
+    fn rollback(&mut self) -> Result<()> {
+        self.0.rollback()
+    }
+
+    fn find_rollback_files(&self) -> Result<BTreeMap<Stamp, PathBuf>> {
+        self.0.find_rollback_files()
+    }
+
+    fn save_rollback_state(&mut self) {
+        self.0.save_rollback_state()
+    }
 }
 
-impl<V> ScannableVec<V::I, V::T> for EagerVec<V>
+impl<V> ReadableVec<V::I, V::T> for EagerVec<V>
 where
     V: StoredVec,
 {

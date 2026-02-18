@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, fs, path::Path};
 
 use vecdb::{
-    AnyStoredVec, AnyVec, CollectableVec, Database, GenericStoredVec, ImportableVec, ScannableVec,
+    AnyStoredVec, AnyVec, Database, WritableVec, ImportableVec, ReadableVec,
     Stamp, Version, ZeroCopyVec,
 };
 
@@ -171,10 +171,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         dbg!((
-            vec.prev_stored_len(),
             vec.stored_len(),
             vec.real_stored_len(),
-            vec.prev_pushed(),
             vec.pushed(),
             vec.prev_updated(),
             vec.updated(),
@@ -270,10 +268,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         dbg!((
-            vec.prev_stored_len(),
             vec.stored_len(),
             vec.real_stored_len(),
-            vec.prev_pushed(),
             vec.pushed(),
             vec.prev_updated(),
             vec.updated(),
@@ -286,10 +282,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(vec.stamp(), Stamp::new(1));
 
         dbg!((
-            vec.prev_stored_len(),
             vec.stored_len(),
             vec.real_stored_len(),
-            vec.prev_pushed(),
             vec.pushed(),
             vec.prev_updated(),
             vec.updated(),
@@ -315,10 +309,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         dbg!((
-            vec.prev_stored_len(),
             vec.stored_len(),
             vec.real_stored_len(),
-            vec.prev_pushed(),
             vec.pushed(),
             vec.prev_updated(),
             vec.updated(),
@@ -329,10 +321,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         vec.rollback()?;
 
         dbg!((
-            vec.prev_stored_len(),
             vec.stored_len(),
             vec.real_stored_len(),
-            vec.prev_pushed(),
             vec.pushed(),
             vec.prev_updated(),
             vec.updated(),
@@ -354,10 +344,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut vec: VEC = ZeroCopyVec::forced_import_with(options)?;
 
         dbg!((
-            vec.prev_stored_len(),
             vec.stored_len(),
             vec.real_stored_len(),
-            vec.prev_pushed(),
             vec.pushed(),
             vec.prev_updated(),
             vec.updated(),
@@ -486,10 +474,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         drop(reader);
 
         dbg!((
-            vec.prev_stored_len(),
             vec.stored_len(),
             vec.real_stored_len(),
-            vec.prev_pushed(),
             vec.pushed(),
             vec.prev_updated(),
             vec.updated(),
@@ -523,10 +509,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         dbg!(("0", vec.prev_holes(), vec.updated()));
 
         dbg!((
-            vec.prev_stored_len(),
             vec.stored_len(),
             vec.real_stored_len(),
-            vec.prev_pushed(),
             vec.pushed(),
             vec.prev_updated(),
             vec.updated(),
@@ -549,10 +533,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         drop(reader);
 
         dbg!((
-            vec.prev_stored_len(),
             vec.stored_len(),
             vec.real_stored_len(),
-            vec.prev_pushed(),
             vec.pushed(),
             vec.prev_updated(),
             vec.updated(),
@@ -564,10 +546,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(vec.stamp(), Stamp::new(1));
 
         dbg!((
-            vec.prev_stored_len(),
             vec.stored_len(),
             vec.real_stored_len(),
-            vec.prev_pushed(),
             vec.pushed(),
             vec.prev_updated(),
             vec.updated(),
@@ -584,10 +564,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         drop(reader);
 
         dbg!((
-            vec.prev_stored_len(),
             vec.stored_len(),
             vec.real_stored_len(),
-            vec.prev_pushed(),
             vec.pushed(),
             vec.prev_updated(),
             vec.updated(),
@@ -598,10 +576,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         vec.stamped_write_with_changes(Stamp::new(2))?;
 
         dbg!((
-            vec.prev_stored_len(),
             vec.stored_len(),
             vec.real_stored_len(),
-            vec.prev_pushed(),
             vec.pushed(),
             vec.prev_updated(),
             vec.updated(),
@@ -632,10 +608,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = vec.rollback_before(Stamp::new(1))?;
 
         dbg!((
-            vec.prev_stored_len(),
             vec.stored_len(),
             vec.real_stored_len(),
-            vec.prev_pushed(),
             vec.pushed(),
             vec.prev_updated(),
             vec.updated(),
@@ -667,10 +641,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         drop(reader);
 
         dbg!((
-            vec.prev_stored_len(),
             vec.stored_len(),
             vec.real_stored_len(),
-            vec.prev_pushed(),
             vec.pushed(),
             vec.prev_updated(),
             vec.updated(),
@@ -703,10 +675,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         assert_eq!(vec.stamp(), Stamp::new(2));
 
         dbg!((
-            vec.prev_stored_len(),
             vec.stored_len(),
             vec.real_stored_len(),
-            vec.prev_pushed(),
             vec.pushed(),
             vec.prev_updated(),
             vec.updated(),
@@ -719,10 +689,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let _ = vec.rollback_before(Stamp::new(1))?;
 
         dbg!((
-            vec.prev_stored_len(),
             vec.stored_len(),
             vec.real_stored_len(),
-            vec.prev_pushed(),
             vec.pushed(),
             vec.prev_updated(),
             vec.updated(),

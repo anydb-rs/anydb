@@ -1,14 +1,13 @@
-use std::{marker::PhantomData, mem, path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, marker::PhantomData, path::PathBuf, sync::Arc};
 
 use log::info;
 use parking_lot::RwLock;
 use rawdb::{Database, Reader, Region};
 
 use crate::{
-    AnyStoredVec, AnyVec, BaseVec, CompressedIoSource,
-    CompressedMmapSource, Error, Format,
-    GenericStoredVec, HEADER_OFFSET, Header, ImportOptions, Result, ScannableVec, Stamp, TypedVec,
-    VecIndex, VecValue, Version, likely, short_type_name, unlikely,
+    AnyStoredVec, AnyVec, BaseVec, CompressedIoSource, CompressedMmapSource, Error, Format,
+    HEADER_OFFSET, Header, ImportOptions, MMAP_CROSSOVER_BYTES, ReadableVec, Result, Stamp,
+    TypedVec, VecIndex, VecValue, Version, WritableVec, likely, short_type_name, unlikely,
     vec_region_name_with,
 };
 
@@ -89,8 +88,8 @@ where
         };
 
         let len = this.real_stored_len();
-        *this.mut_prev_stored_len() = len;
-        this.update_stored_len(len);
+        *this.base.mut_prev_stored_len() = len;
+        this.base.update_stored_len(len);
 
         Ok(this)
     }
@@ -203,12 +202,101 @@ where
         &self.pages
     }
 
-    // ── Source helpers (internal, for ScannableVec) ──────────────────
+    // ── Strategy-specific methods (moved from trait) ─────────────────
+
+    /// Collects stored values in `[from, to)` for serialization purposes.
+    pub(crate) fn collect_stored_range(&self, from: usize, to: usize) -> Result<Vec<T>> {
+        if from >= to {
+            return Ok(vec![]);
+        }
+
+        let reader = self.create_reader();
+        let pages = self.pages.read();
+        let real_len = pages.stored_len(Self::PER_PAGE);
+        let to = to.min(real_len);
+        if from >= to {
+            return Ok(vec![]);
+        }
+
+        let mut result = Vec::with_capacity(to - from);
+        let start_page = from / Self::PER_PAGE;
+        let end_page = (to - 1) / Self::PER_PAGE;
+
+        for page_idx in start_page..=end_page {
+            let page_start = page_idx * Self::PER_PAGE;
+            let decoded = Self::decode_page_(real_len, page_idx, &reader, &pages)?;
+            let local_from = from.saturating_sub(page_start);
+            let local_to = (to - page_start).min(decoded.len());
+            result.extend_from_slice(&decoded[local_from..local_to]);
+        }
+
+        Ok(result)
+    }
+
+    /// Deserializes change data and undoes those changes.
+    fn deserialize_then_undo_changes(&mut self, bytes: &[u8]) -> Result<()> {
+        let change = BaseVec::<I, T>::parse_change_data(bytes, Self::SIZE_OF_T, |b| S::read(b))?;
+
+        // Type-specific truncation: handle pages
+        let current_stored_len = self.stored_len();
+        if change.prev_stored_len < current_stored_len {
+            self.base.update_stored_len(change.prev_stored_len);
+        }
+
+        // Apply base rollback
+        self.base.apply_rollback(&change);
+
+        // Restore truncated values by pushing them back
+        for val in change.truncated_values {
+            self.base.mut_pushed().push(val);
+        }
+
+        Ok(())
+    }
+
+    // ── Source helpers ─────────────────────────────────────────────
+
+    /// Fold over stored data using buffered file I/O (better for large scans).
+    #[inline]
+    pub fn fold_stored_io<B, F: FnMut(B, T) -> B>(
+        &self,
+        from: usize,
+        to: usize,
+        init: B,
+        f: F,
+    ) -> B {
+        let stored_len = self.stored_len();
+        let from = from.min(stored_len);
+        let to = to.min(stored_len);
+        if from >= to {
+            return init;
+        }
+        CompressedIoSource::new(self, from, to).fold(init, f)
+    }
+
+    /// Fold over stored data using mmap (better for small/random reads).
+    #[inline]
+    pub fn fold_stored_mmap<B, F: FnMut(B, T) -> B>(
+        &self,
+        from: usize,
+        to: usize,
+        init: B,
+        f: F,
+    ) -> B {
+        let stored_len = self.stored_len();
+        let from = from.min(stored_len);
+        let to = to.min(stored_len);
+        if from >= to {
+            return init;
+        }
+        CompressedMmapSource::new(self, from, to).fold(init, f)
+    }
 
     /// Fold over stored data using auto-selected source (mmap or IO).
+    #[inline]
     fn fold_source<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, f: F) -> B {
         let range_bytes = to.saturating_sub(from) * size_of::<T>();
-        if range_bytes > crate::MMAP_CROSSOVER_BYTES {
+        if range_bytes > MMAP_CROSSOVER_BYTES {
             CompressedIoSource::new(self, from, to).fold(init, f)
         } else {
             CompressedMmapSource::new(self, from, to).fold(init, f)
@@ -216,6 +304,7 @@ where
     }
 
     /// Fallible fold over stored data using auto-selected source.
+    #[inline]
     fn try_fold_source<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
         &self,
         from: usize,
@@ -224,12 +313,13 @@ where
         f: F,
     ) -> std::result::Result<B, E> {
         let range_bytes = to.saturating_sub(from) * size_of::<T>();
-        if range_bytes > crate::MMAP_CROSSOVER_BYTES {
+        if range_bytes > MMAP_CROSSOVER_BYTES {
             CompressedIoSource::new(self, from, to).try_fold(init, f)
         } else {
             CompressedMmapSource::new(self, from, to).try_fold(init, f)
         }
     }
+
 }
 
 impl<I, T, S> AnyVec for CompressedVecInner<I, T, S>
@@ -250,7 +340,7 @@ where
 
     #[inline]
     fn len(&self) -> usize {
-        self.len_()
+        self.base.len()
     }
 
     #[inline]
@@ -319,49 +409,58 @@ where
         self.base.write_header_if_needed()?;
 
         let stored_len = self.stored_len();
-        let pushed_len = self.pushed_len();
+        let pushed_len = self.base.pushed().len();
 
-        // Phase 1: Check if work needed, read existing page data if truncating
-        let (truncate_at, mut values, starting_page_index) = {
+        // Phase 1a: Copy metadata snapshot (minimal lock scope)
+        let (truncate_at, starting_page_index, partial_page) = {
             let pages = self.pages.read();
 
             let real_stored_len = pages.stored_len(Self::PER_PAGE);
-            assert!(stored_len <= real_stored_len);
+            if stored_len > real_stored_len {
+                return Err(Error::CorruptedRegion { region_len: real_stored_len });
+            }
 
             if pushed_len == 0 && stored_len == real_stored_len {
                 return Ok(false);
             }
 
             let starting_page_index = Self::index_to_page_index(stored_len);
-            assert!(starting_page_index <= pages.len());
+            if starting_page_index > pages.len() {
+                return Err(Error::CorruptedRegion { region_len: pages.len() });
+            }
 
-            let (truncate_at, values) = if starting_page_index < pages.len() {
-                let len = stored_len % Self::PER_PAGE;
-                let values = if len != 0 {
-                    let reader = self.create_reader();
-                    let mut page_values =
-                        Self::decode_page_(stored_len, starting_page_index, &reader, &pages)?;
-                    page_values.truncate(len);
-                    page_values
-                } else {
-                    vec![]
-                };
-                (pages.get(starting_page_index).unwrap().start, values)
+            if starting_page_index < pages.len() {
+                let partial_len = stored_len % Self::PER_PAGE;
+                let page = *pages.get(starting_page_index)
+                    .ok_or(Error::ExpectVecToHaveIndex)?;
+                (page.start, starting_page_index, if partial_len != 0 { Some((page, partial_len)) } else { None })
             } else {
                 let truncate_at = pages
                     .last()
                     .map_or(HEADER_OFFSET as u64, |page| page.start + page.bytes as u64);
-                (truncate_at, vec![])
-            };
+                (truncate_at, starting_page_index, None)
+            }
+        };
+        // Pages lock released — decompression happens without blocking readers
 
-            (truncate_at, values, starting_page_index)
+        // Phase 1b: Decompress partial page (if needed) outside lock
+        let mut values = if let Some((page, partial_len)) = partial_page {
+            let reader = self.create_reader();
+            let compressed_data = reader.unchecked_read(page.start as usize, page.bytes as usize);
+            let mut page_values = Self::decompress_bytes(compressed_data, page.values as usize)?;
+            page_values.truncate(partial_len);
+            page_values
+        } else {
+            vec![]
         };
 
         // Phase 2: Compress (no locks held)
-        values.append(&mut mem::take(self.base.mut_pushed()));
+        values.extend_from_slice(self.base.pushed());
+        self.base.mut_pushed().clear();
 
-        let mut buf = Vec::new();
-        let mut page_sizes = Vec::new();
+        let num_pages = (values.len() + Self::PER_PAGE - 1) / Self::PER_PAGE;
+        let mut buf = Vec::with_capacity(values.len() * Self::SIZE_OF_T);
+        let mut page_sizes = Vec::with_capacity(num_pages);
         for chunk in values.chunks(Self::PER_PAGE) {
             let compressed = Self::compress_page(chunk)?;
             page_sizes.push((compressed.len(), chunk.len()));
@@ -369,8 +468,6 @@ where
         }
 
         // Phase 3: Write to region first (without holding pages lock to avoid deadlock)
-        // Deadlock scenario: Iterator holds region.meta() then waits for pages.read()
-        // Writer holds pages.write() then calls truncate_write which needs region.meta()
         self.region().truncate_write(truncate_at as usize, &buf)?;
 
         // Now acquire pages lock and update page metadata
@@ -383,7 +480,7 @@ where
             let start = if page_index != 0 {
                 let prev = pages
                     .get(page_index - 1)
-                    .expect("previous page should exist");
+                    .ok_or(Error::ExpectVecToHaveIndex)?;
                 prev.start + prev.bytes as u64
             } else {
                 HEADER_OFFSET as u64
@@ -392,10 +489,10 @@ where
             pages.checked_push(
                 page_index,
                 Page::new(start, compressed_len as u32, values_len as u32),
-            );
+            )?;
         }
 
-        self.update_stored_len(stored_len + pushed_len);
+        self.base.update_stored_len(stored_len + pushed_len);
         pages.flush()?;
 
         Ok(true)
@@ -403,7 +500,15 @@ where
 
     #[inline]
     fn serialize_changes(&self) -> Result<Vec<u8>> {
-        self.default_serialize_changes()
+        self.base.serialize_changes(
+            Self::SIZE_OF_T,
+            |from, to| self.collect_stored_range(from, to),
+            |vals, buf| {
+                for v in vals {
+                    S::write_to_vec(v, buf);
+                }
+            },
+        )
     }
 
     #[inline]
@@ -412,7 +517,7 @@ where
     }
 
     fn any_stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()> {
-        <Self as GenericStoredVec<I, T>>::stamped_write_with_changes(self, stamp)
+        <Self as WritableVec<I, T>>::stamped_write_with_changes(self, stamp)
     }
 
     fn remove(self) -> Result<()> {
@@ -420,129 +525,91 @@ where
     }
 
     fn any_reset(&mut self) -> Result<()> {
-        <Self as GenericStoredVec<I, T>>::reset(self)
+        <Self as WritableVec<I, T>>::reset(self)
     }
 }
 
-impl<I, T, S> GenericStoredVec<I, T> for CompressedVecInner<I, T, S>
+impl<I, T, S> WritableVec<I, T> for CompressedVecInner<I, T, S>
 where
     I: VecIndex,
     T: VecValue,
     S: CompressionStrategy<T>,
 {
-    fn collect_stored_range(&self, from: usize, to: usize) -> Result<Vec<T>> {
-        if from >= to {
-            return Ok(vec![]);
-        }
-
-        // Must decode pages directly — fold_source clamps to stored_len,
-        // but this method may read truncated values still in pages on disk.
-        let reader = self.create_reader();
-        let pages = self.pages.read();
-        let real_len = pages.stored_len(Self::PER_PAGE);
-        let to = to.min(real_len);
-        if from >= to {
-            return Ok(vec![]);
-        }
-
-        let mut result = Vec::with_capacity(to - from);
-        let start_page = from / Self::PER_PAGE;
-        let end_page = (to - 1) / Self::PER_PAGE;
-
-        for page_idx in start_page..=end_page {
-            let page_start = page_idx * Self::PER_PAGE;
-            let decoded = Self::decode_page_(real_len, page_idx, &reader, &pages)?;
-            let local_from = from.saturating_sub(page_start);
-            let local_to = (to - page_start).min(decoded.len());
-            result.extend_from_slice(&decoded[local_from..local_to]);
-        }
-
-        Ok(result)
-    }
-
-    #[inline(always)]
-    fn read_value_from_bytes(&self, bytes: &[u8]) -> Result<T> {
-        S::read(bytes)
-    }
-
-    fn write_value_to(&self, value: &T, buf: &mut Vec<u8>) {
-        S::write_to_vec(value, buf);
+    #[inline]
+    fn push(&mut self, value: T) {
+        self.base.mut_pushed().push(value);
     }
 
     #[inline]
     fn pushed(&self) -> &[T] {
         self.base.pushed()
     }
-    #[inline]
-    fn mut_pushed(&mut self) -> &mut Vec<T> {
-        self.base.mut_pushed()
-    }
-    #[inline]
-    fn prev_pushed(&self) -> &[T] {
-        self.base.prev_pushed()
-    }
-    #[inline]
-    fn mut_prev_pushed(&mut self) -> &mut Vec<T> {
-        self.base.mut_prev_pushed()
-    }
 
-    #[inline]
-    #[doc(hidden)]
-    fn update_stored_len(&self, val: usize) {
-        self.base.update_stored_len(val);
-    }
-    #[inline]
-    fn prev_stored_len(&self) -> usize {
-        self.base.prev_stored_len()
-    }
-    #[inline]
-    fn mut_prev_stored_len(&mut self) -> &mut usize {
-        self.base.mut_prev_stored_len()
+    fn truncate_if_needed_at(&mut self, index: usize) -> Result<()> {
+        if self.base.truncate_pushed(index) {
+            self.base.update_stored_len(index);
+        }
+        Ok(())
     }
 
     fn reset(&mut self) -> Result<()> {
-        // Reset pages (specific to CompressedVecInner)
         self.pages.write().reset();
+        self.truncate_if_needed_at(0)?;
+        self.base.reset_base()
+    }
 
-        // Use default reset for common cleanup
-        self.default_reset()
+    fn reset_unsaved(&mut self) {
+        self.base.reset_unsaved_base();
+    }
+
+    fn is_dirty(&self) -> bool {
+        !self.base.pushed().is_empty()
+    }
+
+    fn stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()> {
+        if self.base.saved_stamped_changes() == 0 {
+            return self.stamped_write(stamp);
+        }
+
+        let data = self.serialize_changes()?;
+        self.base.save_change_file(stamp, &data)?;
+        self.stamped_write(stamp)?;
+        self.base.save_prev();
+
+        Ok(())
+    }
+
+    fn rollback(&mut self) -> Result<()> {
+        let bytes = self.base.read_current_change_file()?;
+        self.deserialize_then_undo_changes(&bytes)
+    }
+
+    fn find_rollback_files(&self) -> Result<BTreeMap<Stamp, PathBuf>> {
+        self.base.find_rollback_files()
+    }
+
+    fn save_rollback_state(&mut self) {
+        self.base.save_prev_for_rollback();
     }
 }
 
-impl<I, T, S> ScannableVec<I, T> for CompressedVecInner<I, T, S>
+impl<I, T, S> ReadableVec<I, T> for CompressedVecInner<I, T, S>
 where
     I: VecIndex,
     T: VecValue,
     S: CompressionStrategy<T>,
 {
+    #[inline]
     fn for_each_range_dyn(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
-        let len = self.len_();
-        let from = from.min(len);
-        let to = to.min(len);
-        if from >= to {
-            return;
-        }
-
-        let stored_len = self.stored_len();
-        let stored_to = to.min(stored_len);
-
-        if from < stored_to {
-            self.fold_source(from, stored_to, (), |(), v| f(v));
-        }
-
-        let push_start = from.max(stored_len);
-        for i in push_start..to {
-            if let Some(v) = self.get_pushed_at(i, stored_len) {
-                f(v.clone());
-            }
-        }
+        self.fold_range(from, to, (), |(), v| f(v));
     }
 
+    #[inline]
     fn fold_range<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, mut f: F) -> B
     where
         Self: Sized,
     {
-        let len = self.len_();
+        let len = self.base.len();
         let from = from.min(len);
         let to = to.min(len);
         if from >= to {
@@ -551,28 +618,18 @@ where
 
         let stored_len = self.stored_len();
 
-        // Fast path: entirely within stored data
         if to <= stored_len {
             return self.fold_source(from, to, init, f);
         }
 
-        let stored_to = to.min(stored_len);
         let mut acc = init;
-
-        if from < stored_to {
-            acc = self.fold_source(from, stored_to, acc, &mut f);
+        if from < stored_len {
+            acc = self.fold_source(from, stored_len, acc, &mut f);
         }
-
-        let push_start = from.max(stored_len);
-        for i in push_start..to {
-            if let Some(v) = self.get_pushed_at(i, stored_len) {
-                acc = f(acc, v.clone());
-            }
-        }
-
-        acc
+        self.base.fold_pushed(from, to, acc, f)
     }
 
+    #[inline]
     fn try_fold_range<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
         &self,
         from: usize,
@@ -583,7 +640,7 @@ where
     where
         Self: Sized,
     {
-        let len = self.len_();
+        let len = self.base.len();
         let from = from.min(len);
         let to = to.min(len);
         if from >= to {
@@ -596,21 +653,11 @@ where
             return self.try_fold_source(from, to, init, f);
         }
 
-        let stored_to = to.min(stored_len);
         let mut acc = init;
-
-        if from < stored_to {
-            acc = self.try_fold_source(from, stored_to, acc, &mut f)?;
+        if from < stored_len {
+            acc = self.try_fold_source(from, stored_len, acc, &mut f)?;
         }
-
-        let push_start = from.max(stored_len);
-        for i in push_start..to {
-            if let Some(v) = self.get_pushed_at(i, stored_len) {
-                acc = f(acc, v.clone())?;
-            }
-        }
-
-        Ok(acc)
+        self.base.try_fold_pushed(from, to, acc, f)
     }
 }
 

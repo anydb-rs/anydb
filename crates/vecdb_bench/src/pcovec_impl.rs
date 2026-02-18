@@ -1,7 +1,7 @@
 use anyhow::Result;
 use rayon::prelude::*;
 use std::path::Path;
-use vecdb::{AnyStoredVec, AnyVec, Database, GenericStoredVec, ImportableVec, PcoVec, ScannableVec, Version};
+use vecdb::{AnyStoredVec, AnyVec, Database, WritableVec, ImportableVec, PcoVec, ReadableVec, Version};
 
 use crate::database::DatabaseBenchmark;
 

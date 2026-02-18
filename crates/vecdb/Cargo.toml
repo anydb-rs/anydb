@@ -61,7 +61,7 @@ required-features = ["pco"]
 
 [[example]]
 name = "bench"
-required-features = ["pco"]
+required-features = ["pco", "lz4", "zstd", "zerocopy"]
 
 [package.metadata.docs.rs]
 all-features = true

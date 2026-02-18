@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use zstd::{decode_all, encode_all};
 
-use crate::{Result, impl_bytes_raw_strategy};
+use crate::{Result, impl_bytes_value_strategy};
 
 use super::{super::inner::CompressionStrategy, value::ZstdVecValue};
 
@@ -14,7 +14,7 @@ const ZSTD_COMPRESSION_LEVEL: i32 = 3;
 #[derive(Debug, Clone, Copy)]
 pub struct ZstdStrategy<T>(PhantomData<T>);
 
-impl_bytes_raw_strategy!(ZstdStrategy, ZstdVecValue);
+impl_bytes_value_strategy!(ZstdStrategy, ZstdVecValue);
 
 impl<T> CompressionStrategy<T> for ZstdStrategy<T>
 where

@@ -8,7 +8,7 @@ use std::{
 };
 
 use vecdb::{
-    AnyStoredVec, AnyVec, BytesVec, Database, GenericStoredVec, ImportableVec, PcoVec, ScannableVec,
+    AnyStoredVec, AnyVec, BytesVec, Database, WritableVec, ImportableVec, PcoVec, ReadableVec,
     Version,
 };
 
@@ -46,7 +46,7 @@ fn random_starts(count: usize, max_start: usize) -> Vec<usize> {
 
 fn bench_fold<V>(vec: &V, range_size: usize, starts: &[usize]) -> Duration
 where
-    V: ScannableVec<usize, u64>,
+    V: ReadableVec<usize, u64>,
 {
     let reps = starts.len();
     let mut sum = 0u64;
@@ -63,7 +63,7 @@ where
 
 fn bench_par_fold<V>(vec: &V, range_size: usize, starts: &[usize], threads: usize) -> Duration
 where
-    V: ScannableVec<usize, u64> + Sync,
+    V: ReadableVec<usize, u64> + Sync,
 {
     let reps = starts.len();
     let chunk_size = reps.div_ceil(threads);
@@ -205,7 +205,7 @@ fn populate_pco(dir: &std::path::Path) {
 
 fn bench_type<V>(vec: &V, label: &str)
 where
-    V: ScannableVec<usize, u64> + AnyVec + Sync,
+    V: ReadableVec<usize, u64> + AnyVec + Sync,
 {
     println!(
         "\n=== {label} — {} values ({} GB) ===\n",

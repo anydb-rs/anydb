@@ -6,7 +6,7 @@ use crate::{Bytes, Error, Result};
 /// - Where the compressed data starts in the region
 /// - How many bytes of compressed data
 /// - How many values the page contains when decompressed
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct Page {
     /// Absolute byte offset in the region where compressed data starts

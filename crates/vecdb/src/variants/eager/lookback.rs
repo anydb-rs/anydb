@@ -1,5 +1,5 @@
 use crate::{
-    AnyVec, Error, Exit, GenericStoredVec, ScannableVec, Result, StoredVec, VecIndex, VecValue,
+    AnyVec, Error, Exit, WritableVec, ReadableVec, Result, StoredVec, VecIndex, VecValue,
 };
 
 use super::{CheckedSub, EagerVec};
@@ -12,7 +12,7 @@ where
     fn compute_with_lookback<A, F>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         lookback_len: usize,
         exit: &Exit,
         transform: F,
@@ -21,11 +21,7 @@ where
         A: VecValue + Default,
         F: Fn(usize, A, A) -> V::T,
     {
-        self.validate_computed_version_or_reset(source.version())?;
-
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+        self.compute_init(source.version(), max_from, exit, |this| {
             let skip = this.len();
             let end = this.batch_end(source.len());
             if skip >= end {
@@ -64,7 +60,7 @@ where
     pub fn compute_previous_value<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         len: usize,
         exit: &Exit,
     ) -> Result<()>
@@ -87,7 +83,7 @@ where
     pub fn compute_change<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         len: usize,
         exit: &Exit,
     ) -> Result<()>
@@ -109,7 +105,7 @@ where
     pub fn compute_percentage_change<A>(
         &mut self,
         max_from: V::I,
-        source: &impl ScannableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         len: usize,
         exit: &Exit,
     ) -> Result<()>
@@ -133,8 +129,8 @@ where
     fn compute_rolling_from_window_starts<A, F>(
         &mut self,
         max_from: V::I,
-        window_starts: &impl ScannableVec<V::I, V::I>,
-        values: &impl ScannableVec<V::I, A>,
+        window_starts: &impl ReadableVec<V::I, V::I>,
+        values: &impl ReadableVec<V::I, A>,
         exit: &Exit,
         compute: F,
     ) -> Result<()>
@@ -144,11 +140,7 @@ where
         V::T: From<f64>,
         F: Fn(f64, f64) -> f64,
     {
-        self.validate_computed_version_or_reset(window_starts.version() + values.version())?;
-
-        self.truncate_if_needed(max_from)?;
-
-        self.repeat_until_complete(exit, |this| {
+        self.compute_init(window_starts.version() + values.version(), max_from, exit, |this| {
             let skip = this.len();
             let source_len = window_starts.len().min(values.len());
             let end = this.batch_end(source_len);
@@ -186,8 +178,8 @@ where
     pub fn compute_rolling_percentage_change<A>(
         &mut self,
         max_from: V::I,
-        window_starts: &impl ScannableVec<V::I, V::I>,
-        values: &impl ScannableVec<V::I, A>,
+        window_starts: &impl ReadableVec<V::I, V::I>,
+        values: &impl ReadableVec<V::I, A>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -209,8 +201,8 @@ where
     pub fn compute_rolling_change<A>(
         &mut self,
         max_from: V::I,
-        window_starts: &impl ScannableVec<V::I, V::I>,
-        values: &impl ScannableVec<V::I, A>,
+        window_starts: &impl ReadableVec<V::I, V::I>,
+        values: &impl ReadableVec<V::I, A>,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -230,7 +222,7 @@ where
     pub fn compute_cagr<A>(
         &mut self,
         max_from: V::I,
-        percentage_returns: &impl ScannableVec<V::I, A>,
+        percentage_returns: &impl ReadableVec<V::I, A>,
         days: usize,
         exit: &Exit,
     ) -> Result<()>

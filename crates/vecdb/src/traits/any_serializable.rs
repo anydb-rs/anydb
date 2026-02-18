@@ -1,7 +1,7 @@
-use super::AnyCollectableVec;
+use super::AnyReadableVec;
 
 /// Type-erased trait for serializable vectors.
-pub trait AnySerializableVec: AnyCollectableVec {
+pub trait AnySerializableVec: AnyReadableVec {
     /// Write JSON array to output buffer
     #[cfg(feature = "serde")]
     fn write_json(
@@ -20,7 +20,7 @@ pub trait AnySerializableVec: AnyCollectableVec {
 impl<V> AnySerializableVec for V
 where
     V: crate::TypedVec,
-    V: crate::CollectableVec<V::I, V::T>,
+    V: crate::ReadableVec<V::I, V::T>,
     V::T: serde::Serialize,
 {
     fn write_json(

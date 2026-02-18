@@ -10,7 +10,7 @@ use rawdb::Database;
 use std::ops::DerefMut;
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, GenericStoredVec, ImportOptions, ImportableVec, Result, ScannableVec, Stamp,
+    AnyStoredVec, WritableVec, ImportOptions, ImportableVec, Result, ReadableVec, Stamp,
     StoredVec, Version,
 };
 
@@ -730,15 +730,15 @@ mod raw_rollback {
         }
 
         fn stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()> {
-            GenericStoredVec::stamped_write_with_changes(self, stamp)
+            WritableVec::stamped_write_with_changes(self, stamp)
         }
 
         fn rollback(&mut self) -> Result<()> {
-            GenericStoredVec::rollback(self)
+            WritableVec::rollback(self)
         }
 
         fn rollback_before(&mut self, stamp: Stamp) -> Result<Stamp> {
-            GenericStoredVec::rollback_before(self, stamp)
+            WritableVec::rollback_before(self, stamp)
         }
 
         fn stamp(&self) -> Stamp {
@@ -750,7 +750,7 @@ mod raw_rollback {
         }
 
         fn collect(&self) -> Vec<u32> {
-            ScannableVec::collect(self)
+            ReadableVec::collect(self)
         }
 
         fn collect_holed(&self) -> Result<Vec<Option<u32>>> {
@@ -800,15 +800,15 @@ mod raw_rollback {
         }
 
         fn stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()> {
-            GenericStoredVec::stamped_write_with_changes(self, stamp)
+            WritableVec::stamped_write_with_changes(self, stamp)
         }
 
         fn rollback(&mut self) -> Result<()> {
-            GenericStoredVec::rollback(self)
+            WritableVec::rollback(self)
         }
 
         fn rollback_before(&mut self, stamp: Stamp) -> Result<Stamp> {
-            GenericStoredVec::rollback_before(self, stamp)
+            WritableVec::rollback_before(self, stamp)
         }
 
         fn stamp(&self) -> Stamp {
@@ -820,7 +820,7 @@ mod raw_rollback {
         }
 
         fn collect(&self) -> Vec<u32> {
-            ScannableVec::collect(self)
+            ReadableVec::collect(self)
         }
 
         fn collect_holed(&self) -> Result<Vec<Option<u32>>> {

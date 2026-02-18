@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use pco::ChunkConfig;
 use pco::standalone::{simple_compress, simple_decompress, simple_decompress_into};
 
-use crate::{Error, Result, impl_bytes_raw_strategy, likely};
+use crate::{Error, Result, impl_bytes_value_strategy, likely};
 
 use super::{
     super::inner::CompressionStrategy,
@@ -19,7 +19,7 @@ fn chunk_config() -> ChunkConfig {
 #[derive(Debug, Clone, Copy)]
 pub struct PcodecStrategy<T>(PhantomData<T>);
 
-impl_bytes_raw_strategy!(PcodecStrategy, PcoVecValue);
+impl_bytes_value_strategy!(PcodecStrategy, PcoVecValue);
 
 impl<T> CompressionStrategy<T> for PcodecStrategy<T>
 where

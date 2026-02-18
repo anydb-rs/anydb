@@ -1,7 +1,5 @@
-use std::marker::PhantomData;
-
 use crate::{
-    AnyVec, ScannableBoxedVec, ScannableVec, TypedVec,
+    AnyVec, ReadableBoxedVec, ReadableVec, TypedVec,
     VecIndex, VecValue, Version, short_type_name,
 };
 
@@ -9,7 +7,7 @@ mod transform;
 
 pub use transform::*;
 
-pub type ComputeFrom2<T, S1T, S2T> = fn(S1T, S2T) -> T;
+pub type ComputeFrom2<I, T, S1T, S2T> = fn(I, S1T, S2T) -> T;
 
 /// Lazily computed vector deriving values from two source vectors.
 ///
@@ -25,12 +23,11 @@ where
 {
     name: String,
     base_version: Version,
-    source1: ScannableBoxedVec<S1I, S1T>,
-    source2: ScannableBoxedVec<S2I, S2T>,
-    compute: ComputeFrom2<T, S1T, S2T>,
+    source1: ReadableBoxedVec<S1I, S1T>,
+    source2: ReadableBoxedVec<S2I, S2T>,
+    compute: ComputeFrom2<I, T, S1T, S2T>,
     s1_counts: bool,
     s2_counts: bool,
-    _index: PhantomData<fn() -> I>,
 }
 
 impl<I, T, S1I, S1T, S2I, S2T> LazyVecFrom2<I, T, S1I, S1T, S2I, S2T>
@@ -45,9 +42,9 @@ where
     pub fn init(
         name: &str,
         version: Version,
-        source1: ScannableBoxedVec<S1I, S1T>,
-        source2: ScannableBoxedVec<S2I, S2T>,
-        compute: ComputeFrom2<T, S1T, S2T>,
+        source1: ReadableBoxedVec<S1I, S1T>,
+        source2: ReadableBoxedVec<S2I, S2T>,
+        compute: ComputeFrom2<I, T, S1T, S2T>,
     ) -> Self {
         let target = I::to_string();
         let s1 = source1.index_type_to_string();
@@ -72,13 +69,9 @@ where
             compute,
             s1_counts,
             s2_counts,
-            _index: PhantomData,
         }
     }
 
-    fn version(&self) -> Version {
-        self.base_version + self.source1.version() + self.source2.version()
-    }
 }
 
 impl<I, T, S1I, S1T, S2I, S2T> AnyVec for LazyVecFrom2<I, T, S1I, S1T, S2I, S2T>
@@ -91,7 +84,7 @@ where
     S2T: VecValue,
 {
     fn version(&self) -> Version {
-        self.version()
+        self.base_version + self.source1.version() + self.source2.version()
     }
 
     fn name(&self) -> &str {
@@ -120,11 +113,11 @@ where
 
     #[inline]
     fn region_names(&self) -> Vec<String> {
-        vec![]
+        Vec::new()
     }
 }
 
-impl<I, T, S1I, S1T, S2I, S2T> ScannableVec<I, T> for LazyVecFrom2<I, T, S1I, S1T, S2I, S2T>
+impl<I, T, S1I, S1T, S2I, S2T> ReadableVec<I, T> for LazyVecFrom2<I, T, S1I, S1T, S2I, S2T>
 where
     I: VecIndex,
     T: VecValue,
@@ -133,13 +126,17 @@ where
     S2I: VecIndex,
     S2T: VecValue,
 {
+    #[inline]
     fn for_each_range_dyn(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
+        let to = to.min(self.len());
         let compute = self.compute;
-        let s2_vals = self.source2.collect_range(from, to);
+        let s2_vals = self.source2.collect_range_dyn(from, to);
         let mut s2_iter = s2_vals.into_iter();
+        let mut i = from;
         self.source1.for_each_range_dyn(from, to, &mut |v1| {
             let v2 = s2_iter.next().unwrap();
-            f(compute(v1, v2));
+            f(compute(I::from(i), v1, v2));
+            i += 1;
         });
     }
 }
@@ -169,9 +166,9 @@ where
     pub fn transformed<F: BinaryTransform<S1T, S2T, T>>(
         name: &str,
         version: Version,
-        source1: ScannableBoxedVec<I, S1T>,
-        source2: ScannableBoxedVec<I, S2T>,
+        source1: ReadableBoxedVec<I, S1T>,
+        source2: ReadableBoxedVec<I, S2T>,
     ) -> Self {
-        Self::init(name, version, source1, source2, F::apply)
+        Self::init(name, version, source1, source2, |_, a, b| F::apply(a, b))
     }
 }

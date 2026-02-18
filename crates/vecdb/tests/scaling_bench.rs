@@ -13,7 +13,7 @@ use std::{
 
 use rawdb::Database;
 use tempfile::TempDir;
-use vecdb::{AnyStoredVec, GenericStoredVec, ImportableVec, Result, ScannableVec, Version};
+use vecdb::{AnyStoredVec, WritableVec, ImportableVec, Result, ReadableVec, Version};
 
 #[cfg(feature = "pco")]
 use vecdb::PcoVec;

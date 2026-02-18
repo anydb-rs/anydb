@@ -54,16 +54,16 @@ where
         }
     }
 
-    /// Fold all elements in the range — tight pointer loop the compiler can vectorize.
+    /// Fold all elements in the range — tight pointer loop.
     #[inline]
     pub(crate) fn fold<B, F: FnMut(B, T) -> B>(self, init: B, mut f: F) -> B {
         let ptr = self.data;
-        let mut pos = self.pos;
-        let end = self.end;
+        let mut byte_off = self.pos * Self::SIZE_OF_T;
+        let end_byte = self.end * Self::SIZE_OF_T;
         let mut acc = init;
-        while pos < end {
-            acc = f(acc, unsafe { S::read_from_ptr(ptr, pos * Self::SIZE_OF_T) });
-            pos += 1;
+        while byte_off < end_byte {
+            acc = f(acc, unsafe { S::read_from_ptr(ptr, byte_off) });
+            byte_off += Self::SIZE_OF_T;
         }
         acc
     }
@@ -76,12 +76,12 @@ where
         mut f: F,
     ) -> std::result::Result<B, E> {
         let ptr = self.data;
-        let mut pos = self.pos;
-        let end = self.end;
+        let mut byte_off = self.pos * Self::SIZE_OF_T;
+        let end_byte = self.end * Self::SIZE_OF_T;
         let mut acc = init;
-        while pos < end {
-            acc = f(acc, unsafe { S::read_from_ptr(ptr, pos * Self::SIZE_OF_T) })?;
-            pos += 1;
+        while byte_off < end_byte {
+            acc = f(acc, unsafe { S::read_from_ptr(ptr, byte_off) })?;
+            byte_off += Self::SIZE_OF_T;
         }
         Ok(acc)
     }

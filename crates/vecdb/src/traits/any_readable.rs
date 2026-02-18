@@ -1,13 +1,13 @@
-use crate::{AnyVec, CollectableVec, TypedVec, i64_to_usize};
+use crate::{AnyVec, ReadableVec, TypedVec, i64_to_usize};
 
 /// Type-erased trait for collectable vectors.
-pub trait AnyCollectableVec: AnyVec {
+pub trait AnyReadableVec: AnyVec {
     /// Returns the number of items in the specified range.
     fn range_count(&self, from: Option<i64>, to: Option<i64>) -> usize {
         let len = self.len();
-        let from = from.map(|i| i64_to_usize(i, len));
-        let to = to.map(|i| i64_to_usize(i, len));
-        (from.unwrap_or_default()..to.unwrap_or(len)).count()
+        let from = from.map(|i| i64_to_usize(i, len)).unwrap_or_default();
+        let to = to.map(|i| i64_to_usize(i, len)).unwrap_or(len);
+        to.saturating_sub(from)
     }
 
     /// Returns the total size in bytes of items in the specified range.
@@ -16,9 +16,9 @@ pub trait AnyCollectableVec: AnyVec {
     }
 }
 
-impl<V> AnyCollectableVec for V
+impl<V> AnyReadableVec for V
 where
     V: TypedVec,
-    V: CollectableVec<V::I, V::T>,
+    V: ReadableVec<V::I, V::T>,
 {
 }

@@ -16,12 +16,14 @@ pub trait AnyVec: Send + Sync {
     fn version(&self) -> Version;
     fn name(&self) -> &str;
     fn len(&self) -> usize;
+    #[inline]
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
     /// Returns the string representation of the index type.
     fn index_type_to_string(&self) -> &'static str;
     /// Returns the combined name of the vector.
+    #[inline]
     fn region_name(&self) -> String {
         vec_region_name(self.name(), self.index_type_to_string())
     }

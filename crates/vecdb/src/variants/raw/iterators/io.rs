@@ -93,7 +93,7 @@ where
         self.buffer_pos = 0;
     }
 
-    /// Fold all remaining elements — tight pointer loop per buffer refill.
+    /// Fold all remaining elements — own implementation so LLVM can vectorize the inner loop.
     #[inline]
     pub(crate) fn fold<B, F: FnMut(B, T) -> B>(mut self, init: B, mut f: F) -> B {
         let mut accum = init;

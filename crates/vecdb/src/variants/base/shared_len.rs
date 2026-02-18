@@ -19,13 +19,13 @@ impl SharedLen {
     /// Gets the current length.
     #[inline(always)]
     pub fn get(&self) -> usize {
-        self.0.load(Ordering::SeqCst)
+        self.0.load(Ordering::Acquire)
     }
 
     /// Sets the length.
     #[inline]
     pub fn set(&self, val: usize) {
-        self.0.store(val, Ordering::SeqCst);
+        self.0.store(val, Ordering::Release);
     }
 }
 

@@ -69,18 +69,19 @@ impl Pages {
         self.vec.last()
     }
 
-    /// Pushes a new page, panicking if the page_index doesn't match the current length.
-    ///
-    /// # Panics
-    /// Panics if page_index != current length (pages must be added sequentially).
-    pub fn checked_push(&mut self, page_index: usize, page: Page) {
+    /// Pushes a new page, returning an error if the page_index doesn't match the current length.
+    pub fn checked_push(&mut self, page_index: usize, page: Page) -> Result<()> {
         if page_index != self.vec.len() {
-            panic!("Page index {} doesn't match pages length {}", page_index, self.vec.len());
+            return Err(crate::Error::UnexpectedIndex {
+                expected: self.vec.len(),
+                got: page_index,
+            });
         }
 
         self.set_changed_at(page_index);
 
         self.vec.push(page);
+        Ok(())
     }
 
     fn set_changed_at(&mut self, page_index: usize) {
