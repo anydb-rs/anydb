@@ -1,3 +1,5 @@
+use std::ops::AddAssign;
+
 use crate::{AnyVec, VecIndex, VecValue};
 
 /// High-performance reading of vector values.
@@ -194,6 +196,93 @@ pub trait ReadableVec<I: VecIndex, T: VecValue>: AnyVec {
     #[inline]
     fn collect_dyn(&self) -> Vec<T> {
         self.collect_range_dyn(0, self.len())
+    }
+
+    // ── Aggregations ───────────────────────────────────────────────
+
+    /// Returns the minimum value in `[from, to)`, or `None` if empty.
+    #[inline]
+    fn min(&self, from: usize, to: usize) -> Option<T>
+    where
+        Self: Sized,
+        T: PartialOrd,
+    {
+        self.fold_range(from, to, None, |acc: Option<T>, v| match acc {
+            Some(cur) if cur <= v => Some(cur),
+            _ => Some(v),
+        })
+    }
+
+    /// Returns the minimum value in `[from, to)`, or `None` if empty (object-safe).
+    #[inline]
+    fn min_dyn(&self, from: usize, to: usize) -> Option<T>
+    where
+        T: PartialOrd,
+    {
+        let mut result: Option<T> = None;
+        self.for_each_range_dyn(from, to, &mut |v| match &result {
+            Some(cur) if *cur <= v => {}
+            _ => result = Some(v),
+        });
+        result
+    }
+
+    /// Returns the maximum value in `[from, to)`, or `None` if empty.
+    #[inline]
+    fn max(&self, from: usize, to: usize) -> Option<T>
+    where
+        Self: Sized,
+        T: PartialOrd,
+    {
+        self.fold_range(from, to, None, |acc: Option<T>, v| match acc {
+            Some(cur) if cur >= v => Some(cur),
+            _ => Some(v),
+        })
+    }
+
+    /// Returns the maximum value in `[from, to)`, or `None` if empty (object-safe).
+    #[inline]
+    fn max_dyn(&self, from: usize, to: usize) -> Option<T>
+    where
+        T: PartialOrd,
+    {
+        let mut result: Option<T> = None;
+        self.for_each_range_dyn(from, to, &mut |v| match &result {
+            Some(cur) if *cur >= v => {}
+            _ => result = Some(v),
+        });
+        result
+    }
+
+    /// Returns the sum of values in `[from, to)`, or `None` if empty.
+    #[inline]
+    fn sum(&self, from: usize, to: usize) -> Option<T>
+    where
+        Self: Sized,
+        T: AddAssign + From<u8>,
+    {
+        let mut has_values = false;
+        let result = self.fold_range(from, to, T::from(0), |mut acc, v| {
+            acc += v;
+            has_values = true;
+            acc
+        });
+        has_values.then_some(result)
+    }
+
+    /// Returns the sum of values in `[from, to)`, or `None` if empty (object-safe).
+    #[inline]
+    fn sum_dyn(&self, from: usize, to: usize) -> Option<T>
+    where
+        T: AddAssign + From<u8>,
+    {
+        let mut result = T::from(0);
+        let mut has_values = false;
+        self.for_each_range_dyn(from, to, &mut |v| {
+            result += v;
+            has_values = true;
+        });
+        has_values.then_some(result)
     }
 }
 

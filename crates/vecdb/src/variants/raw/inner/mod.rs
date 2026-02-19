@@ -228,20 +228,21 @@ where
 
     /// Gets a value from pushed or stored layers only. No holes/updates checks.
     ///
+    /// Uses a `VecReader` with a cached mmap base pointer for O(1) stored reads.
     /// Use when you know the vec has no holes or updates (e.g. append-only vecs).
     #[inline(always)]
-    pub fn get_pushed_or_read(&self, index: I, reader: &Reader) -> Option<T> {
+    pub fn get_pushed_or_read(&self, index: I, reader: &VecReader<I, T, S>) -> Option<T> {
         self.get_pushed_or_read_at(index.to_usize(), reader)
     }
 
     /// Gets a value from pushed or stored layers at a usize index. No holes/updates checks.
     #[inline(always)]
-    pub fn get_pushed_or_read_at(&self, index: usize, reader: &Reader) -> Option<T> {
+    pub fn get_pushed_or_read_at(&self, index: usize, reader: &VecReader<I, T, S>) -> Option<T> {
         let stored_len = self.stored_len();
         if index >= stored_len {
             return self.base.pushed().get(index - stored_len).cloned();
         }
-        Some(self.unchecked_read_at(index, reader))
+        Some(reader.get(index))
     }
 
     /// Updates the value at the given index.
