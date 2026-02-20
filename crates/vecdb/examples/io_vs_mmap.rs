@@ -8,8 +8,8 @@ use std::{
 };
 
 use vecdb::{
-    AnyStoredVec, AnyVec, BytesVec, Database, WritableVec, ImportableVec, PcoVec, ReadableVec,
-    Version,
+    AnyStoredVec, AnyVec, BytesVec, Database, ImportableVec, PcoVec, ReadableVec, Version,
+    WritableVec,
 };
 
 const VALUE_COUNT: usize = 10_000_000_000; // 10B u64s = 80GB
@@ -76,8 +76,8 @@ where
             s.spawn(move || {
                 let mut local_sum = 0u64;
                 for &st in chunk {
-                    local_sum =
-                        vec.fold_range(st, st + range_size, local_sum, |acc, v| acc.wrapping_add(v));
+                    local_sum = vec
+                        .fold_range(st, st + range_size, local_sum, |acc, v| acc.wrapping_add(v));
                 }
                 sum.fetch_add(local_sum, Ordering::Relaxed);
             });
@@ -91,10 +91,7 @@ where
 // --- Output formatting ---
 
 fn print_header() {
-    println!(
-        "{:>12} {:>10} {:>14}",
-        "range_size", "bytes", "fold/iter"
-    );
+    println!("{:>12} {:>10} {:>14}", "range_size", "bytes", "fold/iter");
     println!("{}", "-".repeat(40));
 }
 
@@ -249,8 +246,7 @@ fn main() {
             let dir = tempfile::tempdir().unwrap();
             populate_bytes(dir.path());
             let db = Database::open(dir.path()).unwrap();
-            let vec: BytesVec<usize, u64> =
-                BytesVec::import(&db, "bench", Version::ONE).unwrap();
+            let vec: BytesVec<usize, u64> = BytesVec::import(&db, "bench", Version::ONE).unwrap();
             bench_type(&vec, "BytesVec<usize, u64>");
         }
         "pco" => {
@@ -260,7 +256,7 @@ fn main() {
             let vec: PcoVec<usize, u64> = PcoVec::import(&db, "bench", Version::ONE).unwrap();
             bench_type(&vec, "PcoVec<usize, u64>");
         }
-        "both" | _ => {
+        _ => {
             let bytes_dir = tempfile::tempdir().unwrap();
             populate_bytes(bytes_dir.path());
             {
@@ -275,8 +271,7 @@ fn main() {
             populate_pco(pco_dir.path());
             {
                 let db = Database::open(pco_dir.path()).unwrap();
-                let vec: PcoVec<usize, u64> =
-                    PcoVec::import(&db, "bench", Version::ONE).unwrap();
+                let vec: PcoVec<usize, u64> = PcoVec::import(&db, "bench", Version::ONE).unwrap();
                 bench_type(&vec, "PcoVec<usize, u64>");
             }
             drop(pco_dir);

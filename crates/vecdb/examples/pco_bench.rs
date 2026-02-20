@@ -73,7 +73,7 @@ fn main() {
     let iterations = 100;
 
     for (name, data) in &datasets {
-        let compressed = simple_compress(*data, &config).unwrap();
+        let compressed = simple_compress(data, &config).unwrap();
         let len = data.len();
 
         // Benchmark simple_decompress (allocates each time)

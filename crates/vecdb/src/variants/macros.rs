@@ -251,20 +251,26 @@ macro_rules! impl_vec_wrapper {
             T: $value_trait,
         {
             #[inline]
-            fn for_each_range_dyn(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
-                $crate::ReadableVec::<I, T>::for_each_range_dyn(&self.0, from, to, f)
+            fn for_each_range_dyn_at(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
+                $crate::ReadableVec::<I, T>::for_each_range_dyn_at(&self.0, from, to, f)
             }
 
             #[inline]
-            fn fold_range<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, f: F) -> B
+            fn fold_range_at<B, F: FnMut(B, T) -> B>(
+                &self,
+                from: usize,
+                to: usize,
+                init: B,
+                f: F,
+            ) -> B
             where
                 Self: Sized,
             {
-                $crate::ReadableVec::<I, T>::fold_range(&self.0, from, to, init, f)
+                $crate::ReadableVec::<I, T>::fold_range_at(&self.0, from, to, init, f)
             }
 
             #[inline]
-            fn try_fold_range<B, E, F: FnMut(B, T) -> ::std::result::Result<B, E>>(
+            fn try_fold_range_at<B, E, F: FnMut(B, T) -> ::std::result::Result<B, E>>(
                 &self,
                 from: usize,
                 to: usize,
@@ -274,7 +280,7 @@ macro_rules! impl_vec_wrapper {
             where
                 Self: Sized,
             {
-                $crate::ReadableVec::<I, T>::try_fold_range(&self.0, from, to, init, f)
+                $crate::ReadableVec::<I, T>::try_fold_range_at(&self.0, from, to, init, f)
             }
         }
 

@@ -319,7 +319,6 @@ where
             CompressedMmapSource::new(self, from, to).try_fold(init, f)
         }
     }
-
 }
 
 impl<I, T, S> AnyVec for CompressedVecInner<I, T, S>
@@ -417,7 +416,9 @@ where
 
             let real_stored_len = pages.stored_len(Self::PER_PAGE);
             if stored_len > real_stored_len {
-                return Err(Error::CorruptedRegion { region_len: real_stored_len });
+                return Err(Error::CorruptedRegion {
+                    region_len: real_stored_len,
+                });
             }
 
             if pushed_len == 0 && stored_len == real_stored_len {
@@ -426,14 +427,25 @@ where
 
             let starting_page_index = Self::index_to_page_index(stored_len);
             if starting_page_index > pages.len() {
-                return Err(Error::CorruptedRegion { region_len: pages.len() });
+                return Err(Error::CorruptedRegion {
+                    region_len: pages.len(),
+                });
             }
 
             if starting_page_index < pages.len() {
                 let partial_len = stored_len % Self::PER_PAGE;
-                let page = *pages.get(starting_page_index)
+                let page = *pages
+                    .get(starting_page_index)
                     .ok_or(Error::ExpectVecToHaveIndex)?;
-                (page.start, starting_page_index, if partial_len != 0 { Some((page, partial_len)) } else { None })
+                (
+                    page.start,
+                    starting_page_index,
+                    if partial_len != 0 {
+                        Some((page, partial_len))
+                    } else {
+                        None
+                    },
+                )
             } else {
                 let truncate_at = pages
                     .last()
@@ -458,7 +470,7 @@ where
         values.extend_from_slice(self.base.pushed());
         self.base.mut_pushed().clear();
 
-        let num_pages = (values.len() + Self::PER_PAGE - 1) / Self::PER_PAGE;
+        let num_pages = values.len().div_ceil(Self::PER_PAGE);
         let mut buf = Vec::with_capacity(values.len() * Self::SIZE_OF_T);
         let mut page_sizes = Vec::with_capacity(num_pages);
         for chunk in values.chunks(Self::PER_PAGE) {
@@ -600,12 +612,12 @@ where
     S: CompressionStrategy<T>,
 {
     #[inline]
-    fn for_each_range_dyn(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
-        self.fold_range(from, to, (), |(), v| f(v));
+    fn for_each_range_dyn_at(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
+        self.fold_range_at(from, to, (), |(), v| f(v));
     }
 
     #[inline]
-    fn fold_range<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, mut f: F) -> B
+    fn fold_range_at<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, mut f: F) -> B
     where
         Self: Sized,
     {
@@ -630,7 +642,7 @@ where
     }
 
     #[inline]
-    fn try_fold_range<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
+    fn try_fold_range_at<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
         &self,
         from: usize,
         to: usize,

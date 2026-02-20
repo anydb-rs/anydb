@@ -1057,12 +1057,18 @@ where
     S: RawStrategy<T>,
 {
     #[inline]
-    fn for_each_range_dyn(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
-        self.fold_range(from, to, (), |(), v| f(v));
+    fn for_each_range_dyn_at(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
+        self.fold_range_at(from, to, (), |(), v| f(v));
     }
 
     #[inline]
-    fn fold_range<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, mut f: F) -> B
+    fn fold_range_at<B, F: FnMut(B, T) -> B>(
+        &self,
+        from: usize,
+        to: usize,
+        init: B,
+        mut f: F,
+    ) -> B
     where
         Self: Sized,
     {
@@ -1091,7 +1097,7 @@ where
     }
 
     #[inline]
-    fn try_fold_range<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
+    fn try_fold_range_at<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
         &self,
         from: usize,
         to: usize,

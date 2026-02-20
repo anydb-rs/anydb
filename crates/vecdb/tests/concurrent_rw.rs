@@ -26,7 +26,7 @@ use std::{
 use rawdb::Database;
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, AnyVec, BytesVec, WritableVec, ImportableVec, Result, ReadableVec, Version,
+    AnyStoredVec, AnyVec, BytesVec, ImportableVec, ReadableVec, Result, Version, WritableVec,
 };
 
 #[cfg(feature = "pco")]
@@ -344,7 +344,10 @@ fn test_memory_ordering_len_vs_data() -> Result<()> {
                         reads_clone.fetch_add(1, Ordering::Relaxed);
                     }
                     Err(e) => {
-                        eprintln!("ERROR: Read failed at index {} (stored_len={}): {:?}", last_idx, len, e);
+                        eprintln!(
+                            "ERROR: Read failed at index {} (stored_len={}): {:?}",
+                            last_idx, len, e
+                        );
                         errors_clone.fetch_add(1, Ordering::Relaxed);
                     }
                 }
@@ -798,13 +801,13 @@ fn test_extended_stress() -> Result<()> {
 
                         // Also check a random-ish index
                         let random_idx = (len * 7) / 11; // Pseudo-random
-                        if random_idx < len {
-                            if let Some(v) = reader.collect_one(random_idx) {
-                                if v != random_idx as u64 {
-                                    local_errors += 1;
-                                }
-                                local_reads += 1;
+                        if random_idx < len
+                            && let Some(v) = reader.collect_one(random_idx)
+                        {
+                            if v != random_idx as u64 {
+                                local_errors += 1;
                             }
+                            local_reads += 1;
                         }
                     }
                     // Small sleep between reads
@@ -958,8 +961,7 @@ fn test_extended_stress_bytes() -> Result<()> {
                         // Also check a random-ish index
                         let random_idx = (len * 7) / 11;
                         if random_idx < len
-                            && let Ok(v) =
-                                reader.read_at(random_idx, &reader_ref)
+                            && let Ok(v) = reader.read_at(random_idx, &reader_ref)
                         {
                             if v != random_idx as u64 {
                                 local_errors += 1;

@@ -108,10 +108,10 @@ where
     S1T: VecValue,
 {
     #[inline]
-    fn for_each_range_dyn(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
+    fn for_each_range_dyn_at(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
         let compute = self.compute;
         let mut i = from;
-        self.source.for_each_range_dyn(from, to, &mut |v| {
+        self.source.for_each_range_dyn_at(from, to, &mut |v| {
             f(compute(I::from(i), v));
             i += 1;
         });

@@ -30,13 +30,13 @@ where
             }
 
             let mut cumulative_val = if skip > 0 {
-                this.collect_one(skip - 1).unwrap()
+                this.collect_one_at(skip - 1).unwrap()
             } else {
                 V::T::from(0_usize)
             };
 
             let mut i = skip;
-            source.try_fold_range(skip, end, (), |(), v: S| {
+            source.try_fold_range_at(skip, end, (), |(), v: S| {
                 cumulative_val += v.into();
                 this.checked_push_at(i, cumulative_val)?;
                 i += 1;
@@ -98,16 +98,16 @@ where
             }
 
             let mut cumulative_val = if skip > 0 {
-                this.collect_one(skip - 1).unwrap()
+                this.collect_one_at(skip - 1).unwrap()
             } else {
                 V::T::from(0_usize)
             };
 
-            let batch2 = source2.collect_range(skip, end);
+            let batch2 = source2.collect_range_at(skip, end);
             let mut iter2 = batch2.into_iter();
             let mut i = skip;
 
-            source1.try_fold_range(skip, end, (), |(), v1: S1| {
+            source1.try_fold_range_at(skip, end, (), |(), v1: S1| {
                 let v2 = iter2.next().unwrap();
                 cumulative_val += transform(v1, v2);
                 this.checked_push_at(i, cumulative_val)?;
@@ -160,7 +160,7 @@ where
             // Recover count from stored output instead of rebuilding full window.
             // Reads 1 element from self instead of window_size from source.
             let mut count: usize = if skip > 0 {
-                this.collect_one(skip - 1).unwrap().into()
+                this.collect_one_at(skip - 1).unwrap().into()
             } else {
                 0
             };
@@ -171,14 +171,14 @@ where
             let leave_start = skip.saturating_sub(window_size);
             let leave_end = end.saturating_sub(window_size);
             let leave_batch = if leave_end > leave_start {
-                source.collect_range(leave_start, leave_end)
+                source.collect_range_at(leave_start, leave_end)
             } else {
                 vec![]
             };
 
             let mut leave_idx = 0;
             let mut i = skip;
-            source.try_fold_range(skip, end, (), |(), v: S| {
+            source.try_fold_range_at(skip, end, (), |(), v: S| {
                 if i >= window_size {
                     if predicate(&leave_batch[leave_idx]) {
                         count -= 1;
@@ -221,7 +221,7 @@ where
                 let idx = i.to_usize();
                 if count.is_none() {
                     count = Some(if idx > 0 {
-                        this.collect_one(idx - 1).unwrap()
+                        this.collect_one_at(idx - 1).unwrap()
                     } else {
                         V::T::from(0_usize)
                     });

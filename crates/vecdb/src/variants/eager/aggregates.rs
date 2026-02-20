@@ -38,7 +38,7 @@ where
 
             let batches: Vec<Vec<V::T>> = others
                 .iter()
-                .map(|v| v.collect_range(skip, end))
+                .map(|v| v.collect_range_at(skip, end))
                 .collect();
 
             for j in 0..(end - skip) {
@@ -147,11 +147,11 @@ where
 
             let weight_batches: Vec<Vec<W>> = weights
                 .iter()
-                .map(|w| w.collect_range(skip, end))
+                .map(|w| w.collect_range_at(skip, end))
                 .collect();
             let value_batches: Vec<Vec<V::T>> = values
                 .iter()
-                .map(|v| v.collect_range(skip, end))
+                .map(|v| v.collect_range_at(skip, end))
                 .collect();
 
             for j in 0..(end - skip) {
@@ -235,20 +235,20 @@ where
 
             // Get the starting position in source
             let pos = if skip < first_indexes.len() {
-                first_indexes.collect_one(skip).unwrap().to_usize()
+                first_indexes.collect_one_at(skip).unwrap().to_usize()
             } else {
                 return Ok(());
             };
 
             let counts_batch: Vec<usize> = indexes_count
-                .collect_range(skip, end)
+                .collect_range_at(skip, end)
                 .into_iter()
                 .map(usize::from)
                 .collect();
             let total_count: usize = counts_batch.iter().sum();
 
             // Single batch read instead of per-element allocations
-            let all_values = source.collect_range(pos, pos + total_count);
+            let all_values = source.collect_range_at(pos, pos + total_count);
             let mut offset = 0;
             for (j, &count) in counts_batch.iter().enumerate() {
                 let i = skip + j;
@@ -320,12 +320,12 @@ where
                 return Ok(());
             }
 
-            let fi_batch = first_indexes.collect_range(skip, end);
+            let fi_batch = first_indexes.collect_range_at(skip, end);
             for (j, first_index) in fi_batch.iter().enumerate() {
                 let i = skip + j;
                 let next_first = if i + 1 < first_indexes.len() {
                     fi_batch.get(j + 1).map(|fi| fi.to_usize()).unwrap_or_else(|| {
-                        first_indexes.collect_one(i + 1).unwrap().to_usize()
+                        first_indexes.collect_one_at(i + 1).unwrap().to_usize()
                     })
                 } else {
                     other_to_else.len()

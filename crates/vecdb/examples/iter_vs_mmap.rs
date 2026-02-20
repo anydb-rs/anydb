@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use vecdb::{AnyStoredVec, BytesVec, Database, WritableVec, ImportableVec, ReadableVec, Version};
+use vecdb::{AnyStoredVec, BytesVec, Database, ImportableVec, ReadableVec, Version, WritableVec};
 
 const VALUE_COUNT: usize = 10_000_000_000; // 10B u64s = 80GB
 const BATCH_SIZE: usize = 100_000_000;
@@ -69,7 +69,7 @@ fn main() {
         flush();
         let start = Instant::now();
         let mut sum = 0u64;
-        for i in 0..REPEATS {
+        (0..REPEATS).for_each(|i| {
             sum = vec.fold_range(fixed_from, fixed_from + RANGE_SIZE, sum, |acc, v: u64| {
                 acc.wrapping_add(v)
             });
@@ -77,7 +77,7 @@ fn main() {
             sum = vec.fold_range(from, from + RANGE_SIZE, sum, |acc, v: u64| {
                 acc.wrapping_add(v)
             });
-        }
+        });
         std::hint::black_box(sum);
         let elapsed = start.elapsed();
         println!("{elapsed:?} ({:?}/iter)", elapsed / REPEATS as u32);

@@ -64,14 +64,14 @@ where
             // Rebuild deque state from source
             let rebuild_start = skip.checked_sub(window).unwrap_or_default();
             let mut rebuild_i = rebuild_start;
-            source.for_each_range_dyn(rebuild_start, skip, &mut |value: A| {
+            source.for_each_range_dyn_at(rebuild_start, skip, &mut |value: A| {
                 update_deque(&mut deque, rebuild_i, value, window, &should_pop);
                 rebuild_i += 1;
             });
 
             // Process new elements
             let mut i = skip;
-            source.try_fold_range(skip, end, (), |(), value: A| {
+            source.try_fold_range_at(skip, end, (), |(), value: A| {
                 update_deque(&mut deque, i, value, window, &should_pop);
 
                 let v = deque.front().unwrap().1.clone();
@@ -129,7 +129,7 @@ where
             }
 
             let mut prev_sum = if skip > 0 {
-                this.collect_one(skip - 1).unwrap()
+                this.collect_one_at(skip - 1).unwrap()
             } else {
                 V::T::default()
             };
@@ -140,14 +140,14 @@ where
             let pop_start = skip.saturating_sub(window);
             let pop_end = end.saturating_sub(window);
             let mut pop_iter = if pop_end > pop_start {
-                source.collect_range(pop_start, pop_end)
+                source.collect_range_at(pop_start, pop_end)
             } else {
                 vec![]
             }
             .into_iter();
 
             let mut i = skip;
-            source.try_fold_range(skip, end, (), |(), value: A| {
+            source.try_fold_range_at(skip, end, (), |(), value: A| {
                 let value = V::T::from(value);
 
                 let sum = if i >= window {
@@ -191,22 +191,22 @@ where
 
             let (mut running_sum, mut prev_start) = if skip > 0 {
                 let prev_idx = skip - 1;
-                let prev_start = window_starts.collect_one(prev_idx).unwrap();
-                let sum = this.collect_one(prev_idx).unwrap();
+                let prev_start = window_starts.collect_one_at(prev_idx).unwrap();
+                let sum = this.collect_one_at(prev_idx).unwrap();
                 (sum, prev_start)
             } else {
                 (V::T::default(), V::I::from(0))
             };
 
-            let starts_batch = window_starts.collect_range(skip, end);
-            let values_batch = values.collect_range(skip, end);
+            let starts_batch = window_starts.collect_range_at(skip, end);
+            let values_batch = values.collect_range_at(skip, end);
 
             for (j, (start, value)) in starts_batch.into_iter().zip(values_batch).enumerate() {
                 let i = skip + j;
                 running_sum += V::T::from(value);
 
                 if prev_start < start {
-                    values.for_each_range_dyn(
+                    values.for_each_range_dyn_at(
                         prev_start.to_usize(),
                         start.to_usize(),
                         &mut |v: A| {
@@ -249,23 +249,23 @@ where
             // Reads 2 values instead of window_count from source.
             let (mut running_sum, mut prev_start) = if skip > 0 {
                 let prev_idx = skip - 1;
-                let prev_start = window_starts.collect_one(prev_idx).unwrap();
-                let stored_avg = f64::from(this.collect_one(prev_idx).unwrap());
+                let prev_start = window_starts.collect_one_at(prev_idx).unwrap();
+                let stored_avg = f64::from(this.collect_one_at(prev_idx).unwrap());
                 let window_count = prev_idx + 1 - prev_start.to_usize();
                 (stored_avg * window_count as f64, prev_start)
             } else {
                 (0.0_f64, V::I::from(0))
             };
 
-            let starts_batch = window_starts.collect_range(skip, end);
-            let values_batch = values.collect_range(skip, end);
+            let starts_batch = window_starts.collect_range_at(skip, end);
+            let values_batch = values.collect_range_at(skip, end);
 
             for (j, (start, value)) in starts_batch.into_iter().zip(values_batch).enumerate() {
                 let i = skip + j;
                 running_sum += f64::from(value);
 
                 if prev_start < start {
-                    values.for_each_range_dyn(
+                    values.for_each_range_dyn_at(
                         prev_start.to_usize(),
                         start.to_usize(),
                         &mut |v: A| {
@@ -320,14 +320,14 @@ where
             // Falls back to full scan when prev denom is 0.
             let (mut running_sum, mut prev_start) = if skip > 0 {
                 let prev_idx = skip - 1;
-                let prev_start = window_starts.collect_one(prev_idx).unwrap();
-                let prev_denom = f64::from(denominator.collect_one(prev_idx).unwrap());
+                let prev_start = window_starts.collect_one_at(prev_idx).unwrap();
+                let prev_denom = f64::from(denominator.collect_one_at(prev_idx).unwrap());
                 if prev_denom != 0.0 {
-                    let stored_ratio = f64::from(this.collect_one(prev_idx).unwrap());
+                    let stored_ratio = f64::from(this.collect_one_at(prev_idx).unwrap());
                     (stored_ratio * prev_denom, prev_start)
                 } else {
                     let mut sum = 0.0_f64;
-                    numerator.for_each_range_dyn(
+                    numerator.for_each_range_dyn_at(
                         prev_start.to_usize(),
                         prev_idx + 1,
                         &mut |v: A| {
@@ -340,9 +340,9 @@ where
                 (0.0_f64, V::I::from(0))
             };
 
-            let starts_batch = window_starts.collect_range(skip, end);
-            let num_batch = numerator.collect_range(skip, end);
-            let denom_batch = denominator.collect_range(skip, end);
+            let starts_batch = window_starts.collect_range_at(skip, end);
+            let num_batch = numerator.collect_range_at(skip, end);
+            let denom_batch = denominator.collect_range_at(skip, end);
 
             for (j, ((start, num_val), denom_val)) in starts_batch
                 .into_iter()
@@ -354,7 +354,7 @@ where
                 running_sum += f64::from(num_val);
 
                 if prev_start < start {
-                    numerator.for_each_range_dyn(
+                    numerator.for_each_range_dyn_at(
                         prev_start.to_usize(),
                         start.to_usize(),
                         &mut |v: A| {
@@ -416,7 +416,7 @@ where
             let min_prev_i = min_i.unwrap_or_default();
 
             let mut prev_sma = if skip > 0 && skip > min_prev_i {
-                f32::from(this.collect_one(skip - 1).unwrap())
+                f32::from(this.collect_one_at(skip - 1).unwrap())
             } else {
                 0.0
             };
@@ -428,7 +428,7 @@ where
             let pop_end = end.saturating_sub(window).max(pop_start);
             let pop_batch: Vec<f32> = if pop_end > pop_start {
                 let mut v = Vec::with_capacity(pop_end - pop_start);
-                source.for_each_range_dyn(pop_start, pop_end, &mut |val: A| {
+                source.for_each_range_dyn_at(pop_start, pop_end, &mut |val: A| {
                     v.push(f32::from(val));
                 });
                 v
@@ -438,7 +438,7 @@ where
 
             let mut pop_idx = 0;
             let mut i = skip;
-            source.try_fold_range(skip, end, (), |(), value: A| {
+            source.try_fold_range_at(skip, end, (), |(), value: A| {
                 if min_i.is_none_or(|m| m <= i) {
                     let value_f32 = f32::from(value);
                     let effective_i = i - min_prev_i;
@@ -499,14 +499,14 @@ where
                 VecDeque::with_capacity(window.saturating_add(1).min(1024));
             if skip > 0 {
                 let start = skip.saturating_sub(window);
-                source.for_each_range_dyn(start, skip, &mut |v: A| {
+                source.for_each_range_dyn_at(start, skip, &mut |v: A| {
                     buf.push_back(f32::from(v));
                 });
             }
 
             let mut scratch = Vec::with_capacity(window.min(1024));
             let mut i = skip;
-            source.try_fold_range(skip, end, (), |(), value: A| {
+            source.try_fold_range_at(skip, end, (), |(), value: A| {
                 buf.push_back(f32::from(value));
                 if buf.len() > window {
                     buf.pop_front();
@@ -600,13 +600,13 @@ where
             let min_start = min_i.map(|i| i.to_usize()).unwrap_or(0);
 
             let mut prev = if skip > 0 && skip > min_start {
-                this.collect_one(skip - 1).unwrap()
+                this.collect_one_at(skip - 1).unwrap()
             } else {
                 V::T::from(0.0)
             };
 
             let mut index = skip;
-            source.try_fold_range(skip, end, (), |(), value: A| {
+            source.try_fold_range_at(skip, end, (), |(), value: A| {
                 if index >= min_start {
                     let processed = index - min_start + 1;
                     let value = f32::from(value);
@@ -653,7 +653,7 @@ where
                 if prev.is_none() {
                     let idx = i.to_usize();
                     prev = Some(if idx > 0 {
-                        this.collect_one(idx - 1).unwrap()
+                        this.collect_one_at(idx - 1).unwrap()
                     } else {
                         v.clone()
                     });
@@ -781,7 +781,7 @@ where
                 let idx = i.to_usize();
                 if prev.is_none() {
                     prev = Some(if idx > 0 {
-                        this.collect_one(idx - 1).unwrap()
+                        this.collect_one_at(idx - 1).unwrap()
                     } else {
                         V::T::default()
                     });

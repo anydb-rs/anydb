@@ -2,9 +2,7 @@
 
 use rawdb::Database;
 use tempfile::TempDir;
-use vecdb::{
-    AnyStoredVec, EagerVec, WritableVec, ImportableVec, ReadableVec, StoredVec, Version,
-};
+use vecdb::{AnyStoredVec, EagerVec, ImportableVec, ReadableVec, StoredVec, Version, WritableVec};
 
 // ============================================================================
 // Generic Test Functions
@@ -33,7 +31,7 @@ where
 
     // Check if collected data matches what was written
     let collected = vec.collect();
-    for i in 0..1000usize {
+    (0..1000usize).for_each(|i| {
         let value = collected[i];
         let expected = i as u64 * 100;
 
@@ -43,7 +41,7 @@ where
                 i, value, expected
             );
         }
-    }
+    });
 
     println!("Test passed! All values consistent.");
 }

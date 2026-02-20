@@ -34,14 +34,14 @@ where
             let prev_start = skip.saturating_sub(lookback_len);
             let prev_end = end.saturating_sub(lookback_len);
             let prev_batch = if prev_end > prev_start {
-                source.collect_range(prev_start, prev_end)
+                source.collect_range_at(prev_start, prev_end)
             } else {
                 vec![]
             };
 
             let mut prev_idx = 0;
             let mut i = skip;
-            source.try_fold_range(skip, end, (), |(), current: A| {
+            source.try_fold_range_at(skip, end, (), |(), current: A| {
                 let previous = if i >= lookback_len {
                     let val = prev_batch[prev_idx].clone();
                     prev_idx += 1;
@@ -148,8 +148,8 @@ where
                 return Ok(());
             }
 
-            let starts_batch = window_starts.collect_range(skip, end);
-            let values_batch = values.collect_range(skip, end);
+            let starts_batch = window_starts.collect_range_at(skip, end);
+            let values_batch = values.collect_range_at(skip, end);
 
             let mut cached_start = usize::MAX;
             let mut cached_prev = f64::NAN;
@@ -161,7 +161,7 @@ where
                     compute(f64::from(current), f64::NAN)
                 } else {
                     if start_usize != cached_start {
-                        cached_prev = f64::from(values.collect_one(start_usize).unwrap());
+                        cached_prev = f64::from(values.collect_one_at(start_usize).unwrap());
                         cached_start = start_usize;
                     }
                     compute(f64::from(current), cached_prev)

@@ -87,7 +87,7 @@ where
             }
 
             let mut i = skip;
-            other.try_fold_range(skip, end, (), |(), b: A| {
+            other.try_fold_range_at(skip, end, (), |(), b: A| {
                 let (idx, v) = t((V::I::from(i), b, &*this));
                 i += 1;
                 this.checked_push(idx, v)
@@ -116,11 +116,11 @@ where
                 return Ok(());
             }
 
-            let batch2 = other2.collect_range(skip, end);
+            let batch2 = other2.collect_range_at(skip, end);
             let mut iter2 = batch2.into_iter();
             let mut i = skip;
 
-            other1.try_fold_range(skip, end, (), |(), b: A| {
+            other1.try_fold_range_at(skip, end, (), |(), b: A| {
                 let (idx, v) = t((V::I::from(i), b, iter2.next().unwrap(), &*this));
                 i += 1;
                 this.checked_push(idx, v)
@@ -155,13 +155,13 @@ where
                 return Ok(());
             }
 
-            let batch2 = other2.collect_range(skip, end);
-            let batch3 = other3.collect_range(skip, end);
+            let batch2 = other2.collect_range_at(skip, end);
+            let batch3 = other3.collect_range_at(skip, end);
             let mut iter2 = batch2.into_iter();
             let mut iter3 = batch3.into_iter();
             let mut i = skip;
 
-            other1.try_fold_range(skip, end, (), |(), b: A| {
+            other1.try_fold_range_at(skip, end, (), |(), b: A| {
                 let (idx, v) = t((
                     V::I::from(i),
                     b,
@@ -209,15 +209,15 @@ where
                 return Ok(());
             }
 
-            let batch2 = other2.collect_range(skip, end);
-            let batch3 = other3.collect_range(skip, end);
-            let batch4 = other4.collect_range(skip, end);
+            let batch2 = other2.collect_range_at(skip, end);
+            let batch3 = other3.collect_range_at(skip, end);
+            let batch4 = other4.collect_range_at(skip, end);
             let mut iter2 = batch2.into_iter();
             let mut iter3 = batch3.into_iter();
             let mut iter4 = batch4.into_iter();
             let mut i = skip;
 
-            other1.try_fold_range(skip, end, (), |(), b: A| {
+            other1.try_fold_range_at(skip, end, (), |(), b: A| {
                 let (idx, v) = t((
                     V::I::from(i),
                     b,
@@ -259,13 +259,13 @@ where
             }
 
             let mut prev_i = None;
-            let batch = other.collect_range(skip, end);
+            let batch = other.collect_range_at(skip, end);
             for (j, i) in batch.into_iter().enumerate() {
                 let v = V::T::from(skip + j);
                 if prev_i.is_some_and(|prev_i| prev_i == i) {
                     continue;
                 }
-                if this.collect_one(i.to_usize()).is_none_or(|old_v| old_v > v) {
+                if this.collect_one(i).is_none_or(|old_v| old_v > v) {
                     this.truncate_push(i, v)?;
                 }
                 prev_i.replace(i);

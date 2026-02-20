@@ -127,13 +127,13 @@ where
     S2T: VecValue,
 {
     #[inline]
-    fn for_each_range_dyn(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
+    fn for_each_range_dyn_at(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
         let to = to.min(self.len());
         let compute = self.compute;
         let s2_vals = self.source2.collect_range_dyn(from, to);
         let mut s2_iter = s2_vals.into_iter();
         let mut i = from;
-        self.source1.for_each_range_dyn(from, to, &mut |v1| {
+        self.source1.for_each_range_dyn_at(from, to, &mut |v1| {
             let v2 = s2_iter.next().unwrap();
             f(compute(I::from(i), v1, v2));
             i += 1;

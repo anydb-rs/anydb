@@ -35,7 +35,7 @@ where
 
         buf.push(b'[');
         let mut first = true;
-        self.for_each_range_dyn(from_idx, to_idx, &mut |value: V::T| {
+        self.for_each_range_dyn_at(from_idx, to_idx, &mut |value: V::T| {
             if !first {
                 buf.push(b',');
             }
@@ -52,7 +52,7 @@ where
 
     fn write_json_value(&self, from: Option<usize>, buf: &mut Vec<u8>) -> crate::Result<()> {
         let idx = from.unwrap_or(0);
-        if let Some(value) = self.collect_one(idx) {
+        if let Some(value) = self.collect_one_at(idx) {
             #[cfg(feature = "sonic-rs")]
             sonic_rs::to_writer(buf, &value)?;
             #[cfg(all(feature = "serde_json", not(feature = "sonic-rs")))]
