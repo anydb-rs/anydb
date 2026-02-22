@@ -1,6 +1,7 @@
+use std::sync::Arc;
+
 use crate::{
-    AnyVec, ReadableBoxedVec, ReadableVec, TypedVec,
-    VecIndex, VecValue, Version, short_type_name,
+    AnyVec, ReadableBoxedVec, ReadableVec, TypedVec, VecIndex, VecValue, Version, short_type_name,
 };
 
 mod transform;
@@ -24,7 +25,7 @@ where
     S1I: VecIndex,
     S1T: VecValue,
 {
-    name: String,
+    name: Arc<str>,
     base_version: Version,
     source: ReadableBoxedVec<S1I, S1T>,
     compute: ComputeFrom1<I, T, S1T>,
@@ -52,13 +53,12 @@ where
         );
 
         Self {
-            name: name.to_string(),
+            name: Arc::from(name),
             base_version: version,
             source,
             compute,
         }
     }
-
 }
 
 impl<I, T, S1I, S1T> AnyVec for LazyVecFrom1<I, T, S1I, S1T>
@@ -73,7 +73,7 @@ where
     }
 
     fn name(&self) -> &str {
-        self.name.as_str()
+        &self.name
     }
 
     fn index_type_to_string(&self) -> &'static str {
@@ -108,13 +108,78 @@ where
     S1T: VecValue,
 {
     #[inline]
-    fn for_each_range_dyn_at(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
+    fn read_into_at(&self, from: usize, to: usize, buf: &mut Vec<T>) {
+        let to = to.min(self.len());
         let compute = self.compute;
-        let mut i = from;
+        buf.reserve(to.saturating_sub(from));
+        let mut offset = from;
         self.source.for_each_range_dyn_at(from, to, &mut |v| {
-            f(compute(I::from(i), v));
-            i += 1;
+            buf.push(compute(I::from(offset), v));
+            offset += 1;
         });
+    }
+
+    #[inline]
+    fn for_each_range_dyn_at(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
+        let to = to.min(self.len());
+        let compute = self.compute;
+        let mut offset = from;
+        self.source.for_each_range_dyn_at(from, to, &mut |v| {
+            f(compute(I::from(offset), v));
+            offset += 1;
+        });
+    }
+
+    #[inline]
+    fn fold_range_at<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+    {
+        let to = to.min(self.len());
+        if from >= to {
+            return init;
+        }
+        let compute = self.compute;
+        let mut offset = from;
+        let mut acc = Some(init);
+        self.source.for_each_range_dyn_at(from, to, &mut |v| {
+            acc = Some(f(acc.take().unwrap(), compute(I::from(offset), v)));
+            offset += 1;
+        });
+        acc.unwrap()
+    }
+
+    #[inline]
+    fn try_fold_range_at<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
+        &self,
+        from: usize,
+        to: usize,
+        init: B,
+        mut f: F,
+    ) -> std::result::Result<B, E>
+    where
+        Self: Sized,
+    {
+        let to = to.min(self.len());
+        if from >= to {
+            return Ok(init);
+        }
+        let compute = self.compute;
+        let mut offset = from;
+        let mut acc: Option<std::result::Result<B, E>> = Some(Ok(init));
+        self.source.for_each_range_dyn_at(from, to, &mut |v| {
+            if let Some(Ok(a)) = acc.take() {
+                acc = Some(f(a, compute(I::from(offset), v)));
+            }
+            offset += 1;
+        });
+        acc.unwrap()
+    }
+
+    #[inline]
+    fn collect_one_at(&self, index: usize) -> Option<T> {
+        let v = self.source.collect_one_at(index)?;
+        Some((self.compute)(I::from(index), v))
     }
 }
 

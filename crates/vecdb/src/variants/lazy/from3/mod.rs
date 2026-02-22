@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use crate::{
-    AnyVec, ReadableBoxedVec, ReadableVec, TypedVec, VecIndex,
-    VecValue, Version, short_type_name,
+    AnyVec, READ_CHUNK_SIZE, ReadableBoxedVec, ReadableVec, TypedVec, VecIndex, VecValue, Version,
+    short_type_name,
 };
 
 pub type ComputeFrom3<I, T, S1T, S2T, S3T> = fn(I, S1T, S2T, S3T) -> T;
@@ -19,7 +21,7 @@ where
     S3I: VecIndex,
     S3T: VecValue,
 {
-    name: String,
+    name: Arc<str>,
     base_version: Version,
     source1: ReadableBoxedVec<S1I, S1T>,
     source2: ReadableBoxedVec<S2I, S2T>,
@@ -68,7 +70,7 @@ where
         let s3_counts = s3 == target;
 
         Self {
-            name: name.to_string(),
+            name: Arc::from(name),
             base_version: version,
             source1,
             source2,
@@ -79,7 +81,6 @@ where
             s3_counts,
         }
     }
-
 }
 
 impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> AnyVec for LazyVecFrom3<I, T, S1I, S1T, S2I, S2T, S3I, S3T>
@@ -98,7 +99,7 @@ where
     }
 
     fn name(&self) -> &str {
-        self.name.as_str()
+        &self.name
     }
 
     fn index_type_to_string(&self) -> &'static str {
@@ -106,9 +107,21 @@ where
     }
 
     fn len(&self) -> usize {
-        let len1 = if self.s1_counts { self.source1.len() } else { usize::MAX };
-        let len2 = if self.s2_counts { self.source2.len() } else { usize::MAX };
-        let len3 = if self.s3_counts { self.source3.len() } else { usize::MAX };
+        let len1 = if self.s1_counts {
+            self.source1.len()
+        } else {
+            usize::MAX
+        };
+        let len2 = if self.s2_counts {
+            self.source2.len()
+        } else {
+            usize::MAX
+        };
+        let len3 = if self.s3_counts {
+            self.source3.len()
+        } else {
+            usize::MAX
+        };
         len1.min(len2).min(len3)
     }
 
@@ -128,6 +141,49 @@ where
     }
 }
 
+impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> LazyVecFrom3<I, T, S1I, S1T, S2I, S2T, S3I, S3T>
+where
+    I: VecIndex,
+    T: VecValue,
+    S1I: VecIndex,
+    S1T: VecValue,
+    S2I: VecIndex,
+    S2T: VecValue,
+    S3I: VecIndex,
+    S3T: VecValue,
+{
+    /// Chunked iteration over all three sources with reusable buffers.
+    /// Only 3 small buffers are allocated total (capacity min(4096, range)),
+    /// reused across chunks via `clear()`.
+    #[inline]
+    fn chunked_for_each(&self, from: usize, to: usize, mut each: impl FnMut(T)) {
+        let compute = self.compute;
+        let cap = READ_CHUNK_SIZE.min(to.saturating_sub(from));
+        let mut buf1 = Vec::with_capacity(cap);
+        let mut buf2 = Vec::with_capacity(cap);
+        let mut buf3 = Vec::with_capacity(cap);
+        let mut pos = from;
+        while pos < to {
+            let end = (pos + READ_CHUNK_SIZE).min(to);
+            buf1.clear();
+            buf2.clear();
+            buf3.clear();
+            self.source1.read_into_at(pos, end, &mut buf1);
+            self.source2.read_into_at(pos, end, &mut buf2);
+            self.source3.read_into_at(pos, end, &mut buf3);
+            for (local, ((v1, v2), v3)) in buf1
+                .drain(..)
+                .zip(buf2.drain(..))
+                .zip(buf3.drain(..))
+                .enumerate()
+            {
+                each(compute(I::from(pos + local), v1, v2, v3));
+            }
+            pos = end;
+        }
+    }
+}
+
 impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> ReadableVec<I, T>
     for LazyVecFrom3<I, T, S1I, S1T, S2I, S2T, S3I, S3T>
 where
@@ -141,20 +197,66 @@ where
     S3T: VecValue,
 {
     #[inline]
-    fn for_each_range_dyn_at(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
+    fn read_into_at(&self, from: usize, to: usize, buf: &mut Vec<T>) {
         let to = to.min(self.len());
-        let compute = self.compute;
-        let s2_vals = self.source2.collect_range_dyn(from, to);
-        let s3_vals = self.source3.collect_range_dyn(from, to);
-        let mut s2_iter = s2_vals.into_iter();
-        let mut s3_iter = s3_vals.into_iter();
-        let mut i = from;
-        self.source1.for_each_range_dyn_at(from, to, &mut |v1| {
-            let v2 = s2_iter.next().unwrap();
-            let v3 = s3_iter.next().unwrap();
-            f(compute(I::from(i), v1, v2, v3));
-            i += 1;
+        buf.reserve(to.saturating_sub(from));
+        self.chunked_for_each(from, to, |v| buf.push(v));
+    }
+
+    #[inline]
+    fn for_each_range_dyn_at(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
+        self.chunked_for_each(from, to.min(self.len()), f);
+    }
+
+    #[inline]
+    fn fold_range_at<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, mut f: F) -> B
+    where
+        Self: Sized,
+    {
+        let to = to.min(self.len());
+        if from >= to {
+            return init;
+        }
+        let mut acc = Some(init);
+        self.chunked_for_each(from, to, |v| {
+            acc = Some(f(acc.take().unwrap(), v));
         });
+        acc.unwrap()
+    }
+
+    #[inline]
+    fn try_fold_range_at<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
+        &self,
+        from: usize,
+        to: usize,
+        init: B,
+        mut f: F,
+    ) -> std::result::Result<B, E>
+    where
+        Self: Sized,
+    {
+        let to = to.min(self.len());
+        if from >= to {
+            return Ok(init);
+        }
+        let mut acc: Option<std::result::Result<B, E>> = Some(Ok(init));
+        self.chunked_for_each(from, to, |v| {
+            if let Some(Ok(a)) = acc.take() {
+                acc = Some(f(a, v));
+            }
+        });
+        acc.unwrap()
+    }
+
+    #[inline]
+    fn collect_one_at(&self, index: usize) -> Option<T> {
+        if index >= self.len() {
+            return None;
+        }
+        let v1 = self.source1.collect_one_at(index)?;
+        let v2 = self.source2.collect_one_at(index)?;
+        let v3 = self.source3.collect_one_at(index)?;
+        Some((self.compute)(I::from(index), v1, v2, v3))
     }
 }
 

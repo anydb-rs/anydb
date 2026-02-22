@@ -35,7 +35,7 @@ where
 
         buf.push(b'[');
         let mut first = true;
-        self.for_each_range_dyn_at(from_idx, to_idx, &mut |value: V::T| {
+        self.for_each_range_at(from_idx, to_idx, |value: V::T| {
             if !first {
                 buf.push(b',');
             }

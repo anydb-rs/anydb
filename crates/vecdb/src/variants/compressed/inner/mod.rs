@@ -612,6 +612,54 @@ where
     S: CompressionStrategy<T>,
 {
     #[inline]
+    fn read_into_at(&self, from: usize, to: usize, buf: &mut Vec<T>) {
+        let len = self.base.len();
+        let from = from.min(len);
+        let to = to.min(len);
+        if from >= to {
+            return;
+        }
+
+        buf.reserve(to - from);
+        let stored_len = self.stored_len();
+
+        // Stored portion: page-based decompress + extend_from_slice.
+        // Each page decompresses into a reusable buffer, then we memcpy
+        // the relevant slice — much faster than per-element push.
+        if from < stored_len {
+            let stored_to = to.min(stored_len);
+            let reader = self.create_reader();
+            let pages = self.pages.read();
+            let start_page = Self::index_to_page_index(from);
+            let end_page = Self::index_to_page_index(stored_to - 1);
+            let mut page_buf = Vec::with_capacity(Self::PER_PAGE);
+
+            for page_idx in start_page..=end_page {
+                let page_start = Self::page_index_to_index(page_idx);
+                let page = pages
+                    .get(page_idx)
+                    .expect("page should exist after bounds check");
+                let compressed = reader.unchecked_read(page.start as usize, page.bytes as usize);
+                S::decompress_into(compressed, page.values as usize, &mut page_buf)
+                    .expect("decompression failed in read_into_at");
+
+                let local_from = from.saturating_sub(page_start);
+                let local_to = (stored_to - page_start).min(page_buf.len());
+                buf.extend_from_slice(&page_buf[local_from..local_to]);
+            }
+        }
+
+        // Pushed portion: direct slice copy.
+        if to > stored_len {
+            let push_from = from.max(stored_len);
+            let pushed = self.base.pushed();
+            let start = push_from - stored_len;
+            let end = (to - stored_len).min(pushed.len());
+            buf.extend_from_slice(&pushed[start..end]);
+        }
+    }
+
+    #[inline]
     fn for_each_range_dyn_at(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
         self.fold_range_at(from, to, (), |(), v| f(v));
     }

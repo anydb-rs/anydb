@@ -1,12 +1,8 @@
-use crate::{ReadableVec, WritableVec, ImportableVec, TypedVec, VecIndex, VecValue};
+use crate::{ImportableVec, ReadableVec, TypedVec, VecIndex, VecValue, WritableVec};
 
 /// Super trait combining all common stored vec traits.
 pub trait StoredVec:
-    ImportableVec
-    + TypedVec
-    + WritableVec<Self::I, Self::T>
-    + ReadableVec<Self::I, Self::T>
-    + Clone
+    ImportableVec + TypedVec + WritableVec<Self::I, Self::T> + ReadableVec<Self::I, Self::T> + Clone
 where
     Self::I: VecIndex,
     Self::T: VecValue,

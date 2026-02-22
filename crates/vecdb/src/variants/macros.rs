@@ -251,6 +251,11 @@ macro_rules! impl_vec_wrapper {
             T: $value_trait,
         {
             #[inline]
+            fn read_into_at(&self, from: usize, to: usize, buf: &mut Vec<T>) {
+                $crate::ReadableVec::<I, T>::read_into_at(&self.0, from, to, buf)
+            }
+
+            #[inline]
             fn for_each_range_dyn_at(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
                 $crate::ReadableVec::<I, T>::for_each_range_dyn_at(&self.0, from, to, f)
             }

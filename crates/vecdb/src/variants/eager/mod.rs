@@ -279,6 +279,11 @@ where
     V: StoredVec,
 {
     #[inline]
+    fn read_into_at(&self, from: usize, to: usize, buf: &mut Vec<V::T>) {
+        self.0.read_into_at(from, to, buf)
+    }
+
+    #[inline]
     fn for_each_range_dyn_at(&self, from: usize, to: usize, f: &mut dyn FnMut(V::T)) {
         self.0.for_each_range_dyn_at(from, to, f)
     }

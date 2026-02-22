@@ -46,7 +46,7 @@ pub trait AnyVec: Send + Sync {
                     to as usize
                 }
             }),
-            u64::from(self.version()),
+            usize::from(self.version()),
             u64::from(stamp),
         )
     }

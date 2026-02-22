@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     collections::VecDeque,
     ops::{AddAssign, Div, Sub, SubAssign},
 };
@@ -181,6 +182,10 @@ where
         A: VecValue,
         V::T: From<A> + Default + AddAssign + SubAssign,
     {
+        // Cursor for the leaving-value reads — persists across batches so each
+        // compressed page is decompressed at most once instead of once per element.
+        let mut leaving = values.cursor();
+
         self.compute_init(window_starts.version() + values.version(), max_from, exit, |this| {
             let skip = this.len();
             let source_len = window_starts.len().min(values.len());
@@ -193,6 +198,10 @@ where
                 let prev_idx = skip - 1;
                 let prev_start = window_starts.collect_one_at(prev_idx).unwrap();
                 let sum = this.collect_one_at(prev_idx).unwrap();
+                // Position cursor at the current window start.
+                if leaving.position() < prev_start.to_usize() {
+                    leaving.advance(prev_start.to_usize() - leaving.position());
+                }
                 (sum, prev_start)
             } else {
                 (V::T::default(), V::I::from(0))
@@ -206,13 +215,10 @@ where
                 running_sum += V::T::from(value);
 
                 if prev_start < start {
-                    values.for_each_range_dyn_at(
-                        prev_start.to_usize(),
-                        start.to_usize(),
-                        &mut |v: A| {
-                            running_sum -= V::T::from(v);
-                        },
-                    );
+                    let n = start.to_usize() - prev_start.to_usize();
+                    leaving.for_each(n, |v: A| {
+                        running_sum -= V::T::from(v);
+                    });
                     prev_start = start;
                 }
 
@@ -237,6 +243,10 @@ where
         f64: From<A> + From<V::T>,
         V::T: From<f64> + Default,
     {
+        // Cursor for the leaving-value reads — persists across batches so each
+        // compressed page is decompressed at most once instead of once per element.
+        let mut leaving = values.cursor();
+
         self.compute_init(window_starts.version() + values.version(), max_from, exit, |this| {
             let skip = this.len();
             let source_len = window_starts.len().min(values.len());
@@ -252,6 +262,9 @@ where
                 let prev_start = window_starts.collect_one_at(prev_idx).unwrap();
                 let stored_avg = f64::from(this.collect_one_at(prev_idx).unwrap());
                 let window_count = prev_idx + 1 - prev_start.to_usize();
+                if leaving.position() < prev_start.to_usize() {
+                    leaving.advance(prev_start.to_usize() - leaving.position());
+                }
                 (stored_avg * window_count as f64, prev_start)
             } else {
                 (0.0_f64, V::I::from(0))
@@ -265,13 +278,10 @@ where
                 running_sum += f64::from(value);
 
                 if prev_start < start {
-                    values.for_each_range_dyn_at(
-                        prev_start.to_usize(),
-                        start.to_usize(),
-                        &mut |v: A| {
-                            running_sum -= f64::from(v);
-                        },
-                    );
+                    let n = start.to_usize() - prev_start.to_usize();
+                    leaving.for_each(n, |v: A| {
+                        running_sum -= f64::from(v);
+                    });
                     prev_start = start;
                 }
 
@@ -300,6 +310,10 @@ where
         f64: From<A> + From<B> + From<V::T>,
         V::T: From<f64>,
     {
+        // Cursor for the leaving-value reads — persists across batches so each
+        // compressed page is decompressed at most once instead of once per element.
+        let mut leaving = numerator.cursor();
+
         self.compute_init(
             window_starts.version() + numerator.version() + denominator.version(),
             max_from,
@@ -324,9 +338,17 @@ where
                 let prev_denom = f64::from(denominator.collect_one_at(prev_idx).unwrap());
                 if prev_denom != 0.0 {
                     let stored_ratio = f64::from(this.collect_one_at(prev_idx).unwrap());
+                    if leaving.position() < prev_start.to_usize() {
+                        leaving.advance(prev_start.to_usize() - leaving.position());
+                    }
                     (stored_ratio * prev_denom, prev_start)
                 } else {
                     let mut sum = 0.0_f64;
+                    // Full scan fallback — position cursor at window start
+                    // so the main loop can subtract leaving values correctly.
+                    if leaving.position() < prev_start.to_usize() {
+                        leaving.advance(prev_start.to_usize() - leaving.position());
+                    }
                     numerator.for_each_range_dyn_at(
                         prev_start.to_usize(),
                         prev_idx + 1,
@@ -354,13 +376,10 @@ where
                 running_sum += f64::from(num_val);
 
                 if prev_start < start {
-                    numerator.for_each_range_dyn_at(
-                        prev_start.to_usize(),
-                        start.to_usize(),
-                        &mut |v: A| {
-                            running_sum -= f64::from(v);
-                        },
-                    );
+                    let n = start.to_usize() - prev_start.to_usize();
+                    leaving.for_each(n, |v: A| {
+                        running_sum -= f64::from(v);
+                    });
                     prev_start = start;
                 }
 
@@ -478,12 +497,20 @@ where
         fn median(buf: &VecDeque<f32>, scratch: &mut Vec<f32>) -> f32 {
             scratch.clear();
             scratch.extend(buf.iter().copied());
-            scratch.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let cmp =
+                |a: &f32, b: &f32| a.partial_cmp(b).unwrap_or(Ordering::Equal);
+            let mid = scratch.len() / 2;
+            scratch.select_nth_unstable_by(mid, cmp);
             if scratch.len().is_multiple_of(2) {
-                let mid = scratch.len() / 2;
-                (scratch[mid - 1] + scratch[mid]) / 2.0
+                let upper = scratch[mid];
+                let lower = scratch[..mid]
+                    .iter()
+                    .copied()
+                    .max_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
+                    .unwrap_or(upper);
+                (lower + upper) / 2.0
             } else {
-                scratch[scratch.len() / 2]
+                scratch[mid]
             }
         }
 

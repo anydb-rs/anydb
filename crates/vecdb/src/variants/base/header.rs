@@ -7,7 +7,7 @@ use crate::{Bytes, Error, Result, Stamp, Version};
 
 use super::Format;
 
-const HEADER_VERSION: Version = Version::ONE;
+const HEADER_VERSION: Version = Version::TWO;
 pub const HEADER_OFFSET: usize = size_of::<HeaderInner>();
 
 #[derive(Debug, Clone)]
@@ -88,7 +88,6 @@ struct HeaderInner {
     pub computed_version: Version,
     pub stamp: Stamp,
     pub format: Format,
-    pub padding: [u8; 31],
 }
 
 impl HeaderInner {
@@ -99,7 +98,6 @@ impl HeaderInner {
             computed_version: Version::default(),
             stamp: Stamp::default(),
             format,
-            padding: Default::default(),
         };
         header.write(region)?;
         Ok(header)
@@ -180,19 +178,17 @@ impl HeaderInner {
                 received: len,
             });
         }
-        let header_version = Version::from_bytes(&bytes[0..8])?;
-        let vec_version = Version::from_bytes(&bytes[8..16])?;
-        let computed_version = Version::from_bytes(&bytes[16..24])?;
-        let stamp = Stamp::from_bytes(&bytes[24..32])?;
-        let format = Format::from_bytes(&bytes[32..33])?;
-        let padding = [0u8; 31];
+        let header_version = Version::from_bytes(&bytes[0..4])?;
+        let vec_version = Version::from_bytes(&bytes[4..8])?;
+        let computed_version = Version::from_bytes(&bytes[8..12])?;
+        let stamp = Stamp::from_bytes(&bytes[12..20])?;
+        let format = Format::from_bytes(&bytes[20..21])?;
         Ok(Self {
             header_version,
             vec_version,
             computed_version,
             stamp,
             format,
-            padding,
         })
     }
 }
