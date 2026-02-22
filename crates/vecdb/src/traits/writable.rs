@@ -24,9 +24,6 @@ where
 {
     const SIZE_OF_T: usize = size_of::<T>();
 
-    // ── Required methods (each impl provides) ────────────────────────
-
-    /// Pushes a new value to the end of the vector.
     fn push(&mut self, value: T);
 
     /// Returns the current pushed (uncommitted) values.
@@ -57,8 +54,6 @@ where
     /// Saves type-specific rollback state after the rollback loop completes.
     #[doc(hidden)]
     fn save_rollback_state(&mut self);
-
-    // ── Provided methods ─────────────────────────────────────────────
 
     /// Rolls back changes to before the given stamp.
     fn rollback_before(&mut self, stamp: Stamp) -> Result<Stamp> {

@@ -16,8 +16,8 @@ pub use checked_sub::*;
 pub use saturating_add::*;
 
 use crate::{
-    AnyStoredVec, AnyVec, Exit, WritableVec, Header, ImportOptions,
-    ImportableVec, ReadableVec, Result, Stamp, StoredVec, TypedVec,
+    AnyStoredVec, AnyVec, Exit, ReadableBoxedVec, ReadableCloneableVec, WritableVec, Header,
+    ImportOptions, ImportableVec, ReadableVec, Result, Stamp, StoredVec, TypedVec,
     Version,
     traits::writable::MAX_CACHE_SIZE,
 };
@@ -39,7 +39,7 @@ use crate::{
 /// - Arithmetic: `compute_add()`, `compute_subtract()`, `compute_multiply()`, `compute_divide()`
 /// - Moving statistics: `compute_sma()`, `compute_ema()`, `compute_sum()`, `compute_max()`, `compute_min()`
 /// - Lookback calculations: `compute_change()`, `compute_percentage_change()`
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[must_use = "Vector should be stored to keep data accessible"]
 pub struct EagerVec<V>(V);
 
@@ -278,7 +278,12 @@ impl<V> ReadableVec<V::I, V::T> for EagerVec<V>
 where
     V: StoredVec,
 {
-    #[inline]
+    #[inline(always)]
+    fn collect_one_at(&self, index: usize) -> Option<V::T> {
+        self.0.collect_one_at(index)
+    }
+
+    #[inline(always)]
     fn read_into_at(&self, from: usize, to: usize, buf: &mut Vec<V::T>) {
         self.0.read_into_at(from, to, buf)
     }
@@ -314,6 +319,28 @@ where
         Self: Sized,
     {
         self.0.try_fold_range_at(from, to, init, f)
+    }
+}
+
+impl<V> ReadableCloneableVec<V::I, V::T> for EagerVec<V>
+where
+    V: StoredVec,
+{
+    #[inline]
+    fn read_only_boxed_clone(&self) -> ReadableBoxedVec<V::I, V::T> {
+        self.0.read_only_boxed_clone()
+    }
+}
+
+impl<V> StoredVec for EagerVec<V>
+where
+    V: StoredVec,
+{
+    type ReadOnly = V::ReadOnly;
+
+    #[inline]
+    fn read_only_clone(&self) -> Self::ReadOnly {
+        self.0.read_only_clone()
     }
 }
 

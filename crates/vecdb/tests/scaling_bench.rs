@@ -13,7 +13,7 @@ use std::{
 
 use rawdb::Database;
 use tempfile::TempDir;
-use vecdb::{AnyStoredVec, WritableVec, ImportableVec, Result, ReadableVec, Version};
+use vecdb::{AnyStoredVec, AnyVec, ImportableVec, ReadableVec, Result, StoredVec, Version, WritableVec};
 
 #[cfg(feature = "pco")]
 use vecdb::PcoVec;
@@ -25,6 +25,7 @@ fn setup_test_db() -> Result<(Database, TempDir)> {
 }
 
 /// Test configuration
+#[cfg(feature = "pco")]
 struct Config {
     num_readers: usize,
     write_interval_us: u64,
@@ -33,6 +34,7 @@ struct Config {
 }
 
 /// Run a single benchmark with the given configuration
+#[cfg(feature = "pco")]
 fn run_benchmark(config: &Config) -> Result<(usize, usize, usize)> {
     let (db, _temp) = setup_test_db()?;
     let version = Version::ONE;
@@ -52,7 +54,7 @@ fn run_benchmark(config: &Config) -> Result<(usize, usize, usize)> {
     // Spawn readers
     let reader_handles: Vec<_> = (0..config.num_readers)
         .map(|_| {
-            let reader = writer.clone();
+            let reader = writer.read_only_clone();
             let stop = stop.clone();
             let reads = reads_completed.clone();
             let errs = read_errors.clone();
@@ -62,7 +64,7 @@ fn run_benchmark(config: &Config) -> Result<(usize, usize, usize)> {
                 let mut local_errors = 0usize;
 
                 while !stop.load(Ordering::Relaxed) {
-                    let len = reader.stored_len();
+                    let len = reader.len();
                     if len > 0 {
                         let idx = len - 1;
                         if let Some(v) = reader.collect_one(idx) {

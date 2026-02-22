@@ -2,7 +2,7 @@ use rawdb::likely;
 
 use crate::{Error, ValueStrategy, Result};
 
-/// Trait for compression strategies used by CompressedVecInner.
+/// Trait for compression strategies used by ReadWriteCompressedVec.
 pub trait CompressionStrategy<T>: ValueStrategy<T> {
     /// Compress a slice of values into bytes.
     fn compress(values: &[T]) -> Result<Vec<u8>>;

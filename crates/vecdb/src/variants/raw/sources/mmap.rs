@@ -2,9 +2,11 @@ use std::marker::PhantomData;
 
 use rawdb::Reader;
 
+use rawdb::Region;
+
 use crate::{AnyStoredVec, HEADER_OFFSET, VecIndex, VecValue};
 
-use super::super::{RawStrategy, RawVecInner};
+use super::super::{RawStrategy, ReadWriteRawVec};
 
 /// Read-only mmap-backed source over a raw (uncompressed) vector.
 ///
@@ -37,9 +39,17 @@ where
 {
     const SIZE_OF_T: usize = size_of::<T>();
 
-    pub(crate) fn new(vec: &RawVecInner<I, T, S>, from: usize, to: usize) -> Self {
-        let reader = vec.region().create_reader();
-        let stored_len = vec.stored_len();
+    pub(crate) fn new(vec: &ReadWriteRawVec<I, T, S>, from: usize, to: usize) -> Self {
+        Self::new_from_parts(vec.region(), vec.stored_len(), from, to)
+    }
+
+    pub(crate) fn new_from_parts(
+        region: &Region,
+        stored_len: usize,
+        from: usize,
+        to: usize,
+    ) -> Self {
+        let reader = region.create_reader();
         let from = from.min(stored_len);
         let to = to.min(stored_len);
         let slice = reader.prefixed(HEADER_OFFSET);

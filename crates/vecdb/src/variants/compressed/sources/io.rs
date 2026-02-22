@@ -1,14 +1,15 @@
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom},
+    sync::Arc,
 };
 
-use parking_lot::RwLockReadGuard;
-use rawdb::RegionMetadata;
+use parking_lot::{RwLock, RwLockReadGuard};
+use rawdb::{Region, RegionMetadata};
 
 use crate::{AnyStoredVec, BUFFER_SIZE, Pages, VecIndex, VecValue, unlikely};
 
-use super::super::inner::{CompressedVecInner, CompressionStrategy, MAX_UNCOMPRESSED_PAGE_SIZE};
+use super::super::inner::{ReadWriteCompressedVec, CompressionStrategy, MAX_UNCOMPRESSED_PAGE_SIZE};
 
 /// Buffered file I/O source for reading stored compressed data.
 ///
@@ -40,12 +41,21 @@ where
     const PER_PAGE: usize = MAX_UNCOMPRESSED_PAGE_SIZE / Self::SIZE_OF_T;
     const NO_PAGE: usize = usize::MAX;
 
-    pub(crate) fn new(vec: &'a CompressedVecInner<I, T, S>, from: usize, to: usize) -> Self {
-        let region_lock = vec.region().meta();
+    pub(crate) fn new(vec: &'a ReadWriteCompressedVec<I, T, S>, from: usize, to: usize) -> Self {
+        Self::new_from_parts(vec.region(), vec.pages(), vec.stored_len(), from, to)
+    }
+
+    pub(crate) fn new_from_parts(
+        region: &'a Region,
+        pages: &'a Arc<RwLock<Pages>>,
+        stored_len: usize,
+        from: usize,
+        to: usize,
+    ) -> Self {
+        let region_lock = region.meta();
         let region_start = region_lock.start() as u64;
-        let file = vec.region().open_db_read_only_file().expect("open file");
-        let pages = vec.pages().read();
-        let stored_len = vec.stored_len();
+        let file = region.open_db_read_only_file().expect("open file");
+        let pages = pages.read();
         let from = from.min(stored_len);
         let to = to.min(stored_len);
 

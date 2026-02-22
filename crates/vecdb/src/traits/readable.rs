@@ -253,7 +253,7 @@ pub trait ReadableVec<I: VecIndex, T: VecValue>: AnyVec {
     /// Uses `for_each_range_dyn_at` with a stack-local `Option`. Stored vecs
     /// override `for_each_range_dyn_at` → `fold_range_at` for zero-alloc reads;
     /// lazy vecs override `collect_one_at` directly.
-    #[inline]
+    #[inline(always)]
     fn collect_one_at(&self, index: usize) -> Option<T> {
         if index >= self.len() {
             return None;
@@ -392,23 +392,23 @@ pub trait ReadableVec<I: VecIndex, T: VecValue>: AnyVec {
 
 /// Trait for readable vectors that can be cloned as trait objects.
 pub trait ReadableCloneableVec<I: VecIndex, T: VecValue>: ReadableVec<I, T> {
-    fn boxed_clone(&self) -> Box<dyn ReadableCloneableVec<I, T>>;
+    fn read_only_boxed_clone(&self) -> Box<dyn ReadableCloneableVec<I, T>>;
 }
 
 impl<I: VecIndex, T: VecValue, U> ReadableCloneableVec<I, T> for U
 where
     U: 'static + ReadableVec<I, T> + Clone,
 {
-    fn boxed_clone(&self) -> Box<dyn ReadableCloneableVec<I, T>> {
+    fn read_only_boxed_clone(&self) -> Box<dyn ReadableCloneableVec<I, T>> {
         Box::new(self.clone())
     }
 }
 
 impl<I: VecIndex, T: VecValue> Clone for Box<dyn ReadableCloneableVec<I, T>> {
     fn clone(&self) -> Self {
-        self.boxed_clone()
+        self.read_only_boxed_clone()
     }
 }
 
-/// Type alias for boxed cloneable readable vectors.
+/// Type alias for boxed read-only vectors.
 pub type ReadableBoxedVec<I, T> = Box<dyn ReadableCloneableVec<I, T>>;

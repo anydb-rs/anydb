@@ -1,8 +1,8 @@
 use rawdb::Reader;
 
-use crate::{AnyStoredVec, Format, HEADER_OFFSET, VecIndex, impl_vec_wrapper};
+use crate::{AnyStoredVec, Format, HEADER_OFFSET, ReadOnlyRawVec, VecIndex, impl_vec_wrapper};
 
-use super::RawVecInner;
+use super::ReadWriteRawVec;
 
 mod strategy;
 mod value;
@@ -15,7 +15,7 @@ pub use value::*;
 /// Uses the `zerocopy` crate for direct memory-mapped access without copying, providing
 /// the fastest possible performance. Values are stored in **NATIVE byte order**.
 ///
-/// Like `BytesVec`, this wraps `RawVecInner` and supports:
+/// Like `BytesVec`, this wraps `ReadWriteRawVec` and supports:
 /// - Holes (deleted indices)
 /// - Updated values (modifications to stored data)
 /// - Push/rollback operations
@@ -37,9 +37,9 @@ pub use value::*;
 /// Use `BytesVec` when:
 /// - Cross-platform compatibility is needed
 /// - Sharing data between different architectures
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[must_use = "Vector should be stored to keep data accessible"]
-pub struct ZeroCopyVec<I, T>(pub(crate) RawVecInner<I, T, ZeroCopyStrategy<T>>);
+pub struct ZeroCopyVec<I, T>(pub(crate) ReadWriteRawVec<I, T, ZeroCopyStrategy<T>>);
 
 impl<I, T> ZeroCopyVec<I, T>
 where
@@ -98,7 +98,8 @@ where
 
 impl_vec_wrapper!(
     ZeroCopyVec,
-    RawVecInner<I, T, ZeroCopyStrategy<T>>,
+    ReadWriteRawVec<I, T, ZeroCopyStrategy<T>>,
     ZeroCopyVecValue,
-    Format::ZeroCopy
+    Format::ZeroCopy,
+    ReadOnlyRawVec<I, T, ZeroCopyStrategy<T>>
 );

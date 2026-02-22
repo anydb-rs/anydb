@@ -4,7 +4,7 @@
 /// ```ignore
 /// impl_vec_wrapper!(
 ///     LZ4Vec,
-///     CompressedVecInner<I, T, LZ4Strategy<T>>,
+///     ReadWriteCompressedVec<I, T, LZ4Strategy<T>>,
 ///     LZ4VecValue,
 ///     Format::LZ4,
 /// );
@@ -19,7 +19,7 @@
 /// - `WritableVec`
 /// - `ReadableVec` (delegates `for_each_range_dyn` / `fold_range` to inner)
 macro_rules! impl_vec_wrapper {
-    ($wrapper:ident, $inner:ty, $value_trait:ident, $format:expr) => {
+    ($wrapper:ident, $inner:ty, $value_trait:ident, $format:expr, $read_only:ty) => {
         impl<I, T> ::std::ops::Deref for $wrapper<I, T> {
             type Target = $inner;
 
@@ -245,12 +245,41 @@ macro_rules! impl_vec_wrapper {
             }
         }
 
-        impl<I, T> $crate::ReadableVec<I, T> for $wrapper<I, T>
+        impl<I, T> $crate::ReadableCloneableVec<I, T> for $wrapper<I, T>
         where
             I: $crate::VecIndex,
             T: $value_trait,
         {
             #[inline]
+            fn read_only_boxed_clone(&self) -> $crate::ReadableBoxedVec<I, T> {
+                Box::new(self.0.read_only_clone())
+            }
+        }
+
+        impl<I, T> $crate::StoredVec for $wrapper<I, T>
+        where
+            I: $crate::VecIndex,
+            T: $value_trait,
+        {
+            type ReadOnly = $read_only;
+
+            #[inline]
+            fn read_only_clone(&self) -> Self::ReadOnly {
+                self.0.read_only_clone()
+            }
+        }
+
+        impl<I, T> $crate::ReadableVec<I, T> for $wrapper<I, T>
+        where
+            I: $crate::VecIndex,
+            T: $value_trait,
+        {
+            #[inline(always)]
+            fn collect_one_at(&self, index: usize) -> Option<T> {
+                $crate::ReadableVec::<I, T>::collect_one_at(&self.0, index)
+            }
+
+            #[inline(always)]
             fn read_into_at(&self, from: usize, to: usize, buf: &mut Vec<T>) {
                 $crate::ReadableVec::<I, T>::read_into_at(&self.0, from, to, buf)
             }

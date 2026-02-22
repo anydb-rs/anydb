@@ -1,6 +1,4 @@
-/// Wrapper that tracks both current and previous values for rollback support.
-///
-/// Used for types where both current and previous are the same type and cloneable.
+/// Tracks current and previous values for rollback support.
 #[derive(Debug, Clone)]
 pub struct WithPrev<T> {
     current: T,
@@ -8,7 +6,6 @@ pub struct WithPrev<T> {
 }
 
 impl<T> WithPrev<T> {
-    /// Creates a new WithPrev with the same value for current and previous.
     pub fn new(value: T) -> Self
     where
         T: Clone,
@@ -19,31 +16,27 @@ impl<T> WithPrev<T> {
         }
     }
 
-    /// Returns a reference to the current value.
     #[inline(always)]
     pub fn current(&self) -> &T {
         &self.current
     }
 
-    /// Returns a mutable reference to the current value.
     #[inline]
     pub fn current_mut(&mut self) -> &mut T {
         &mut self.current
     }
 
-    /// Returns a reference to the previous value.
     #[inline(always)]
     pub fn previous(&self) -> &T {
         &self.previous
     }
 
-    /// Returns a mutable reference to the previous value.
     #[inline]
     pub fn previous_mut(&mut self) -> &mut T {
         &mut self.previous
     }
 
-    /// Saves the current value to previous.
+    /// Copies current into previous.
     #[inline]
     pub fn save(&mut self)
     where
@@ -52,7 +45,7 @@ impl<T> WithPrev<T> {
         self.previous.clone_from(&self.current);
     }
 
-    /// Restores the previous value to current.
+    /// Copies previous into current.
     #[inline]
     pub fn restore(&mut self)
     where
@@ -61,13 +54,11 @@ impl<T> WithPrev<T> {
         self.current.clone_from(&self.previous);
     }
 
-    /// Swaps current and previous values.
     #[inline]
     pub fn swap(&mut self) {
         std::mem::swap(&mut self.current, &mut self.previous);
     }
 
-    /// Takes the current value, replacing it with the default.
     #[inline]
     pub fn take_current(&mut self) -> T
     where
@@ -76,7 +67,6 @@ impl<T> WithPrev<T> {
         std::mem::take(&mut self.current)
     }
 
-    /// Takes the previous value, replacing it with the default.
     #[inline]
     pub fn take_previous(&mut self) -> T
     where
@@ -85,7 +75,6 @@ impl<T> WithPrev<T> {
         std::mem::take(&mut self.previous)
     }
 
-    /// Clears both current and previous values.
     #[inline]
     pub fn clear(&mut self)
     where
@@ -95,7 +84,6 @@ impl<T> WithPrev<T> {
         self.previous = T::default();
     }
 
-    /// Clears only the previous value.
     #[inline]
     pub fn clear_previous(&mut self)
     where

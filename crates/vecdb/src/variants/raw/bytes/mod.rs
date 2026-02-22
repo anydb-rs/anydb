@@ -1,6 +1,6 @@
-use crate::{Format, impl_vec_wrapper};
+use crate::{Format, ReadOnlyRawVec, impl_vec_wrapper};
 
-use super::RawVecInner;
+use super::ReadWriteRawVec;
 
 mod strategy;
 mod r#trait;
@@ -15,7 +15,7 @@ pub use value::*;
 /// Uses the `Bytes` trait to serialize values with `to_bytes()/from_bytes()` in
 /// **LITTLE-ENDIAN** format, ensuring **portability across different endianness systems**.
 ///
-/// Like `ZeroCopyVec`, this wraps `RawVecInner` and supports:
+/// Like `ZeroCopyVec`, this wraps `ReadWriteRawVec` and supports:
 /// - Holes (deleted indices)
 /// - Updated values (modifications to stored data)
 /// - Push/rollback operations
@@ -32,13 +32,14 @@ pub use value::*;
 /// Use `ZeroCopyVec` when:
 /// - Maximum performance is critical
 /// - Data stays on the same architecture
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[must_use = "Vector should be stored to keep data accessible"]
-pub struct BytesVec<I, T>(pub(crate) RawVecInner<I, T, BytesStrategy<T>>);
+pub struct BytesVec<I, T>(pub(crate) ReadWriteRawVec<I, T, BytesStrategy<T>>);
 
 impl_vec_wrapper!(
     BytesVec,
-    RawVecInner<I, T, BytesStrategy<T>>,
+    ReadWriteRawVec<I, T, BytesStrategy<T>>,
     BytesVecValue,
-    Format::Bytes
+    Format::Bytes,
+    ReadOnlyRawVec<I, T, BytesStrategy<T>>
 );

@@ -1,4 +1,4 @@
-use crate::{CompressedVecInner, Format, impl_vec_wrapper};
+use crate::{ReadWriteCompressedVec, Format, ReadOnlyCompressedVec, impl_vec_wrapper};
 
 mod strategy;
 mod r#trait;
@@ -23,13 +23,14 @@ pub use value::*;
 /// - Numeric data dominates (integers, floats)
 /// - Storage space is critical
 /// - Sequential access patterns are common
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[must_use = "Vector should be stored to keep data accessible"]
-pub struct PcoVec<I, T>(CompressedVecInner<I, T, PcodecStrategy<T>>);
+pub struct PcoVec<I, T>(ReadWriteCompressedVec<I, T, PcodecStrategy<T>>);
 
 impl_vec_wrapper!(
     PcoVec,
-    CompressedVecInner<I, T, PcodecStrategy<T>>,
+    ReadWriteCompressedVec<I, T, PcodecStrategy<T>>,
     PcoVecValue,
-    Format::Pco
+    Format::Pco,
+    ReadOnlyCompressedVec<I, T, PcodecStrategy<T>>
 );

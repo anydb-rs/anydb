@@ -1,10 +1,10 @@
 use std::marker::PhantomData;
 
-use rawdb::Reader;
+use rawdb::{Reader, Region};
 
-use crate::{AnyStoredVec, HEADER_OFFSET, VecIndex, VecValue};
+use crate::{AnyStoredVec, HEADER_OFFSET, ReadOnlyRawVec, VecIndex, VecValue};
 
-use super::super::{RawStrategy, RawVecInner};
+use super::super::{RawStrategy, ReadWriteRawVec};
 
 /// Read-only random-access handle into a raw vector's stored data.
 ///
@@ -30,12 +30,8 @@ where
 {
     const SIZE_OF_T: usize = size_of::<T>();
 
-    pub fn new(vec: &RawVecInner<I, T, S>) -> Self
-    where
-        I: VecIndex,
-    {
-        let reader = vec.region().create_reader();
-        let stored_len = vec.stored_len();
+    pub(crate) fn from_region(region: &Region, stored_len: usize) -> Self {
+        let reader = region.create_reader();
         let slice = reader.prefixed(HEADER_OFFSET);
         let ptr = slice.as_ptr();
 
@@ -45,6 +41,20 @@ where
             stored_len,
             _marker: PhantomData,
         }
+    }
+
+    pub fn from_read_write(vec: &ReadWriteRawVec<I, T, S>) -> Self
+    where
+        I: VecIndex,
+    {
+        Self::from_region(vec.region(), vec.stored_len())
+    }
+
+    pub fn from_read_only(vec: &ReadOnlyRawVec<I, T, S>) -> Self
+    where
+        I: VecIndex,
+    {
+        Self::from_region(vec.region(), vec.stored_len())
     }
 
     /// Returns the value at `index`.

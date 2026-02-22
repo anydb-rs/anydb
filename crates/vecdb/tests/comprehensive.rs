@@ -1,12 +1,12 @@
 //! Comprehensive tests for RawVec functionality (take, holes, update, collect_holed).
 //!
-//! These tests are specific to BytesVec and ZeroCopyVec which implement RawVecInner.
+//! These tests are specific to BytesVec and ZeroCopyVec which implement ReadWriteRawVec.
 
 use rawdb::Database;
 use std::collections::BTreeSet;
 use std::ops::DerefMut;
 use tempfile::TempDir;
-use vecdb::{RawVecInner, Reader, Result, Stamp, StoredVec, Version};
+use vecdb::{ReadWriteRawVec, Reader, Result, Stamp, StoredVec, Version};
 
 // ============================================================================
 // Test Setup
@@ -31,32 +31,32 @@ pub trait RawVecOps {
     fn create_reader(&self) -> Reader;
 }
 
-impl<S> RawVecOps for RawVecInner<usize, u32, S>
+impl<S> RawVecOps for ReadWriteRawVec<usize, u32, S>
 where
     S: vecdb::RawStrategy<u32>,
 {
     fn take(&mut self, index: usize, reader: &Reader) -> Result<Option<u32>> {
-        RawVecInner::take(self, index, reader)
+        ReadWriteRawVec::take(self, index, reader)
     }
 
     fn update(&mut self, index: usize, value: u32) -> Result<()> {
-        RawVecInner::update(self, index, value)
+        ReadWriteRawVec::update(self, index, value)
     }
 
     fn holes(&self) -> &BTreeSet<usize> {
-        RawVecInner::holes(self)
+        ReadWriteRawVec::holes(self)
     }
 
     fn collect_holed(&self) -> Result<Vec<Option<u32>>> {
-        RawVecInner::collect_holed(self)
+        ReadWriteRawVec::collect_holed(self)
     }
 
     fn get_any_or_read(&self, index: usize, reader: &Reader) -> Result<Option<u32>> {
-        RawVecInner::get_any_or_read(self, index, reader)
+        ReadWriteRawVec::get_any_or_read(self, index, reader)
     }
 
     fn create_reader(&self) -> Reader {
-        RawVecInner::create_reader(self)
+        ReadWriteRawVec::create_reader(self)
     }
 }
 

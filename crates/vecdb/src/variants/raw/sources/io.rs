@@ -5,11 +5,17 @@ use std::{
 };
 
 use parking_lot::RwLockReadGuard;
-use rawdb::RegionMetadata;
+use rawdb::{Region, RegionMetadata};
 
-use crate::{AnyStoredVec, HEADER_OFFSET, VecIndex, VecValue, likely};
+use crate::{AnyStoredVec, BUFFER_SIZE, HEADER_OFFSET, VecIndex, VecValue, likely};
 
-use super::super::{RawStrategy, RawVecInner};
+use super::super::{RawStrategy, ReadWriteRawVec};
+
+/// Buffer size aligned to SIZE_OF_T for raw I/O reads.
+const fn aligned_buffer_size<T>() -> usize {
+    let size_of_t = size_of::<T>();
+    (BUFFER_SIZE / size_of_t) * size_of_t
+}
 
 /// Buffered file I/O source for reading stored data sequentially.
 ///
@@ -33,14 +39,22 @@ where
     S: RawStrategy<T>,
 {
     const SIZE_OF_T: usize = size_of::<T>();
-    const NORMAL_BUFFER_SIZE: usize = RawVecInner::<I, T, S>::aligned_buffer_size();
+    const NORMAL_BUFFER_SIZE: usize = aligned_buffer_size::<T>();
 
-    pub(crate) fn new(vec: &'a RawVecInner<I, T, S>, from: usize, to: usize) -> Self {
-        let file = vec.region().open_db_read_only_file().expect("open file");
-        let region_meta = vec.region().meta();
+    pub(crate) fn new(vec: &'a ReadWriteRawVec<I, T, S>, from: usize, to: usize) -> Self {
+        Self::new_from_parts(vec.region(), vec.stored_len(), from, to)
+    }
+
+    pub(crate) fn new_from_parts(
+        region: &'a Region,
+        stored_len: usize,
+        from: usize,
+        to: usize,
+    ) -> Self {
+        let file = region.open_db_read_only_file().expect("open file");
+        let region_meta = region.meta();
         let region_start = region_meta.start();
         let start_offset = region_start + HEADER_OFFSET;
-        let stored_len = vec.stored_len();
         let from = from.min(stored_len);
         let to = to.min(stored_len);
 

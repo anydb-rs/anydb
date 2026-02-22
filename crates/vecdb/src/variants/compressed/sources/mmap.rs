@@ -1,11 +1,11 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, sync::Arc};
 
-use parking_lot::RwLockReadGuard;
-use rawdb::Reader;
+use parking_lot::{RwLock, RwLockReadGuard};
+use rawdb::{Reader, Region};
 
 use crate::{AnyStoredVec, Pages, VecIndex, VecValue, unlikely};
 
-use super::super::inner::{CompressedVecInner, CompressionStrategy, MAX_UNCOMPRESSED_PAGE_SIZE};
+use super::super::inner::{ReadWriteCompressedVec, CompressionStrategy, MAX_UNCOMPRESSED_PAGE_SIZE};
 
 /// Read-only mmap-backed source over a compressed vector.
 ///
@@ -31,13 +31,22 @@ where
     const PER_PAGE: usize = MAX_UNCOMPRESSED_PAGE_SIZE / Self::SIZE_OF_T;
     const NO_PAGE: usize = usize::MAX;
 
-    pub(crate) fn new(vec: &'a CompressedVecInner<I, T, S>, from: usize, to: usize) -> Self {
-        let stored_len = vec.stored_len();
+    pub(crate) fn new(vec: &'a ReadWriteCompressedVec<I, T, S>, from: usize, to: usize) -> Self {
+        Self::new_from_parts(vec.region(), vec.pages(), vec.stored_len(), from, to)
+    }
+
+    pub(crate) fn new_from_parts(
+        region: &Region,
+        pages: &'a Arc<RwLock<Pages>>,
+        stored_len: usize,
+        from: usize,
+        to: usize,
+    ) -> Self {
         let from = from.min(stored_len);
         let to = to.min(stored_len);
         Self {
-            reader: vec.region().create_reader(),
-            pages: vec.pages().read(),
+            reader: region.create_reader(),
+            pages: pages.read(),
             page_buf: Vec::with_capacity(Self::PER_PAGE),
             page_buf_idx: Self::NO_PAGE,
             pos: from,

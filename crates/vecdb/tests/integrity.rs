@@ -9,7 +9,7 @@ use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, WritableVec, ImportOptions, ImportableVec, RawStrategy, RawVecInner, Reader,
+    AnyStoredVec, WritableVec, ImportOptions, ImportableVec, RawStrategy, ReadWriteRawVec, Reader,
     Result, ReadableVec, Stamp, StoredVec, Version,
 };
 
@@ -39,18 +39,18 @@ pub trait IntegrityOps {
     fn create_reader(&self) -> Reader;
 }
 
-// Generic implementations for any RawVecInner strategy
-impl<S> IntegrityOps for RawVecInner<usize, u32, S>
+// Generic implementations for any ReadWriteRawVec strategy
+impl<S> IntegrityOps for ReadWriteRawVec<usize, u32, S>
 where
     S: RawStrategy<u32>,
 {
     fn update(&mut self, index: usize, value: u32) -> Result<()> {
-        RawVecInner::update(self, index, value)
+        ReadWriteRawVec::update(self, index, value)
     }
 
     fn take(&mut self, index: usize) -> Result<Option<u32>> {
         let reader = self.create_reader();
-        let result = RawVecInner::take(self, index, &reader);
+        let result = ReadWriteRawVec::take(self, index, &reader);
         drop(reader);
         result
     }
@@ -68,15 +68,15 @@ where
     }
 
     fn collect_holed(&self) -> Result<Vec<Option<u32>>> {
-        RawVecInner::collect_holed(self)
+        ReadWriteRawVec::collect_holed(self)
     }
 
     fn get_any_or_read(&self, index: usize, reader: &Reader) -> Result<Option<u32>> {
-        RawVecInner::get_any_or_read(self, index, reader)
+        ReadWriteRawVec::get_any_or_read(self, index, reader)
     }
 
     fn create_reader(&self) -> Reader {
-        RawVecInner::create_reader(self)
+        ReadWriteRawVec::create_reader(self)
     }
 }
 

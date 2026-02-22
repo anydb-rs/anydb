@@ -26,7 +26,8 @@ use std::{
 use rawdb::Database;
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, AnyVec, BytesVec, ImportableVec, ReadableVec, Result, Version, WritableVec,
+    AnyStoredVec, AnyVec, BytesVec, ImportableVec, ReadableVec, Result, StoredVec, Version,
+    WritableVec,
 };
 
 #[cfg(feature = "pco")]
@@ -53,14 +54,11 @@ fn test_reader_sees_written_data_without_flush() -> Result<()> {
     writer.write()?;
     // Note: NOT calling flush() here - data is in mmap but not synced to disk
 
-    // Clone to create reader (simulates what Query does)
-    let reader = writer.clone();
+    // Create VecReader (simulates what Query does)
+    let r = writer.reader();
 
     // Reader should see the stored data via shared mmap
-    assert_eq!(reader.stored_len(), 100);
-    assert_eq!(reader.len(), 100);
-
-    let r = reader.reader();
+    assert_eq!(r.len(), 100);
     assert_eq!(r.get(0), 0);
     assert_eq!(r.get(50), 50);
     assert_eq!(r.get(99), 99);
@@ -82,8 +80,8 @@ fn test_reader_sees_new_data_after_write() -> Result<()> {
     }
     writer.write()?;
 
-    // Clone to create reader
-    let reader = writer.clone();
+    // Create read-only clone sharing SharedLen
+    let reader = writer.read_only_clone();
     assert_eq!(reader.len(), 50);
 
     // Writer adds more data
@@ -91,18 +89,16 @@ fn test_reader_sees_new_data_after_write() -> Result<()> {
         writer.push(i);
     }
 
-    // Reader still sees old length (pushed is not shared)
-    assert_eq!(reader.stored_len(), 50);
-    // Reader's pushed is its own copy (empty since we cloned after write)
-    assert_eq!(reader.pushed_len(), 0);
+    // Reader still sees old stored_len (pushed is not shared)
+    assert_eq!(reader.len(), 50);
 
     // Writer calls write() - this updates stored_len (shared) and writes to mmap
     writer.write()?;
 
     // Now reader should see the new stored_len
-    assert_eq!(reader.stored_len(), 100);
+    assert_eq!(reader.len(), 100);
 
-    // And reader can read the new data from mmap
+    // And read-only clone can create a VecReader for O(1) point reads
     let r = reader.reader();
     assert_eq!(r.get(99), 99);
     assert_eq!(r.get(75), 75);
@@ -124,7 +120,7 @@ fn test_concurrent_read_during_write() -> Result<()> {
     }
     writer.write()?;
 
-    let reader = writer.clone();
+    let reader = writer.read_only_clone();
     let barrier = Arc::new(Barrier::new(2));
 
     let reader_barrier = barrier.clone();
@@ -134,7 +130,7 @@ fn test_concurrent_read_during_write() -> Result<()> {
 
         // Continuously read while writer is working
         for _ in 0..100 {
-            let len = reader.stored_len();
+            let len = reader.len();
             if len > 0 {
                 let r = reader.reader();
                 // Read some values - should never panic or return garbage
@@ -190,19 +186,15 @@ fn test_batched_writes_single_flush() -> Result<()> {
     vec2.write()?;
     vec3.write()?;
 
-    // Create readers
-    let reader1 = vec1.clone();
-    let reader2 = vec2.clone();
-    let reader3 = vec3.clone();
+    // Create VecReaders
+    let r1 = vec1.reader();
+    let r2 = vec2.reader();
+    let r3 = vec3.reader();
 
     // All readers should see the data
-    assert_eq!(reader1.len(), 100);
-    assert_eq!(reader2.len(), 100);
-    assert_eq!(reader3.len(), 100);
-
-    let r1 = reader1.reader();
-    let r2 = reader2.reader();
-    let r3 = reader3.reader();
+    assert_eq!(r1.len(), 100);
+    assert_eq!(r2.len(), 100);
+    assert_eq!(r3.len(), 100);
 
     assert_eq!(r1.get(50), 50);
     assert_eq!(r2.get(50), 100);
@@ -212,12 +204,12 @@ fn test_batched_writes_single_flush() -> Result<()> {
     // dirty_range is in a separate Mutex from region metadata
     db.flush()?;
 
-    // Data should still be readable
+    // Data should still be readable after flush
     drop(r1);
     drop(r2);
     drop(r3);
 
-    let r1 = reader1.reader();
+    let r1 = vec1.reader();
     assert_eq!(r1.get(99), 99);
 
     Ok(())
@@ -237,7 +229,7 @@ fn test_pco_concurrent_read_write() -> Result<()> {
     }
     writer.write()?;
 
-    let reader = writer.clone();
+    let reader = writer.read_only_clone();
 
     // Add more data
     for i in 500..1000u64 {
@@ -246,7 +238,7 @@ fn test_pco_concurrent_read_write() -> Result<()> {
     writer.write()?;
 
     // Reader should see all data
-    assert_eq!(reader.stored_len(), 1000);
+    assert_eq!(reader.len(), 1000);
 
     assert_eq!(reader.collect_range(0, 1), vec![0]);
     assert_eq!(reader.collect_range(500, 501), vec![500]);
@@ -268,8 +260,8 @@ fn test_reader_isolation_from_pushed() -> Result<()> {
     }
     writer.write()?;
 
-    // Clone reader
-    let reader = writer.clone();
+    // Read-only clone
+    let reader = writer.read_only_clone();
 
     // Writer pushes more but doesn't write
     for i in 50..100u64 {
@@ -280,10 +272,8 @@ fn test_reader_isolation_from_pushed() -> Result<()> {
     assert_eq!(writer.len(), 100);
     assert_eq!(writer.pushed_len(), 50);
 
-    // Reader doesn't see writer's pushed (has its own empty pushed)
+    // Read-only clone doesn't see writer's pushed
     assert_eq!(reader.len(), 50);
-    assert_eq!(reader.pushed_len(), 0);
-    assert_eq!(reader.stored_len(), 50);
 
     // Reader can't access indices 50-99
     let r = reader.reader();
@@ -308,7 +298,7 @@ fn test_memory_ordering_len_vs_data() -> Result<()> {
     }
     writer.write()?;
 
-    let reader = writer.clone();
+    let reader = writer.read_only_clone();
 
     let barrier = Arc::new(Barrier::new(2));
     let stop = Arc::new(AtomicBool::new(false));
@@ -326,31 +316,20 @@ fn test_memory_ordering_len_vs_data() -> Result<()> {
         reader_barrier.wait();
 
         while !stop_clone.load(Ordering::Relaxed) {
-            let len = reader.stored_len();
+            let len = reader.len();
             if len > 0 {
-                // CRITICAL: If we see stored_len = N, we MUST be able to read index N-1
+                // CRITICAL: If we see len = N, we MUST be able to read index N-1
                 let last_idx = len - 1;
-                let reader_ref = reader.create_reader();
-                match reader.read_at(last_idx, &reader_ref) {
-                    Ok(val) => {
-                        // Verify the value is correct (not garbage)
-                        if val != last_idx as u64 {
-                            eprintln!(
-                                "ERROR: Read wrong value at {}: expected {}, got {}",
-                                last_idx, last_idx, val
-                            );
-                            errors_clone.fetch_add(1, Ordering::Relaxed);
-                        }
-                        reads_clone.fetch_add(1, Ordering::Relaxed);
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "ERROR: Read failed at index {} (stored_len={}): {:?}",
-                            last_idx, len, e
-                        );
-                        errors_clone.fetch_add(1, Ordering::Relaxed);
-                    }
+                let r = reader.reader();
+                let val = r.get(last_idx);
+                if val != last_idx as u64 {
+                    eprintln!(
+                        "ERROR: Read wrong value at {}: expected {}, got {}",
+                        last_idx, last_idx, val
+                    );
+                    errors_clone.fetch_add(1, Ordering::Relaxed);
                 }
+                reads_clone.fetch_add(1, Ordering::Relaxed);
             }
             // No sleep - tight loop to maximize chance of catching races
         }
@@ -398,7 +377,7 @@ fn test_length_data_consistency_stress() -> Result<()> {
 
     let mut writer: BytesVec<usize, u64> = BytesVec::forced_import(&db, "test_vec", version)?;
 
-    let reader = writer.clone();
+    let reader = writer.read_only_clone();
 
     let stop = Arc::new(AtomicBool::new(false));
     let max_len_seen = Arc::new(AtomicUsize::new(0));
@@ -415,12 +394,12 @@ fn test_length_data_consistency_stress() -> Result<()> {
                 break;
             }
 
-            let len = reader.stored_len();
+            let len = reader.len();
             max_len_clone.fetch_max(len, Ordering::Relaxed);
 
             if len > 0 {
-                // Create fresh reader each time to avoid caching issues
-                let reader_ref = reader.create_reader();
+                // Create fresh VecReader each time to pick up new stored data
+                let r = reader.reader();
 
                 // Check first, last, and a few sample indices
                 let indices_to_check = [0, len.saturating_sub(1), len / 2];
@@ -429,16 +408,9 @@ fn test_length_data_consistency_stress() -> Result<()> {
                     if i >= len {
                         continue;
                     }
-                    match reader.read_at(i, &reader_ref) {
-                        Ok(val) => {
-                            if val != i as u64 {
-                                errors_clone.fetch_add(1, Ordering::Relaxed);
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("ERROR: Read failed at index {} (len={}): {:?}", i, len, e);
-                            errors_clone.fetch_add(1, Ordering::Relaxed);
-                        }
+                    let val = r.get(i);
+                    if val != i as u64 {
+                        errors_clone.fetch_add(1, Ordering::Relaxed);
                     }
                 }
             }
@@ -490,13 +462,13 @@ fn test_many_readers_one_writer() -> Result<()> {
 
     let handles: Vec<_> = (0..num_readers)
         .map(|_| {
-            let reader = writer.clone();
+            let reader = writer.read_only_clone();
             let b = barrier.clone();
             thread::spawn(move || -> Result<()> {
                 b.wait();
                 for _ in 0..50 {
-                    let len = reader.stored_len();
                     let r = reader.reader();
+                    let len = r.len();
                     // Verify data integrity
                     for i in 0..len.min(100) {
                         let val = r.get(i);
@@ -562,10 +534,10 @@ fn test_realworld_stress() -> Result<()> {
     vec_c.write()?;
     db.flush()?;
 
-    // Create readers (simulating web server Query clones)
-    let reader_a = vec_a.clone();
-    let reader_b = vec_b.clone();
-    let reader_c = vec_c.clone();
+    // Create read-only clones (simulating web server Query clones)
+    let reader_a = vec_a.read_only_clone();
+    let reader_b = vec_b.read_only_clone();
+    let reader_c = vec_c.read_only_clone();
 
     let stop = Arc::new(AtomicBool::new(false));
     let total_reads = Arc::new(AtomicUsize::new(0));
@@ -588,9 +560,9 @@ fn test_realworld_stress() -> Result<()> {
 
                 while !stop.load(Ordering::Relaxed) {
                     // Read from all three vecs
-                    let len_a = r_a.stored_len();
-                    let len_b = r_b.stored_len();
-                    let len_c = r_c.stored_len();
+                    let len_a = r_a.len();
+                    let len_b = r_b.len();
+                    let len_c = r_c.len();
 
                     // They should all have the same length (written together)
                     // Allow for small differences during concurrent writes
@@ -606,44 +578,35 @@ fn test_realworld_stress() -> Result<()> {
 
                     // Verify data at various positions
                     if min_len > 0 {
-                        let reader_a_ref = r_a.create_reader();
-                        let reader_b_ref = r_b.create_reader();
-                        let reader_c_ref = r_c.create_reader();
+                        let ra = r_a.reader();
+                        let rb = r_b.reader();
+                        let rc = r_c.reader();
 
                         // Check first element
-                        if let Ok(v) = r_a.read_at(0, &reader_a_ref)
-                            && v != 0
-                        {
+                        if ra.get(0) != 0 {
                             local_errors += 1;
                         }
 
                         // Check last safe element
                         let safe_idx = min_len.saturating_sub(1);
-                        if let Ok(v) = r_a.read_at(safe_idx, &reader_a_ref)
-                            && v != safe_idx as u64
-                        {
+                        let va = ra.get(safe_idx);
+                        if va != safe_idx as u64 {
                             eprintln!(
                                 "Reader {}: vec_a[{}] = {} (expected {})",
-                                reader_id, safe_idx, v, safe_idx
+                                reader_id, safe_idx, va, safe_idx
                             );
                             local_errors += 1;
                         }
-                        if let Ok(v) = r_b.read_at(safe_idx, &reader_b_ref)
-                            && v != (safe_idx as u64) * 2
-                        {
+                        if rb.get(safe_idx) != (safe_idx as u64) * 2 {
                             local_errors += 1;
                         }
-                        if let Ok(v) = r_c.read_at(safe_idx, &reader_c_ref)
-                            && v != (safe_idx as u64) * 3
-                        {
+                        if rc.get(safe_idx) != (safe_idx as u64) * 3 {
                             local_errors += 1;
                         }
 
                         // Check a middle element
                         let mid_idx = min_len / 2;
-                        if let Ok(v) = r_a.read_at(mid_idx, &reader_a_ref)
-                            && v != mid_idx as u64
-                        {
+                        if ra.get(mid_idx) != mid_idx as u64 {
                             local_errors += 1;
                         }
 
@@ -776,7 +739,7 @@ fn test_extended_stress() -> Result<()> {
     let num_readers = 1;
     let reader_handles: Vec<_> = (0..num_readers)
         .map(|_| {
-            let reader = writer.clone();
+            let reader = writer.read_only_clone();
             let stop = stop.clone();
             let reads = reads_completed.clone();
             let errs = read_errors.clone();
@@ -786,7 +749,7 @@ fn test_extended_stress() -> Result<()> {
                 let mut local_errors = 0usize;
 
                 while !stop.load(Ordering::Relaxed) {
-                    let len = reader.stored_len();
+                    let len = reader.len();
                     if len > 0 {
                         // Check last element - most likely to catch races
                         let idx = len - 1;
@@ -930,7 +893,7 @@ fn test_extended_stress_bytes() -> Result<()> {
     let num_readers = 8;
     let reader_handles: Vec<_> = (0..num_readers)
         .map(|_| {
-            let reader = writer.clone();
+            let reader = writer.read_only_clone();
             let stop = stop.clone();
             let reads = reads_completed.clone();
             let errs = read_errors.clone();
@@ -940,29 +903,21 @@ fn test_extended_stress_bytes() -> Result<()> {
                 let mut local_errors = 0usize;
 
                 while !stop.load(Ordering::Relaxed) {
-                    let len = reader.stored_len();
+                    let r = reader.reader();
+                    let len = r.len();
                     if len > 0 {
-                        let reader_ref = reader.create_reader();
-
                         // Check last element - most likely to catch races
                         let idx = len - 1;
-                        match reader.read_at(idx, &reader_ref) {
-                            Ok(v) => {
-                                if v != idx as u64 {
-                                    local_errors += 1;
-                                }
-                                local_reads += 1;
-                            }
-                            Err(_) => {
-                                local_errors += 1;
-                            }
+                        let v = r.get(idx);
+                        if v != idx as u64 {
+                            local_errors += 1;
                         }
+                        local_reads += 1;
 
                         // Also check a random-ish index
                         let random_idx = (len * 7) / 11;
-                        if random_idx < len
-                            && let Ok(v) = reader.read_at(random_idx, &reader_ref)
-                        {
+                        if random_idx < len {
+                            let v = r.get(random_idx);
                             if v != random_idx as u64 {
                                 local_errors += 1;
                             }

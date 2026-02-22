@@ -1506,7 +1506,7 @@ mod dirty_iter {
 mod raw_features {
     use super::*;
     use std::ops::DerefMut;
-    use vecdb::{BytesVec, RawVecInner};
+    use vecdb::{BytesVec, ReadWriteRawVec};
 
     // Generic test functions for raw vecs
 
@@ -1697,20 +1697,20 @@ mod raw_features {
         fn fill_first_hole_or_push(&mut self, value: i32) -> Result<usize>;
     }
 
-    impl<I, T, S> RawVecOps for RawVecInner<I, T, S>
+    impl<I, T, S> RawVecOps for ReadWriteRawVec<I, T, S>
     where
         I: vecdb::VecIndex,
         T: vecdb::VecValue + From<i32> + Into<i32>,
         S: vecdb::RawStrategy<T>,
     {
         fn delete_at(&mut self, index: usize) {
-            vecdb::RawVecInner::delete_at(self, index)
+            vecdb::ReadWriteRawVec::delete_at(self, index)
         }
         fn update_at(&mut self, index: usize, value: i32) -> Result<()> {
-            vecdb::RawVecInner::update_at(self, index, T::from(value))
+            vecdb::ReadWriteRawVec::update_at(self, index, T::from(value))
         }
         fn fill_first_hole_or_push(&mut self, value: i32) -> Result<usize> {
-            vecdb::RawVecInner::fill_first_hole_or_push(self, T::from(value)).map(|i| i.to_usize())
+            vecdb::ReadWriteRawVec::fill_first_hole_or_push(self, T::from(value)).map(|i| i.to_usize())
         }
     }
 

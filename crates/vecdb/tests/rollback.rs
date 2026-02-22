@@ -700,7 +700,7 @@ mod raw_rollback {
     // ============================================================================
 
     #[cfg(feature = "zerocopy")]
-    use vecdb::{RawVecInner, ZeroCopyStrategy, ZeroCopyVec};
+    use vecdb::{ReadWriteRawVec, ZeroCopyStrategy, ZeroCopyVec};
 
     #[cfg(feature = "zerocopy")]
     impl RollbackVec for ZeroCopyVec<usize, u32> {
@@ -717,14 +717,14 @@ mod raw_rollback {
     }
 
     #[cfg(feature = "zerocopy")]
-    impl RollbackOps for RawVecInner<usize, u32, ZeroCopyStrategy<u32>> {
+    impl RollbackOps for ReadWriteRawVec<usize, u32, ZeroCopyStrategy<u32>> {
         fn update(&mut self, index: usize, value: u32) -> Result<()> {
-            RawVecInner::update(self, index, value)
+            ReadWriteRawVec::update(self, index, value)
         }
 
         fn take(&mut self, index: usize) -> Result<Option<u32>> {
             let reader = self.create_reader();
-            let result = RawVecInner::take(self, index, &reader);
+            let result = ReadWriteRawVec::take(self, index, &reader);
             drop(reader);
             result
         }
@@ -754,15 +754,15 @@ mod raw_rollback {
         }
 
         fn collect_holed(&self) -> Result<Vec<Option<u32>>> {
-            RawVecInner::collect_holed(self)
+            ReadWriteRawVec::collect_holed(self)
         }
 
         fn get_any_or_read(&self, index: usize, reader: &vecdb::Reader) -> Result<Option<u32>> {
-            RawVecInner::get_any_or_read(self, index, reader)
+            ReadWriteRawVec::get_any_or_read(self, index, reader)
         }
 
         fn create_reader(&self) -> vecdb::Reader {
-            RawVecInner::create_reader(self)
+            ReadWriteRawVec::create_reader(self)
         }
     }
 
@@ -771,7 +771,7 @@ mod raw_rollback {
     // ============================================================================
 
     #[cfg(not(feature = "zerocopy"))]
-    use vecdb::RawVecInner;
+    use vecdb::ReadWriteRawVec;
     use vecdb::{BytesStrategy, BytesVec};
 
     impl RollbackVec for BytesVec<usize, u32> {
@@ -787,14 +787,14 @@ mod raw_rollback {
         }
     }
 
-    impl RollbackOps for RawVecInner<usize, u32, BytesStrategy<u32>> {
+    impl RollbackOps for ReadWriteRawVec<usize, u32, BytesStrategy<u32>> {
         fn update(&mut self, index: usize, value: u32) -> Result<()> {
-            RawVecInner::update(self, index, value)
+            ReadWriteRawVec::update(self, index, value)
         }
 
         fn take(&mut self, index: usize) -> Result<Option<u32>> {
             let reader = self.create_reader();
-            let result = RawVecInner::take(self, index, &reader);
+            let result = ReadWriteRawVec::take(self, index, &reader);
             drop(reader);
             result
         }
@@ -824,15 +824,15 @@ mod raw_rollback {
         }
 
         fn collect_holed(&self) -> Result<Vec<Option<u32>>> {
-            RawVecInner::collect_holed(self)
+            ReadWriteRawVec::collect_holed(self)
         }
 
         fn get_any_or_read(&self, index: usize, reader: &vecdb::Reader) -> Result<Option<u32>> {
-            RawVecInner::get_any_or_read(self, index, reader)
+            ReadWriteRawVec::get_any_or_read(self, index, reader)
         }
 
         fn create_reader(&self) -> vecdb::Reader {
-            RawVecInner::create_reader(self)
+            ReadWriteRawVec::create_reader(self)
         }
     }
 
