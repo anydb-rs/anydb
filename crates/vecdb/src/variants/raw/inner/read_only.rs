@@ -69,32 +69,33 @@ where
         self.read_at_once(index.to_usize())
     }
 
-    #[inline]
-    fn fold_source<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, f: F) -> B {
+    #[inline(always)]
+    fn fold_source<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, len: usize, init: B, f: F) -> B {
         let range_bytes = (to - from) * size_of::<T>();
         if range_bytes > MMAP_CROSSOVER_BYTES {
-            RawIoSource::<I, T, S>::new_from_parts(self.base.region(), self.base.stored_len(), from, to)
+            RawIoSource::<I, T, S>::new_from_parts(self.base.region(), len, from, to)
                 .fold(init, f)
         } else {
-            RawMmapSource::<I, T, S>::new_from_parts(self.base.region(), self.base.stored_len(), from, to)
+            RawMmapSource::<I, T, S>::new_from_parts(self.base.region(), len, from, to)
                 .fold(init, f)
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn try_fold_source<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
         &self,
         from: usize,
         to: usize,
+        len: usize,
         init: B,
         f: F,
     ) -> std::result::Result<B, E> {
         let range_bytes = (to - from) * size_of::<T>();
         if range_bytes > MMAP_CROSSOVER_BYTES {
-            RawIoSource::<I, T, S>::new_from_parts(self.base.region(), self.base.stored_len(), from, to)
+            RawIoSource::<I, T, S>::new_from_parts(self.base.region(), len, from, to)
                 .try_fold(init, f)
         } else {
-            RawMmapSource::<I, T, S>::new_from_parts(self.base.region(), self.base.stored_len(), from, to)
+            RawMmapSource::<I, T, S>::new_from_parts(self.base.region(), len, from, to)
                 .try_fold(init, f)
         }
     }
@@ -180,7 +181,7 @@ where
             };
             buf.extend_from_slice(src);
         } else {
-            self.fold_source(from, to, (), |(), v| buf.push(v));
+            self.fold_source(from, to, len, (), |(), v| buf.push(v));
         }
     }
 
@@ -200,7 +201,7 @@ where
         if from >= to {
             return init;
         }
-        self.fold_source(from, to, init, f)
+        self.fold_source(from, to, len, init, f)
     }
 
     #[inline]
@@ -220,7 +221,7 @@ where
         if from >= to {
             return Ok(init);
         }
-        self.try_fold_source(from, to, init, f)
+        self.try_fold_source(from, to, len, init, f)
     }
 }
 

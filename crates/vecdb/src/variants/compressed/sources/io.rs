@@ -171,7 +171,7 @@ where
     }
 
     /// Fold all remaining elements — tight pointer loop per page so LLVM can vectorize.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn fold<B, F: FnMut(B, T) -> B>(mut self, init: B, mut f: F) -> B {
         let per_page = Self::PER_PAGE;
         let end_index = self.end_index;
@@ -199,7 +199,7 @@ where
     }
 
     /// Fallible fold with early exit on error.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn try_fold<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
         mut self,
         init: B,

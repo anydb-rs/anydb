@@ -108,7 +108,7 @@ where
     }
 
     /// Fold all remaining elements — own implementation so LLVM can vectorize the inner loop.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn fold<B, F: FnMut(B, T) -> B>(mut self, init: B, mut f: F) -> B {
         let mut accum = init;
         loop {
@@ -130,7 +130,7 @@ where
     }
 
     /// Fallible fold with early exit on error.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn try_fold<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
         mut self,
         init: B,

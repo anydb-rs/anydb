@@ -232,7 +232,7 @@ where
         })
     }
 
-    pub fn compute_coarser(
+    pub fn compute_first_per_index(
         &mut self,
         max_from: V::T,
         other: &impl ReadableVec<V::T, V::I>,
@@ -266,6 +266,11 @@ where
                     continue;
                 }
                 if this.collect_one(i).is_none_or(|old_v| old_v > v) {
+                    // Pad gaps with the current value so empty periods get zero-length ranges
+                    let i_usize = i.to_usize();
+                    while this.len() < i_usize {
+                        this.push(v);
+                    }
                     this.truncate_push(i, v)?;
                 }
                 prev_i.replace(i);

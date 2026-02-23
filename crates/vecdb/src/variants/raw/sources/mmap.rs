@@ -65,7 +65,7 @@ where
     }
 
     /// Fold all elements in the range — tight pointer loop.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn fold<B, F: FnMut(B, T) -> B>(self, init: B, mut f: F) -> B {
         let ptr = self.data;
         let mut byte_off = self.pos * Self::SIZE_OF_T;
@@ -79,7 +79,7 @@ where
     }
 
     /// Fallible fold with early exit on error.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn try_fold<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
         self,
         init: B,

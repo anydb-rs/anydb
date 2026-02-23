@@ -270,7 +270,7 @@ where
         CompressedMmapSource::new(self, from, to).fold(init, f)
     }
 
-    #[inline]
+    #[inline(always)]
     fn fold_source<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, f: F) -> B {
         let range_bytes = (to - from) * Self::SIZE_OF_T;
         if range_bytes > MMAP_CROSSOVER_BYTES {
@@ -280,7 +280,7 @@ where
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn try_fold_source<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
         &self,
         from: usize,

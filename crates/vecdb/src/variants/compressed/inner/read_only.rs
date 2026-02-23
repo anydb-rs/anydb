@@ -50,14 +50,14 @@ where
         page_index * Self::PER_PAGE
     }
 
-    #[inline]
-    fn fold_source<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, f: F) -> B {
+    #[inline(always)]
+    fn fold_source<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, len: usize, init: B, f: F) -> B {
         let range_bytes = (to - from) * size_of::<T>();
         if range_bytes > MMAP_CROSSOVER_BYTES {
             CompressedIoSource::<I, T, S>::new_from_parts(
                 self.base.region(),
                 &self.pages,
-                self.base.stored_len(),
+                len,
                 from,
                 to,
             )
@@ -66,7 +66,7 @@ where
             CompressedMmapSource::<I, T, S>::new_from_parts(
                 self.base.region(),
                 &self.pages,
-                self.base.stored_len(),
+                len,
                 from,
                 to,
             )
@@ -74,11 +74,12 @@ where
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn try_fold_source<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
         &self,
         from: usize,
         to: usize,
+        len: usize,
         init: B,
         f: F,
     ) -> std::result::Result<B, E> {
@@ -87,7 +88,7 @@ where
             CompressedIoSource::<I, T, S>::new_from_parts(
                 self.base.region(),
                 &self.pages,
-                self.base.stored_len(),
+                len,
                 from,
                 to,
             )
@@ -96,7 +97,7 @@ where
             CompressedMmapSource::<I, T, S>::new_from_parts(
                 self.base.region(),
                 &self.pages,
-                self.base.stored_len(),
+                len,
                 from,
                 to,
             )
@@ -202,7 +203,7 @@ where
         if from >= to {
             return init;
         }
-        self.fold_source(from, to, init, f)
+        self.fold_source(from, to, len, init, f)
     }
 
     #[inline]
@@ -222,7 +223,7 @@ where
         if from >= to {
             return Ok(init);
         }
-        self.try_fold_source(from, to, init, f)
+        self.try_fold_source(from, to, len, init, f)
     }
 }
 
