@@ -1589,22 +1589,21 @@ mod integration {
         // Hash files in the regions directory, excluding changes subdirectory
         let regions_dir = dir.join("regions");
         if regions_dir.exists() {
-            for entry in walkdir::WalkDir::new(&regions_dir)
-                .follow_links(false)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
-                let path = entry.path();
-
-                // Skip the changes directory
-                if path.components().any(|c| c.as_os_str() == "changes") {
-                    continue;
-                }
-
-                if entry.file_type().is_file() {
-                    files.push(path.to_path_buf());
+            fn collect_files(dir: &Path, files: &mut Vec<PathBuf>) {
+                let Ok(entries) = fs::read_dir(dir) else { return };
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let path = entry.path();
+                    if path.components().any(|c| c.as_os_str() == "changes") {
+                        continue;
+                    }
+                    if path.is_dir() {
+                        collect_files(&path, files);
+                    } else if path.is_file() {
+                        files.push(path);
+                    }
                 }
             }
+            collect_files(&regions_dir, &mut files);
         }
 
         files.sort();

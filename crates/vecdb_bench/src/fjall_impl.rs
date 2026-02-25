@@ -91,15 +91,19 @@ impl DatabaseBenchmark for FjallBench {
     }
 
     fn disk_size(path: &Path) -> Result<u64> {
-        let mut total = 0u64;
-        if path.exists() {
-            for entry in walkdir::WalkDir::new(path) {
+        fn sum_dir(dir: &Path) -> std::io::Result<u64> {
+            let mut total = 0u64;
+            for entry in std::fs::read_dir(dir)? {
                 let entry = entry?;
-                if entry.file_type().is_file() {
+                let ft = entry.file_type()?;
+                if ft.is_dir() {
+                    total += sum_dir(&entry.path())?;
+                } else if ft.is_file() {
                     total += entry.metadata()?.len();
                 }
             }
+            Ok(total)
         }
-        Ok(total)
+        if path.exists() { Ok(sum_dir(path)?) } else { Ok(0) }
     }
 }

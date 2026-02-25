@@ -1,9 +1,27 @@
-use std::{process::exit, sync::Arc};
+use std::{
+    process::exit,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use log::info;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 
 type Callbacks = Arc<Mutex<Vec<Box<dyn Fn() + Send + Sync>>>>;
+
+static SIGNAL_RECEIVED: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn signal_handler(_sig: libc::c_int) {
+    if SIGNAL_RECEIVED.swap(true, Ordering::Relaxed) {
+        const MSG: &[u8] = b"Shutdown already pending...\n";
+        unsafe { libc::write(2, MSG.as_ptr().cast(), MSG.len()) };
+    } else {
+        const MSG: &[u8] = b"Signal received, shutdown pending...\n";
+        unsafe { libc::write(2, MSG.as_ptr().cast(), MSG.len()) };
+    }
+}
 
 /// Graceful shutdown coordinator for ensuring data consistency during program exit.
 ///
@@ -33,38 +51,41 @@ impl Exit {
         self.cleanup_callbacks.lock().push(Box::new(callback));
     }
 
-    /// Sets the Ctrl-C signal handler for graceful shutdown.
+    /// Registers signal handlers for graceful shutdown (SIGINT + SIGTERM).
     ///
     /// # Panics
-    /// Only one Ctrl-C handler can be registered per process. This will panic if:
-    /// - Called multiple times
-    /// - Another crate has already registered a Ctrl-C handler
+    /// Panics if `sigaction` fails to install handlers.
     pub fn set_ctrlc_handler(&self) {
-        let lock_copy = self.lock.clone();
-        let callbacks = self.cleanup_callbacks.clone();
+        unsafe {
+            let mut action: libc::sigaction = std::mem::zeroed();
+            action.sa_sigaction = signal_handler as *const () as usize;
+            libc::sigemptyset(&raw mut action.sa_mask);
+            action.sa_flags = libc::SA_RESTART;
 
-        ctrlc::set_handler(move || {
-            // Run cleanup callbacks
-            for callback in callbacks.lock().iter() {
-                callback();
-            }
-
-            if let Some(_lock) = lock_copy.try_write() {
-                info!("Exiting...");
-                exit(0);
-            }
-
-            info!("Waiting to exit safely...");
-            let _lock = lock_copy.write();
-            info!("Exiting...");
-            exit(0);
-        })
-        .expect("Error setting Ctrl-C handler");
+            assert!(
+                libc::sigaction(libc::SIGINT, &action, std::ptr::null_mut()) == 0,
+                "failed to install SIGINT handler"
+            );
+            assert!(
+                libc::sigaction(libc::SIGTERM, &action, std::ptr::null_mut()) == 0,
+                "failed to install SIGTERM handler"
+            );
+        }
     }
 
     /// Acquires a read lock to protect a critical section from shutdown.
     /// The shutdown handler will wait for all locks to be released.
+    ///
+    /// If a signal was received while waiting, runs cleanup callbacks and exits.
     pub fn lock(&self) -> RwLockReadGuard<'_, ()> {
-        self.lock.read()
+        let guard = self.lock.read();
+        if SIGNAL_RECEIVED.compare_exchange(true, false, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+            for callback in self.cleanup_callbacks.lock().iter() {
+                callback();
+            }
+            info!("Exiting...");
+            exit(0);
+        }
+        guard
     }
 }

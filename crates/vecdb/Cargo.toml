@@ -21,7 +21,7 @@ zerocopy = ["dep:zerocopy"]
 zstd = ["dep:zstd"]
 
 [dependencies]
-ctrlc = { version = "3.5.2", features = ["termination"] }
+libc = { workspace = true }
 log = { workspace = true }
 parking_lot = { workspace = true }
 rawdb = { workspace = true }
@@ -41,7 +41,6 @@ zstd = { version = "0.13.3", optional = true }
 [dev-dependencies]
 sha2 = "0.10"
 tempfile = { workspace = true }
-walkdir = "2.5"
 
 [[example]]
 name = "zerocopy"

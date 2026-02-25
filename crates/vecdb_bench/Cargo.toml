@@ -18,5 +18,4 @@ vecdb = { workspace = true, features = ["pco"] }
 rand = "0.10.0"
 rayon = "1.11"
 anyhow = "1.0"
-walkdir = "2.5"
 byteorder = "1.5"
