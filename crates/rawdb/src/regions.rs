@@ -158,7 +158,10 @@ impl Regions {
             ref_count
         );
         if ref_count > 2 {
-            return Err(Error::RegionStillReferenced { ref_count });
+            return Err(Error::RegionStillReferenced {
+                id: region.meta().id().to_string(),
+                ref_count,
+            });
         }
 
         if self

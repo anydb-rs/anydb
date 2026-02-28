@@ -122,6 +122,10 @@ where
         V::T: std::ops::Add<V::T, Output = V::T> + From<A> + Default + CheckedSub,
         A: VecValue,
     {
+        // Cursor for the leaving-value reads — persists across batches so each
+        // compressed page is decompressed at most once instead of once per element.
+        let mut leaving = source.cursor();
+
         self.compute_init(Version::new(2) + source.version(), max_from, exit, |this| {
             let skip = this.len();
             let end = this.batch_end(source.len());
@@ -135,24 +139,21 @@ where
                 V::T::default()
             };
 
-            // Collect only the values that leave the window during this batch.
-            // At position i, source[i - window] leaves (when i >= window).
-            // Reads batch_size elements instead of window.
+            // Position cursor at the start of the leaving-values window.
             let pop_start = skip.saturating_sub(window);
-            let pop_end = end.saturating_sub(window);
-            let mut pop_iter = if pop_end > pop_start {
-                source.collect_range_at(pop_start, pop_end)
-            } else {
-                vec![]
+            if leaving.position() < pop_start {
+                leaving.advance(pop_start - leaving.position());
             }
-            .into_iter();
 
             let mut i = skip;
             source.try_fold_range_at(skip, end, (), |(), value: A| {
                 let value = V::T::from(value);
 
                 let sum = if i >= window {
-                    let old = V::T::from(pop_iter.next().unwrap());
+                    let mut old = V::T::default();
+                    leaving.for_each(1, |v: A| {
+                        old = V::T::from(v);
+                    });
                     match prev_sum.clone().checked_sub(old) {
                         Some(diff) => diff + value,
                         None => return Err(Error::Underflow),

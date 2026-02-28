@@ -231,6 +231,13 @@ pub trait ReadableVec<I: VecIndex, T: VecValue>: AnyVec {
         self.collect_range_dyn(from, to)
     }
 
+    /// Clears `buf` then fills it with values in `[from, to)`. Reuses the buffer allocation.
+    #[inline]
+    fn collect_range_into_at(&self, from: usize, to: usize, buf: &mut Vec<T>) {
+        buf.clear();
+        self.read_into_at(from, to, buf);
+    }
+
     /// Collects values in `[from, to)` into a `Vec<T>` (object-safe).
     #[inline]
     fn collect_range_dyn(&self, from: usize, to: usize) -> Vec<T> {

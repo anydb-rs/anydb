@@ -289,6 +289,12 @@ impl Database {
     /// This is useful for garbage collection - keeping only regions that are
     /// still in use and removing all others.
     pub fn retain_regions(&self, mut ids: HashSet<String>) -> Result<()> {
+        debug!(
+            "{}: retain_regions called with {} ids to keep",
+            self,
+            ids.len()
+        );
+
         // Collect regions to remove first to avoid deadlock
         // (holding read lock while calling region.remove() which needs write lock)
         let regions_to_remove: Vec<_> = self
@@ -299,17 +305,36 @@ impl Database {
             .filter_map(|id| self.get_region(id))
             .collect();
 
+        if !ids.is_empty() {
+            debug!(
+                "{}: retain_regions: {} ids in retain set not found in db: {:?}",
+                self,
+                ids.len(),
+                ids
+            );
+        }
+
         if !regions_to_remove.is_empty() {
             debug!(
-                "{}: retain_regions removing {} regions",
+                "{}: retain_regions removing {} regions: {:?}",
                 self,
-                regions_to_remove.len()
+                regions_to_remove.len(),
+                regions_to_remove
+                    .iter()
+                    .map(|r| r.meta().id().to_string())
+                    .collect::<Vec<_>>()
             );
         }
 
         // Now remove them (read lock is released)
         for region in regions_to_remove {
-            debug!("{}: removing {}", self, region.meta());
+            let ref_count = std::sync::Arc::strong_count(region.arc());
+            debug!(
+                "{}: removing '{}' (arc count: {})",
+                self,
+                region.meta().id(),
+                ref_count
+            );
             region.remove()?;
         }
         Ok(())

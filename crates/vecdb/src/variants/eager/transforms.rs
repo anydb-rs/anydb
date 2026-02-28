@@ -1,5 +1,5 @@
 use crate::{
-    AnyVec, Exit, WritableVec, ReadableVec, Result, StoredVec, VecIndex, VecValue, Version,
+    AnyVec, BinaryTransform, Exit, WritableVec, ReadableVec, Result, StoredVec, VecIndex, VecValue, Version,
 };
 
 use super::EagerVec;
@@ -128,6 +128,27 @@ where
         })
     }
 
+    pub fn compute_binary<A, B, F>(
+        &mut self,
+        max_from: V::I,
+        source1: &impl ReadableVec<V::I, A>,
+        source2: &impl ReadableVec<V::I, B>,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        A: VecValue,
+        B: VecValue,
+        F: BinaryTransform<A, B, V::T>,
+    {
+        self.compute_transform2(
+            max_from,
+            source1,
+            source2,
+            |(h, a, b, ..)| (h, F::apply(a, b)),
+            exit,
+        )
+    }
+
     pub fn compute_transform3<A, B, C, F>(
         &mut self,
         max_from: V::I,
@@ -229,6 +250,38 @@ where
                 i += 1;
                 this.checked_push(idx, v)
             })
+        })
+    }
+
+    /// Compute values through an indirection: for each index i, produces
+    /// `source2[source1[i]]`. Collects both sources in bulk to avoid per-element lookups.
+    pub fn compute_indirect<A>(
+        &mut self,
+        max_from: V::I,
+        source1: &impl ReadableVec<V::I, A>,
+        source2: &impl ReadableVec<A, V::T>,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        A: VecValue + VecIndex,
+    {
+        self.compute_init(source1.version() + source2.version(), max_from, exit, |this| {
+            let skip = this.len();
+            let end = this.batch_end(source1.len());
+            if skip >= end {
+                return Ok(());
+            }
+
+            let keys: Vec<A> = source1.collect_range_at(skip, end);
+            let values: Vec<V::T> = source2.collect();
+
+            for (j, key) in keys.into_iter().enumerate() {
+                let idx = V::I::from(skip + j);
+                let v = values[key.to_usize()].clone();
+                this.checked_push(idx, v)?;
+            }
+
+            Ok(())
         })
     }
 

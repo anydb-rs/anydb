@@ -240,4 +240,16 @@ where
 
         Ok(())
     }
+
+    /// Validates computed version and truncates to `max_from` in one call.
+    ///
+    /// Equivalent to:
+    /// ```ignore
+    /// vec.validate_computed_version_or_reset(dep_version)?;
+    /// vec.truncate_if_needed(max_from)?;
+    /// ```
+    fn validate_and_truncate(&mut self, dep_version: Version, max_from: I) -> Result<()> {
+        self.validate_computed_version_or_reset(dep_version)?;
+        self.truncate_if_needed(max_from)
+    }
 }

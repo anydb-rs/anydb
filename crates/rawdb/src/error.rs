@@ -23,8 +23,8 @@ pub enum Error {
     #[error("Region already exists")]
     RegionAlreadyExists,
 
-    #[error("Cannot remove region: still held by {} reference(s)", ref_count - 1)]
-    RegionStillReferenced { ref_count: usize },
+    #[error("Cannot remove region '{id}': still held by {} reference(s)", ref_count - 1)]
+    RegionStillReferenced { id: String, ref_count: usize },
 
     // Write errors
     #[error("Write position {position} is beyond region length {region_len}")]
