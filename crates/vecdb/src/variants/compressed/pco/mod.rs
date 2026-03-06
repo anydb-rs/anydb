@@ -1,4 +1,4 @@
-use crate::{ReadWriteCompressedVec, Format, ReadOnlyCompressedVec, impl_vec_wrapper};
+use crate::{Format, ReadOnlyCompressedVec, ReadWriteCompressedVec, impl_vec_wrapper};
 
 mod strategy;
 mod r#trait;

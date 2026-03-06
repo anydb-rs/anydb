@@ -1,8 +1,8 @@
 use std::{collections::BTreeSet, fs, path::Path};
 
 use vecdb::{
-    AnyStoredVec, AnyVec, Database, WritableVec, ImportableVec, ReadableVec,
-    Stamp, Version, ZeroCopyVec,
+    AnyStoredVec, AnyVec, Database, ImportableVec, ReadableVec, Stamp, Version, WritableVec,
+    ZeroCopyVec,
 };
 
 #[allow(clippy::upper_case_acronyms)]

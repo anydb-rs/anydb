@@ -5,8 +5,7 @@ use std::{
 };
 
 use crate::{
-    AnyVec, Error, Exit, WritableVec, Result, ReadableVec, StoredVec, VecIndex, VecValue,
-    Version,
+    AnyVec, Error, Exit, ReadableVec, Result, StoredVec, VecIndex, VecValue, Version, WritableVec,
 };
 
 use super::{CheckedSub, EagerVec};
@@ -187,48 +186,55 @@ where
         // compressed page is decompressed at most once instead of once per element.
         let mut leaving = values.cursor();
 
-        self.compute_init(window_starts.version() + values.version(), max_from, exit, |this| {
-            let skip = this.len();
-            let source_len = window_starts.len().min(values.len());
-            let end = this.batch_end(source_len);
-            if skip >= end {
-                return Ok(());
-            }
-
-            let (mut running_sum, mut prev_start) = if skip > 0 {
-                let prev_idx = skip - 1;
-                let prev_start = window_starts.collect_one_at(prev_idx).unwrap();
-                let sum = this.collect_one_at(prev_idx).unwrap();
-                // Position cursor at the current window start.
-                if leaving.position() < prev_start.to_usize() {
-                    leaving.advance(prev_start.to_usize() - leaving.position());
-                }
-                (sum, prev_start)
-            } else {
-                (V::T::default(), V::I::from(0))
-            };
-
-            let starts_batch = window_starts.collect_range_at(skip, end);
-            let values_batch = values.collect_range_at(skip, end);
-
-            for (j, (start, value)) in starts_batch.into_iter().zip(values_batch).enumerate() {
-                let i = skip + j;
-                running_sum += V::T::from(value);
-
-                if prev_start < start {
-                    let n = start.to_usize() - prev_start.to_usize();
-                    leaving.for_each(n, |v: A| {
-                        running_sum -= V::T::from(v);
-                    });
-                    prev_start = start;
+        self.compute_init(
+            window_starts.version() + values.version(),
+            max_from,
+            exit,
+            |this| {
+                let skip = this.len();
+                let source_len = window_starts.len().min(values.len());
+                let end = this.batch_end(source_len);
+                if skip >= end {
+                    return Ok(());
                 }
 
-                this.checked_push_at(i, running_sum.clone())?;
-            }
+                let (mut running_sum, mut prev_start) = if skip > 0 {
+                    let prev_idx = skip - 1;
+                    let prev_start = window_starts.collect_one_at(prev_idx).unwrap();
+                    let sum = this.collect_one_at(prev_idx).unwrap();
+                    // Position cursor at the current window start.
+                    if leaving.position() < prev_start.to_usize() {
+                        leaving.advance(prev_start.to_usize() - leaving.position());
+                    }
+                    (sum, prev_start)
+                } else {
+                    (V::T::default(), V::I::from(0))
+                };
 
-            Ok(())
-        })
+                let starts_batch = window_starts.collect_range_at(skip, end);
+                let values_batch = values.collect_range_at(skip, end);
+
+                for (j, (start, value)) in starts_batch.into_iter().zip(values_batch).enumerate() {
+                    let i = skip + j;
+                    running_sum += V::T::from(value);
+
+                    if prev_start < start {
+                        let n = start.to_usize() - prev_start.to_usize();
+                        leaving.for_each(n, |v: A| {
+                            running_sum -= V::T::from(v);
+                        });
+                        prev_start = start;
+                    }
+
+                    this.checked_push_at(i, running_sum.clone())?;
+                }
+
+                Ok(())
+            },
+        )
     }
+
+
 
     /// Compute rolling average with variable window starts.
     /// For each index i, computes mean of values from `window_starts[i]` to i (inclusive).
@@ -248,51 +254,390 @@ where
         // compressed page is decompressed at most once instead of once per element.
         let mut leaving = values.cursor();
 
-        self.compute_init(window_starts.version() + values.version(), max_from, exit, |this| {
-            let skip = this.len();
-            let source_len = window_starts.len().min(values.len());
-            let end = this.batch_end(source_len);
-            if skip >= end {
-                return Ok(());
-            }
-
-            // Recover running_sum from stored average * window_count.
-            // Reads 2 values instead of window_count from source.
-            let (mut running_sum, mut prev_start) = if skip > 0 {
-                let prev_idx = skip - 1;
-                let prev_start = window_starts.collect_one_at(prev_idx).unwrap();
-                let stored_avg = f64::from(this.collect_one_at(prev_idx).unwrap());
-                let window_count = prev_idx + 1 - prev_start.to_usize();
-                if leaving.position() < prev_start.to_usize() {
-                    leaving.advance(prev_start.to_usize() - leaving.position());
-                }
-                (stored_avg * window_count as f64, prev_start)
-            } else {
-                (0.0_f64, V::I::from(0))
-            };
-
-            let starts_batch = window_starts.collect_range_at(skip, end);
-            let values_batch = values.collect_range_at(skip, end);
-
-            for (j, (start, value)) in starts_batch.into_iter().zip(values_batch).enumerate() {
-                let i = skip + j;
-                running_sum += f64::from(value);
-
-                if prev_start < start {
-                    let n = start.to_usize() - prev_start.to_usize();
-                    leaving.for_each(n, |v: A| {
-                        running_sum -= f64::from(v);
-                    });
-                    prev_start = start;
+        self.compute_init(
+            window_starts.version() + values.version(),
+            max_from,
+            exit,
+            |this| {
+                let skip = this.len();
+                let source_len = window_starts.len().min(values.len());
+                let end = this.batch_end(source_len);
+                if skip >= end {
+                    return Ok(());
                 }
 
-                let count = i - start.to_usize() + 1;
-                let avg = running_sum / count as f64;
-                this.checked_push_at(i, V::T::from(avg))?;
-            }
+                // Recover running_sum from stored average * window_count.
+                // Reads 2 values instead of window_count from source.
+                let (mut running_sum, mut prev_start) = if skip > 0 {
+                    let prev_idx = skip - 1;
+                    let prev_start = window_starts.collect_one_at(prev_idx).unwrap();
+                    let stored_avg = f64::from(this.collect_one_at(prev_idx).unwrap());
+                    let window_count = prev_idx + 1 - prev_start.to_usize();
+                    if leaving.position() < prev_start.to_usize() {
+                        leaving.advance(prev_start.to_usize() - leaving.position());
+                    }
+                    (stored_avg * window_count as f64, prev_start)
+                } else {
+                    (0.0_f64, V::I::from(0))
+                };
 
-            Ok(())
+                let starts_batch = window_starts.collect_range_at(skip, end);
+                let values_batch = values.collect_range_at(skip, end);
+
+                for (j, (start, value)) in starts_batch.into_iter().zip(values_batch).enumerate() {
+                    let i = skip + j;
+                    running_sum += f64::from(value);
+
+                    if prev_start < start {
+                        let n = start.to_usize() - prev_start.to_usize();
+                        leaving.for_each(n, |v: A| {
+                            running_sum -= f64::from(v);
+                        });
+                        prev_start = start;
+                    }
+
+                    let count = i - start.to_usize() + 1;
+                    let avg = running_sum / count as f64;
+                    this.checked_push_at(i, V::T::from(avg))?;
+                }
+
+                Ok(())
+            },
+        )
+    }
+
+    /// Compute rolling standard deviation with variable window starts.
+    /// For each index i, computes SD of values from `window_starts[i]` to i (inclusive),
+    /// using the provided rolling mean.
+    /// SD = sqrt(E[X²] - E[X]²) where E[X²] is the rolling mean of squares
+    /// and E[X] is the rolling mean from the `mean` parameter.
+    pub fn compute_rolling_sd<A, B>(
+        &mut self,
+        max_from: V::I,
+        window_starts: &impl ReadableVec<V::I, V::I>,
+        values: &impl ReadableVec<V::I, A>,
+        mean: &impl ReadableVec<V::I, B>,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        A: VecValue,
+        B: VecValue,
+        f64: From<A> + From<B> + From<V::T>,
+        V::T: From<f64>,
+    {
+        let mut leaving = values.cursor();
+
+        self.compute_init(
+            window_starts.version() + values.version() + mean.version(),
+            max_from,
+            exit,
+            |this| {
+                let skip = this.len();
+                let source_len = window_starts.len().min(values.len()).min(mean.len());
+                let end = this.batch_end(source_len);
+                if skip >= end {
+                    return Ok(());
+                }
+
+                let (mut running_sum_sq, mut prev_start) = if skip > 0 {
+                    let prev_idx = skip - 1;
+                    let prev_start = window_starts.collect_one_at(prev_idx).unwrap();
+                    let count = (prev_idx + 1 - prev_start.to_usize()) as f64;
+                    let sd_val = f64::from(this.collect_one_at(prev_idx).unwrap());
+                    let mean_val = f64::from(mean.collect_one_at(prev_idx).unwrap());
+                    let sum_sq = (sd_val * sd_val + mean_val * mean_val) * count;
+                    if leaving.position() < prev_start.to_usize() {
+                        leaving.advance(prev_start.to_usize() - leaving.position());
+                    }
+                    (sum_sq, prev_start)
+                } else {
+                    (0.0f64, V::I::from(0))
+                };
+
+                let starts_batch = window_starts.collect_range_at(skip, end);
+                let values_batch = values.collect_range_at(skip, end);
+                let mean_batch = mean.collect_range_at(skip, end);
+
+                for (j, ((start, value), m)) in starts_batch
+                    .into_iter()
+                    .zip(values_batch)
+                    .zip(mean_batch)
+                    .enumerate()
+                {
+                    let i = skip + j;
+                    let val = f64::from(value);
+                    running_sum_sq += val * val;
+
+                    if prev_start < start {
+                        let n = start.to_usize() - prev_start.to_usize();
+                        leaving.for_each(n, |v: A| {
+                            let old = f64::from(v);
+                            running_sum_sq -= old * old;
+                        });
+                        prev_start = start;
+                    }
+
+                    let count = (i - start.to_usize() + 1) as f64;
+                    let mean_val = f64::from(m);
+                    let variance = (running_sum_sq / count - mean_val * mean_val).max(0.0);
+                    this.checked_push_at(i, V::T::from(variance.sqrt()))?;
+                }
+
+                Ok(())
+            },
+        )
+    }
+
+    /// Compute expanding (all-time) standard deviation.
+    /// For each index i, computes SD of all values from 0 to i (inclusive).
+    /// SD = sqrt(E[X²] - E[X]²).
+    pub fn compute_expanding_sd<A, B>(
+        &mut self,
+        max_from: V::I,
+        values: &impl ReadableVec<V::I, A>,
+        mean: &impl ReadableVec<V::I, B>,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        A: VecValue,
+        B: VecValue,
+        f64: From<A> + From<B> + From<V::T>,
+        V::T: From<f64>,
+    {
+        self.compute_init(
+            values.version() + mean.version(),
+            max_from,
+            exit,
+            |this| {
+                let skip = this.len();
+                let source_len = values.len().min(mean.len());
+                let end = this.batch_end(source_len);
+                if skip >= end {
+                    return Ok(());
+                }
+
+                let mut running_sum_sq = if skip > 0 {
+                    let count = skip as f64;
+                    let sd_val = f64::from(this.collect_one_at(skip - 1).unwrap());
+                    let mean_val = f64::from(mean.collect_one_at(skip - 1).unwrap());
+                    (sd_val * sd_val + mean_val * mean_val) * count
+                } else {
+                    0.0f64
+                };
+
+                let values_batch = values.collect_range_at(skip, end);
+                let mean_batch = mean.collect_range_at(skip, end);
+
+                for (j, (value, m)) in values_batch.into_iter().zip(mean_batch).enumerate() {
+                    let i = skip + j;
+                    let val = f64::from(value);
+                    running_sum_sq += val * val;
+
+                    let count = (i + 1) as f64;
+                    let mean_val = f64::from(m);
+                    let variance = (running_sum_sq / count - mean_val * mean_val).max(0.0);
+                    this.checked_push_at(i, V::T::from(variance.sqrt()))?;
+                }
+
+                Ok(())
+            },
+        )
+    }
+
+    /// Compute rolling EMA with variable window starts.
+    /// For each index i, computes an exponential moving average with
+    /// α = 2/(span+1) where span = i - window_starts[i] + 1.
+    /// Compute rolling EMA with variable window starts.
+    /// α = 2/(span+1) where span = i - window_starts[i] + 1.
+    pub fn compute_rolling_ema<A>(
+        &mut self,
+        max_from: V::I,
+        window_starts: &impl ReadableVec<V::I, V::I>,
+        values: &impl ReadableVec<V::I, A>,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        A: VecValue,
+        f64: From<A> + From<V::T>,
+        V::T: From<f64> + Default,
+    {
+        self.compute_rolling_exponential(max_from, window_starts, values, exit, |span| {
+            2.0 / (span + 1.0)
         })
+    }
+
+    /// Compute rolling RMA (Wilder's smoothing) with variable window starts.
+    /// α = 1/span where span = i - window_starts[i] + 1.
+    pub fn compute_rolling_rma<A>(
+        &mut self,
+        max_from: V::I,
+        window_starts: &impl ReadableVec<V::I, V::I>,
+        values: &impl ReadableVec<V::I, A>,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        A: VecValue,
+        f64: From<A> + From<V::T>,
+        V::T: From<f64> + Default,
+    {
+        self.compute_rolling_exponential(max_from, window_starts, values, exit, |span| 1.0 / span)
+    }
+
+    fn compute_rolling_exponential<A, F>(
+        &mut self,
+        max_from: V::I,
+        window_starts: &impl ReadableVec<V::I, V::I>,
+        values: &impl ReadableVec<V::I, A>,
+        exit: &Exit,
+        alpha_fn: F,
+    ) -> Result<()>
+    where
+        A: VecValue,
+        f64: From<A> + From<V::T>,
+        V::T: From<f64> + Default,
+        F: Fn(f64) -> f64,
+    {
+        self.compute_init(
+            Version::new(2) + window_starts.version() + values.version(),
+            max_from,
+            exit,
+            |this| {
+                let skip = this.len();
+                let source_len = window_starts.len().min(values.len());
+                let end = this.batch_end(source_len);
+                if skip >= end {
+                    return Ok(());
+                }
+
+                let mut prev = if skip > 0 {
+                    f64::from(this.collect_one_at(skip - 1).unwrap())
+                } else {
+                    0.0_f64
+                };
+
+                let starts_batch = window_starts.collect_range_at(skip, end);
+                let values_batch = values.collect_range_at(skip, end);
+
+                for (j, (start, value)) in starts_batch.into_iter().zip(values_batch).enumerate() {
+                    let i = skip + j;
+                    let span = (i - start.to_usize() + 1) as f64;
+                    let alpha = alpha_fn(span);
+                    let value = f64::from(value);
+                    prev = alpha * value + (1.0 - alpha) * prev;
+                    this.checked_push_at(i, V::T::from(prev))?;
+                }
+
+                Ok(())
+            },
+        )
+    }
+
+    /// Compute rolling maximum with variable window starts (deque-based).
+    pub fn compute_rolling_max_from_starts<A>(
+        &mut self,
+        max_from: V::I,
+        window_starts: &impl ReadableVec<V::I, V::I>,
+        source: &impl ReadableVec<V::I, A>,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        A: VecValue + Ord,
+        V::T: From<A>,
+    {
+        self.compute_rolling_monotonic_from_starts(
+            max_from,
+            window_starts,
+            source,
+            exit,
+            |back, new| *back <= *new,
+        )
+    }
+
+    /// Compute rolling minimum with variable window starts (deque-based).
+    pub fn compute_rolling_min_from_starts<A>(
+        &mut self,
+        max_from: V::I,
+        window_starts: &impl ReadableVec<V::I, V::I>,
+        source: &impl ReadableVec<V::I, A>,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        A: VecValue + Ord,
+        V::T: From<A>,
+    {
+        self.compute_rolling_monotonic_from_starts(
+            max_from,
+            window_starts,
+            source,
+            exit,
+            |back, new| *back >= *new,
+        )
+    }
+
+    fn compute_rolling_monotonic_from_starts<A, F>(
+        &mut self,
+        max_from: V::I,
+        window_starts: &impl ReadableVec<V::I, V::I>,
+        source: &impl ReadableVec<V::I, A>,
+        exit: &Exit,
+        should_pop: F,
+    ) -> Result<()>
+    where
+        A: VecValue + Ord,
+        V::T: From<A>,
+        F: Fn(&A, &A) -> bool,
+    {
+        self.compute_init(
+            window_starts.version() + source.version(),
+            max_from,
+            exit,
+            |this| {
+                let skip = this.len();
+                let source_len = window_starts.len().min(source.len());
+                let end = this.batch_end(source_len);
+                if skip >= end {
+                    return Ok(());
+                }
+
+                // Rebuild deque from source values in the current window
+                let mut deque: VecDeque<(usize, A)> = VecDeque::new();
+                if skip > 0 {
+                    let window_start = window_starts.collect_one_at(skip - 1).unwrap().to_usize();
+                    let window_values = source.collect_range_at(window_start, skip);
+                    for (k, v) in (window_start..skip).zip(window_values) {
+                        while deque.back().is_some_and(|(_, dv)| should_pop(dv, &v)) {
+                            deque.pop_back();
+                        }
+                        deque.push_back((k, v));
+                    }
+                }
+
+                let starts_batch = window_starts.collect_range_at(skip, end);
+                let values_batch = source.collect_range_at(skip, end);
+
+                for (j, (start, value)) in starts_batch.into_iter().zip(values_batch).enumerate() {
+                    let i = skip + j;
+                    let ws = start.to_usize();
+
+                    while let Some(&(idx, _)) = deque.front() {
+                        if idx < ws {
+                            deque.pop_front();
+                        } else {
+                            break;
+                        }
+                    }
+
+                    while deque.back().is_some_and(|(_, v)| should_pop(v, &value)) {
+                        deque.pop_back();
+                    }
+                    deque.push_back((i, value));
+
+                    this.checked_push_at(i, V::T::from(deque.front().unwrap().1.clone()))?;
+                }
+
+                Ok(())
+            },
+        )
     }
 
     /// Compute rolling ratio with variable window starts.
@@ -320,81 +665,82 @@ where
             max_from,
             exit,
             |this| {
-            let skip = this.len();
-            let source_len = window_starts
-                .len()
-                .min(numerator.len())
-                .min(denominator.len());
-            let end = this.batch_end(source_len);
-            if skip >= end {
-                return Ok(());
-            }
-
-            // Recover running_sum from stored_ratio * denom[prev_idx].
-            // Reads 3 values instead of window_count from numerator.
-            // Falls back to full scan when prev denom is 0.
-            let (mut running_sum, mut prev_start) = if skip > 0 {
-                let prev_idx = skip - 1;
-                let prev_start = window_starts.collect_one_at(prev_idx).unwrap();
-                let prev_denom = f64::from(denominator.collect_one_at(prev_idx).unwrap());
-                if prev_denom != 0.0 {
-                    let stored_ratio = f64::from(this.collect_one_at(prev_idx).unwrap());
-                    if leaving.position() < prev_start.to_usize() {
-                        leaving.advance(prev_start.to_usize() - leaving.position());
-                    }
-                    (stored_ratio * prev_denom, prev_start)
-                } else {
-                    let mut sum = 0.0_f64;
-                    // Full scan fallback — position cursor at window start
-                    // so the main loop can subtract leaving values correctly.
-                    if leaving.position() < prev_start.to_usize() {
-                        leaving.advance(prev_start.to_usize() - leaving.position());
-                    }
-                    numerator.for_each_range_dyn_at(
-                        prev_start.to_usize(),
-                        prev_idx + 1,
-                        &mut |v: A| {
-                            sum += f64::from(v);
-                        },
-                    );
-                    (sum, prev_start)
-                }
-            } else {
-                (0.0_f64, V::I::from(0))
-            };
-
-            let starts_batch = window_starts.collect_range_at(skip, end);
-            let num_batch = numerator.collect_range_at(skip, end);
-            let denom_batch = denominator.collect_range_at(skip, end);
-
-            for (j, ((start, num_val), denom_val)) in starts_batch
-                .into_iter()
-                .zip(num_batch)
-                .zip(denom_batch)
-                .enumerate()
-            {
-                let i = skip + j;
-                running_sum += f64::from(num_val);
-
-                if prev_start < start {
-                    let n = start.to_usize() - prev_start.to_usize();
-                    leaving.for_each(n, |v: A| {
-                        running_sum -= f64::from(v);
-                    });
-                    prev_start = start;
+                let skip = this.len();
+                let source_len = window_starts
+                    .len()
+                    .min(numerator.len())
+                    .min(denominator.len());
+                let end = this.batch_end(source_len);
+                if skip >= end {
+                    return Ok(());
                 }
 
-                let denom = f64::from(denom_val);
-                let ratio = if denom != 0.0 {
-                    running_sum / denom
+                // Recover running_sum from stored_ratio * denom[prev_idx].
+                // Reads 3 values instead of window_count from numerator.
+                // Falls back to full scan when prev denom is 0.
+                let (mut running_sum, mut prev_start) = if skip > 0 {
+                    let prev_idx = skip - 1;
+                    let prev_start = window_starts.collect_one_at(prev_idx).unwrap();
+                    let prev_denom = f64::from(denominator.collect_one_at(prev_idx).unwrap());
+                    if prev_denom != 0.0 {
+                        let stored_ratio = f64::from(this.collect_one_at(prev_idx).unwrap());
+                        if leaving.position() < prev_start.to_usize() {
+                            leaving.advance(prev_start.to_usize() - leaving.position());
+                        }
+                        (stored_ratio * prev_denom, prev_start)
+                    } else {
+                        let mut sum = 0.0_f64;
+                        // Full scan fallback — position cursor at window start
+                        // so the main loop can subtract leaving values correctly.
+                        if leaving.position() < prev_start.to_usize() {
+                            leaving.advance(prev_start.to_usize() - leaving.position());
+                        }
+                        numerator.for_each_range_dyn_at(
+                            prev_start.to_usize(),
+                            prev_idx + 1,
+                            &mut |v: A| {
+                                sum += f64::from(v);
+                            },
+                        );
+                        (sum, prev_start)
+                    }
                 } else {
-                    0.0
+                    (0.0_f64, V::I::from(0))
                 };
-                this.checked_push_at(i, V::T::from(ratio))?;
-            }
 
-            Ok(())
-        })
+                let starts_batch = window_starts.collect_range_at(skip, end);
+                let num_batch = numerator.collect_range_at(skip, end);
+                let denom_batch = denominator.collect_range_at(skip, end);
+
+                for (j, ((start, num_val), denom_val)) in starts_batch
+                    .into_iter()
+                    .zip(num_batch)
+                    .zip(denom_batch)
+                    .enumerate()
+                {
+                    let i = skip + j;
+                    running_sum += f64::from(num_val);
+
+                    if prev_start < start {
+                        let n = start.to_usize() - prev_start.to_usize();
+                        leaving.for_each(n, |v: A| {
+                            running_sum -= f64::from(v);
+                        });
+                        prev_start = start;
+                    }
+
+                    let denom = f64::from(denom_val);
+                    let ratio = if denom != 0.0 {
+                        running_sum / denom
+                    } else {
+                        0.0
+                    };
+                    this.checked_push_at(i, V::T::from(ratio))?;
+                }
+
+                Ok(())
+            },
+        )
     }
 
     pub fn compute_sma<A>(
@@ -498,8 +844,7 @@ where
         fn median(buf: &VecDeque<f32>, scratch: &mut Vec<f32>) -> f32 {
             scratch.clear();
             scratch.extend(buf.iter().copied());
-            let cmp =
-                |a: &f32, b: &f32| a.partial_cmp(b).unwrap_or(Ordering::Equal);
+            let cmp = |a: &f32, b: &f32| a.partial_cmp(b).unwrap_or(Ordering::Equal);
             let mid = scratch.len() / 2;
             scratch.select_nth_unstable_by(mid, cmp);
             if scratch.len().is_multiple_of(2) {

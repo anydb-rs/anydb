@@ -58,9 +58,6 @@ pub enum Error {
     #[error("Corrupted metadata: {0}")]
     CorruptedMetadata(String),
 
-    #[error("Write retry limit exceeded after {retries} attempts")]
-    WriteRetryLimitExceeded { retries: usize },
-
     #[error("Region size would overflow: current={current}, requested={requested}")]
     RegionSizeOverflow { current: usize, requested: usize },
 

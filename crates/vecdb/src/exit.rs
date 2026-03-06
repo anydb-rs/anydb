@@ -1,8 +1,8 @@
 use std::{
     process::exit,
     sync::{
-        atomic::{AtomicBool, AtomicI32, Ordering},
         Arc,
+        atomic::{AtomicBool, AtomicI32, Ordering},
     },
     thread,
 };
@@ -61,7 +61,10 @@ impl Exit {
     /// Panics if pipe creation or `sigaction` fails.
     pub fn set_ctrlc_handler(&self) {
         let mut fds = [0i32; 2];
-        assert!(unsafe { libc::pipe(fds.as_mut_ptr()) } == 0, "failed to create pipe");
+        assert!(
+            unsafe { libc::pipe(fds.as_mut_ptr()) } == 0,
+            "failed to create pipe"
+        );
 
         let read_fd = fds[0];
         SIGNAL_PIPE.store(fds[1], Ordering::Relaxed);

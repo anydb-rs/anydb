@@ -430,7 +430,7 @@ fn test_set_min_regions() -> Result<()> {
     db.set_min_regions(100)?;
 
     // File should be large enough for 100 regions
-    let file_len = db.file_len()?;
+    let file_len = db.file_len();
     assert!(file_len >= 100 * PAGE_SIZE);
 
     Ok(())
@@ -1312,7 +1312,7 @@ fn test_set_min_len_preallocate() -> Result<()> {
     let large_size = PAGE_SIZE * 1000;
     db.set_min_len(large_size)?;
 
-    let file_len = db.file_len()?;
+    let file_len = db.file_len();
     assert!(file_len >= large_size);
 
     // Should still be able to write
@@ -1564,7 +1564,12 @@ fn test_comprehensive_db_operations() -> Result<()> {
 
         assert!(start_to_index.get(&0).unwrap().ptr_eq(&region1));
         assert!(start_to_index.get(&PAGE_SIZE).unwrap().ptr_eq(&region2));
-        assert!(start_to_index.get(&(PAGE_SIZE * 2)).unwrap().ptr_eq(&region3));
+        assert!(
+            start_to_index
+                .get(&(PAGE_SIZE * 2))
+                .unwrap()
+                .ptr_eq(&region3)
+        );
         assert!(layout.start_to_hole().is_empty());
     }
 
@@ -1596,7 +1601,12 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 2);
         assert!(start_to_index.get(&0).unwrap().ptr_eq(&region1));
-        assert!(start_to_index.get(&(PAGE_SIZE * 2)).unwrap().ptr_eq(&region3));
+        assert!(
+            start_to_index
+                .get(&(PAGE_SIZE * 2))
+                .unwrap()
+                .ptr_eq(&region3)
+        );
         let start_to_hole = layout.start_to_hole();
         assert!(start_to_hole.len() == 1);
         assert!(start_to_hole.get(&PAGE_SIZE) == Some(&PAGE_SIZE));
@@ -1639,7 +1649,12 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 2);
         assert!(start_to_index.get(&0).unwrap().ptr_eq(&region1));
-        assert!(start_to_index.get(&(PAGE_SIZE * 2)).unwrap().ptr_eq(&region3));
+        assert!(
+            start_to_index
+                .get(&(PAGE_SIZE * 2))
+                .unwrap()
+                .ptr_eq(&region3)
+        );
 
         let start_to_hole = layout.start_to_hole();
         assert!(start_to_hole.len() == 1);
@@ -1677,7 +1692,12 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 2);
         assert!(start_to_index.get(&0).unwrap().ptr_eq(&region1));
-        assert!(start_to_index.get(&(PAGE_SIZE * 2)).unwrap().ptr_eq(&region3));
+        assert!(
+            start_to_index
+                .get(&(PAGE_SIZE * 2))
+                .unwrap()
+                .ptr_eq(&region3)
+        );
         let start_to_hole = layout.start_to_hole();
         assert!(start_to_hole.is_empty());
     }
@@ -1713,8 +1733,18 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 3);
         assert!(start_to_index.get(&0).unwrap().ptr_eq(&region1));
-        assert!(start_to_index.get(&(PAGE_SIZE * 2)).unwrap().ptr_eq(&region3));
-        assert!(start_to_index.get(&(PAGE_SIZE * 3)).unwrap().ptr_eq(&region2));
+        assert!(
+            start_to_index
+                .get(&(PAGE_SIZE * 2))
+                .unwrap()
+                .ptr_eq(&region3)
+        );
+        assert!(
+            start_to_index
+                .get(&(PAGE_SIZE * 3))
+                .unwrap()
+                .ptr_eq(&region2)
+        );
         let start_to_hole = layout.start_to_hole();
         assert!(start_to_hole.is_empty());
     }
@@ -1747,7 +1777,12 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 2);
         assert!(start_to_index.get(&0).unwrap().ptr_eq(&region1));
-        assert!(start_to_index.get(&(PAGE_SIZE * 3)).unwrap().ptr_eq(&region2));
+        assert!(
+            start_to_index
+                .get(&(PAGE_SIZE * 3))
+                .unwrap()
+                .ptr_eq(&region2)
+        );
         let start_to_hole = layout.start_to_hole();
         assert!(start_to_hole.get(&(PAGE_SIZE * 2)) == Some(&PAGE_SIZE));
     }
@@ -1779,8 +1814,18 @@ fn test_comprehensive_db_operations() -> Result<()> {
         let layout = db.layout();
         let start_to_index = layout.start_to_region();
         assert!(start_to_index.len() == 2);
-        assert!(start_to_index.get(&(PAGE_SIZE * 4)).unwrap().ptr_eq(&region1));
-        assert!(start_to_index.get(&(PAGE_SIZE * 3)).unwrap().ptr_eq(&region2));
+        assert!(
+            start_to_index
+                .get(&(PAGE_SIZE * 4))
+                .unwrap()
+                .ptr_eq(&region1)
+        );
+        assert!(
+            start_to_index
+                .get(&(PAGE_SIZE * 3))
+                .unwrap()
+                .ptr_eq(&region2)
+        );
         let start_to_hole = layout.start_to_hole();
         assert!(start_to_hole.get(&0) == Some(&(PAGE_SIZE * 3)));
     }

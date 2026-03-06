@@ -1,6 +1,6 @@
 use std::ops::{Add, AddAssign};
 
-use crate::{AnyVec, Exit, WritableVec, ReadableVec, Result, StoredVec, VecIndex, VecValue};
+use crate::{AnyVec, Exit, ReadableVec, Result, StoredVec, VecIndex, VecValue, WritableVec};
 
 use super::EagerVec;
 
@@ -90,31 +90,36 @@ where
     {
         let target_len = source1.len().min(source2.len());
 
-        self.compute_init(source1.version() + source2.version(), max_from, exit, |this| {
-            let skip = this.len();
-            let end = this.batch_end(target_len);
-            if skip >= end {
-                return Ok(());
-            }
+        self.compute_init(
+            source1.version() + source2.version(),
+            max_from,
+            exit,
+            |this| {
+                let skip = this.len();
+                let end = this.batch_end(target_len);
+                if skip >= end {
+                    return Ok(());
+                }
 
-            let mut cumulative_val = if skip > 0 {
-                this.collect_one_at(skip - 1).unwrap()
-            } else {
-                V::T::from(0_usize)
-            };
+                let mut cumulative_val = if skip > 0 {
+                    this.collect_one_at(skip - 1).unwrap()
+                } else {
+                    V::T::from(0_usize)
+                };
 
-            let batch2 = source2.collect_range_at(skip, end);
-            let mut iter2 = batch2.into_iter();
-            let mut i = skip;
+                let batch2 = source2.collect_range_at(skip, end);
+                let mut iter2 = batch2.into_iter();
+                let mut i = skip;
 
-            source1.try_fold_range_at(skip, end, (), |(), v1: S1| {
-                let v2 = iter2.next().unwrap();
-                cumulative_val += transform(v1, v2);
-                this.checked_push_at(i, cumulative_val)?;
-                i += 1;
-                Ok(())
-            })
-        })
+                source1.try_fold_range_at(skip, end, (), |(), v1: S1| {
+                    let v2 = iter2.next().unwrap();
+                    cumulative_val += transform(v1, v2);
+                    this.checked_push_at(i, cumulative_val)?;
+                    i += 1;
+                    Ok(())
+                })
+            },
+        )
     }
 
     /// Compute cumulative count of values matching a predicate.

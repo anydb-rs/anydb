@@ -37,7 +37,11 @@ where
     let vec_a_reader: V = V::forced_import(&database, "vec_a", version)?;
 
     // vec_b should see all 100 values written by vec_a
-    assert_eq!(vec_a_reader.len(), 100, "vec_b should see vec_a's written data");
+    assert_eq!(
+        vec_a_reader.len(),
+        100,
+        "vec_b should see vec_a's written data"
+    );
 
     for i in 0..100usize {
         assert_eq!(
@@ -110,7 +114,10 @@ where
         .collect();
 
     let actual_c: Vec<u32> = vec_c_verify.collect();
-    assert_eq!(actual_c, expected_c, "compute chain should produce correct results");
+    assert_eq!(
+        actual_c, expected_c,
+        "compute chain should produce correct results"
+    );
 
     Ok(())
 }
@@ -137,7 +144,10 @@ where
     assert!(vec.write()?, "write() with data should return true");
 
     // Second write with no new data should return false
-    assert!(!vec.write()?, "write() after already written should return false");
+    assert!(
+        !vec.write()?,
+        "write() after already written should return false"
+    );
 
     // Push more data
     vec.push(43);

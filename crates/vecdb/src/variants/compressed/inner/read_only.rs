@@ -51,7 +51,14 @@ where
     }
 
     #[inline(always)]
-    fn fold_source<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, len: usize, init: B, f: F) -> B {
+    fn fold_source<B, F: FnMut(B, T) -> B>(
+        &self,
+        from: usize,
+        to: usize,
+        len: usize,
+        init: B,
+        f: F,
+    ) -> B {
         let range_bytes = (to - from) * size_of::<T>();
         if range_bytes > MMAP_CROSSOVER_BYTES {
             CompressedIoSource::<I, T, S>::new_from_parts(

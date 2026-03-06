@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::{Error, Result, ZeroCopyVecValue, ValueStrategy, variants::raw::RawStrategy};
+use crate::{Error, Result, ValueStrategy, ZeroCopyVecValue, variants::raw::RawStrategy};
 
 /// Serialization strategy using zerocopy for native byte order access.
 ///

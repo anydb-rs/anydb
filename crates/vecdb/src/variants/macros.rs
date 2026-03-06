@@ -224,10 +224,7 @@ macro_rules! impl_vec_wrapper {
             }
 
             #[inline]
-            fn stamped_write_with_changes(
-                &mut self,
-                stamp: $crate::Stamp,
-            ) -> $crate::Result<()> {
+            fn stamped_write_with_changes(&mut self, stamp: $crate::Stamp) -> $crate::Result<()> {
                 self.0.stamped_write_with_changes(stamp)
             }
 
@@ -236,7 +233,10 @@ macro_rules! impl_vec_wrapper {
                 self.0.rollback()
             }
 
-            fn find_rollback_files(&self) -> $crate::Result<::std::collections::BTreeMap<$crate::Stamp, ::std::path::PathBuf>> {
+            fn find_rollback_files(
+                &self,
+            ) -> $crate::Result<::std::collections::BTreeMap<$crate::Stamp, ::std::path::PathBuf>>
+            {
                 self.0.find_rollback_files()
             }
 
@@ -317,7 +317,6 @@ macro_rules! impl_vec_wrapper {
                 $crate::ReadableVec::<I, T>::try_fold_range_at(&self.0, from, to, init, f)
             }
         }
-
     };
 }
 

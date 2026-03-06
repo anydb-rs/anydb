@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use crate::{AnyReadableVec, Formattable, ReadableVec, TypedVec, ValueWriter, VecIteratorWriter};
 
 pub trait AnyVecWithWriter: AnyReadableVec {
@@ -21,8 +19,7 @@ where
 
         let values = self.collect_range_at(from_usize, to_usize);
         Box::new(VecIteratorWriter {
-            iter: Box::new(values.into_iter()),
-            _phantom: PhantomData as PhantomData<V::T>,
+            iter: values.into_iter(),
         })
     }
 }

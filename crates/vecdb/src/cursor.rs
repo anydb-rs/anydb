@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use crate::{READ_CHUNK_SIZE, ReadableVec, VecIndex, VecValue};
 
 /// Forward-only reader that reuses an internal buffer across chunked `read_into_at` calls.
@@ -13,8 +15,8 @@ use crate::{READ_CHUNK_SIZE, ReadableVec, VecIndex, VecValue};
 ///     // process val
 /// }
 /// ```
-pub struct Cursor<'a, I: VecIndex, T: VecValue> {
-    source: &'a dyn ReadableVec<I, T>,
+pub struct Cursor<'a, I: VecIndex, T: VecValue, V: ReadableVec<I, T> + ?Sized = dyn ReadableVec<I, T>> {
+    source: &'a V,
     buf: Vec<T>,
     /// Absolute position of buf[0] in the source vec.
     buf_start: usize,
@@ -22,31 +24,22 @@ pub struct Cursor<'a, I: VecIndex, T: VecValue> {
     pos: usize,
     chunk_size: usize,
     len: usize,
+    _phantom: PhantomData<I>,
 }
 
-impl<'a, I: VecIndex, T: VecValue> Cursor<'a, I, T> {
+impl<'a, I: VecIndex, T: VecValue, V: ReadableVec<I, T> + ?Sized> Cursor<'a, I, T, V> {
     /// Creates a new cursor with default chunk size ([`READ_CHUNK_SIZE`]).
     #[inline]
-    pub fn new<V: ReadableVec<I, T>>(source: &'a V) -> Self {
-        Self::init(source, READ_CHUNK_SIZE)
-    }
-
-    /// Creates a new cursor from a trait object with default chunk size.
-    #[inline]
-    pub fn from_dyn(source: &'a dyn ReadableVec<I, T>) -> Self {
-        Self::init(source, READ_CHUNK_SIZE)
-    }
-
-    #[inline]
-    fn init(source: &'a dyn ReadableVec<I, T>, chunk_size: usize) -> Self {
+    pub fn new(source: &'a V) -> Self {
         let len = source.len();
         Self {
             source,
-            buf: Vec::with_capacity(chunk_size.min(len)),
+            buf: Vec::with_capacity(READ_CHUNK_SIZE.min(len)),
             buf_start: 0,
             pos: 0,
-            chunk_size,
+            chunk_size: READ_CHUNK_SIZE,
             len,
+            _phantom: PhantomData,
         }
     }
 

@@ -5,7 +5,10 @@ use std::{
     fmt,
     fs::{self, File, OpenOptions},
     path::{Path, PathBuf},
-    sync::{Arc, Weak},
+    sync::{
+        Arc, Weak,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use log::{debug, trace};
@@ -61,7 +64,7 @@ pub struct Database(Arc<DatabaseInner>);
 /// 3. mmap       (Database-level: memory-mapped file)
 /// 4. file       (Database-level: file handle)
 /// 5. meta       (Region-level: per-region metadata)
-/// 6. dirty_ranges (Region-level: per-region dirty tracking)
+/// 6. dirty_bounds (Region-level: per-region dirty tracking)
 /// ```
 ///
 /// If you need multiple locks, acquire them top-to-bottom. Never hold a
@@ -75,6 +78,9 @@ struct DatabaseInner {
     regions: RwLock<Regions>,
     mmap: RwLock<MmapMut>,
     file: RwLock<File>,
+    /// Cached file length (updated under file write lock, read lock-free).
+    /// Avoids fstat syscalls on the hot path of set_min_len.
+    cached_file_len: AtomicUsize,
 }
 
 impl Database {
@@ -102,10 +108,11 @@ impl Database {
 
         file.try_lock()?;
 
-        let file_len = file.metadata()?.len() as usize;
+        let mut file_len = file.metadata()?.len() as usize;
         if file_len < min_len {
             file.set_len(min_len as u64)?;
             file.sync_all()?;
+            file_len = min_len;
         }
 
         let regions = Regions::open(path)?;
@@ -118,6 +125,7 @@ impl Database {
             regions: RwLock::new(regions),
             mmap: RwLock::new(mmap),
             file: RwLock::new(file),
+            cached_file_len: AtomicUsize::new(file_len),
         }));
 
         db.regions_mut().fill(&db)?;
@@ -129,24 +137,27 @@ impl Database {
     }
 
     /// Returns the current length of the database file in bytes.
-    pub fn file_len(&self) -> Result<usize> {
-        Ok(self.file().metadata()?.len() as usize)
+    ///
+    /// Uses a cached value (no syscall). The cache is updated under the file
+    /// write lock whenever the file grows.
+    #[inline]
+    pub fn file_len(&self) -> usize {
+        self.0.cached_file_len.load(Ordering::Relaxed)
     }
 
     /// Ensures the database file is at least the specified length.
     ///
-    /// This pre-allocates file space to avoid expensive growth during writes.
-    /// The length is rounded up to the next page size multiple (4096 bytes).
+    /// Doubles the file size when growth is needed, with a 1 MiB floor.
+    /// Empty space is free (sparse file), so this amortizes mmap recreations
+    /// when many regions grow at once.
     pub fn set_min_len(&self, len: usize) -> Result<()> {
         let len = Self::ceil_number_to_page_size_multiple(len);
 
-        // Quick check without lock
-        let file_len = self.file_len()?;
-        if file_len >= len {
+        // Quick check via cached length (no syscall, no lock)
+        if self.file_len() >= len {
             return Ok(());
         }
 
-        debug!("{}: set_min_len({})", self, len);
         trace!("{}: set_min_len acquiring mmap_mut", self);
         let mut mmap = self.mmap_mut();
         trace!("{}: set_min_len acquiring file_mut", self);
@@ -154,13 +165,17 @@ impl Database {
 
         // Re-check after acquiring lock - another thread may have extended the file
         // while we were waiting. Without this check, we could TRUNCATE the file.
-        let current_len = file.metadata()?.len() as usize;
+        let current_len = self.file_len();
         if current_len >= len {
             return Ok(());
         }
 
-        trace!("{}: set_min_len extending file", self);
-        file.set_len(len as u64)?;
+        let target_len = Self::ceil_number_to_page_size_multiple(
+            len.max(current_len * 2).max(1024 * 1024),
+        );
+        debug!("{}: set_min_len to {} (requested {})", self, target_len, len);
+        file.set_len(target_len as u64)?;
+        self.0.cached_file_len.store(target_len, Ordering::Relaxed);
         *mmap = create_mmap(&file)?;
         Ok(())
     }
@@ -185,21 +200,27 @@ impl Database {
             return Ok(region);
         }
 
-        // Pre-extend outside lock if needed (file I/O shouldn't block other threads)
+        // Pre-extend outside lock so file I/O doesn't block other threads
         let layout = self.layout();
         if layout.find_smallest_adequate_hole(PAGE_SIZE).is_none() {
             let end = layout.len();
             drop(layout);
-            self.set_min_len(end + PAGE_SIZE * 16)?;
+            self.set_min_len(end + PAGE_SIZE)?;
         } else {
             drop(layout);
         }
 
         // Lock order: layout → regions
         debug!("{}: create_region_if_needed '{}'", self, id);
-        trace!("{}: create_region_if_needed '{}' acquiring layout_mut", self, id);
+        trace!(
+            "{}: create_region_if_needed '{}' acquiring layout_mut",
+            self, id
+        );
         let mut layout = self.layout_mut();
-        trace!("{}: create_region_if_needed '{}' acquiring regions_mut", self, id);
+        trace!(
+            "{}: create_region_if_needed '{}' acquiring regions_mut",
+            self, id
+        );
         let mut regions = self.regions_mut();
 
         // Double-check after lock (another thread may have created it)
@@ -224,7 +245,7 @@ impl Database {
         write_to_mmap(&self.mmap(), start, data);
     }
 
-    /// Copy data within the mmap, chunked to avoid excessive memory pressure.
+    /// Copy data within the mmap.
     ///
     /// Returns an error if source and destination ranges overlap.
     pub(crate) fn copy(&self, src: usize, dst: usize, len: usize) -> Result<()> {
@@ -232,7 +253,6 @@ impl Database {
             return Ok(());
         }
 
-        // Check for overlapping ranges
         let src_end = src + len;
         let dst_end = dst + len;
         if !(src_end <= dst || dst_end <= src) {
@@ -244,23 +264,8 @@ impl Database {
             });
         }
 
-        const CHUNK_SIZE: usize = GiB; // 1GB chunks
         let mmap = self.mmap();
-        for offset in (0..len).step_by(CHUNK_SIZE) {
-            let chunk_len = (len - offset).min(CHUNK_SIZE);
-            let src_start = src + offset;
-            let dst_start = dst + offset;
-            write_to_mmap(&mmap, dst_start, &mmap[src_start..src_start + chunk_len]);
-        }
-        Ok(())
-    }
-
-    /// Flushes dirty ranges to disk.
-    pub(crate) fn flush_ranges(&self, ranges: Vec<(usize, usize)>) -> Result<()> {
-        let mmap = self.mmap();
-        for (start, end) in ranges {
-            mmap.flush_range(start, end - start)?;
-        }
+        write_to_mmap(&mmap, dst, &mmap[src..src_end]);
         Ok(())
     }
 
@@ -297,13 +302,14 @@ impl Database {
 
         // Collect regions to remove first to avoid deadlock
         // (holding read lock while calling region.remove() which needs write lock)
-        let regions_to_remove: Vec<_> = self
-            .regions()
+        let regions = self.regions();
+        let regions_to_remove: Vec<_> = regions
             .id_to_index()
             .keys()
             .filter(|id| !ids.remove(&**id))
-            .filter_map(|id| self.get_region(id))
+            .filter_map(|id| regions.get_from_id(id).cloned())
             .collect();
+        drop(regions);
 
         if !ids.is_empty() {
             debug!(
@@ -361,16 +367,16 @@ impl Database {
     /// Also promotes pending holes so they can be reused by future allocations.
     /// Returns the number of regions that had dirty data or metadata.
     pub fn flush(&self) -> Result<usize> {
-        // Collect dirty regions (take ranges, clearing them atomically)
-        let dirty_regions: Vec<(Region, Vec<(usize, usize)>)> = self
+        // Collect dirty regions (take bounds, clearing them atomically)
+        let dirty_regions: Vec<(Region, Option<(usize, usize)>)> = self
             .regions()
             .index_to_region()
             .iter()
             .flatten()
             .filter_map(|r| {
-                let ranges = r.take_dirty_ranges();
-                if !ranges.is_empty() || r.meta().needs_flush() {
-                    Some((r.clone(), ranges))
+                let bounds = r.take_dirty_bounds();
+                if bounds.is_some() || r.meta().needs_flush() {
+                    Some((r.clone(), bounds))
                 } else {
                     None
                 }
@@ -383,52 +389,38 @@ impl Database {
             return Ok(0);
         }
 
-        // Collect all dirty ranges with their region info
-        let data_regions: Vec<_> = dirty_regions
+        // Compute bounding box of all dirty bounds for a single async writeback hint.
+        // No need to sort/merge per-range — fdatasync flushes all dirty pages regardless.
+        let (flush_start, flush_end) = dirty_regions
             .iter()
-            .filter(|(_, ranges)| !ranges.is_empty())
-            .collect();
+            .filter_map(|(r, bounds)| {
+                let (min, max) = (*bounds)?;
+                let region_start = r.meta().start();
+                Some((region_start + min, region_start + max))
+            })
+            .fold((usize::MAX, 0usize), |(min_s, max_e), (s, e)| {
+                (min_s.min(s), max_e.max(e))
+            });
 
-        if !data_regions.is_empty() {
-            // Flatten all ranges into absolute positions
-            let mut all_ranges: Vec<_> = data_regions
-                .iter()
-                .flat_map(|(r, ranges)| {
-                    let region_start = r.meta().start();
-                    ranges
-                        .iter()
-                        .map(move |(s, e)| (region_start + s, region_start + e))
-                })
-                .collect();
-            all_ranges.sort_unstable_by_key(|(s, _)| *s);
-
-            // Merge adjacent ranges (gap < 64KB)
-            const MERGE_GAP: usize = 64 * 1024;
-            let merged: Vec<(usize, usize)> =
-                all_ranges
-                    .into_iter()
-                    .fold(Vec::new(), |mut acc, (s, e)| {
-                        if let Some((_, last_end)) = acc.last_mut()
-                            && s <= *last_end + MERGE_GAP
-                        {
-                            *last_end = (*last_end).max(e);
-                        } else {
-                            acc.push((s, e));
-                        }
-                        acc
-                    });
-
-            if let Err(e) = self.flush_ranges(merged) {
-                // Restore all original ranges to their regions
-                for (region, ranges) in dirty_regions {
-                    region.restore_dirty_ranges(ranges);
+        if flush_start < flush_end {
+            let mmap = self.mmap();
+            if let Err(e) = mmap.flush_async_range(flush_start, flush_end - flush_start) {
+                drop(mmap);
+                for (region, bounds) in dirty_regions {
+                    if let Some((min, max)) = bounds {
+                        region.restore_dirty_bounds(min, max);
+                    }
                 }
-                return Err(e);
+                return Err(e.into());
             }
         }
 
-        // Sync metadata, then mark clean
+        // Schedule metadata writeback, then sync to disk.
+        // Data MUST be durable before metadata — if we crash after metadata sync
+        // but before data sync, metadata could reference unwritten data.
         self.regions().flush()?;
+        self.file().sync_data()?;
+        self.regions().sync_data()?;
         for (region, _) in &dirty_regions {
             region.meta().mark_clean();
         }
@@ -524,15 +516,13 @@ impl Database {
         drop(file);
         drop(layout);
 
-        // Sync and recreate mmap if we punched anything
+        // Sync if we punched anything. Mmap recreation is unnecessary: hole punching
+        // uses KEEP_SIZE so the file length is unchanged, and the kernel transparently
+        // returns zeros for punched pages through the existing mapping.
         if punched > 0 {
             debug!("{}: punch_holes syncing after {} punches", self, punched);
-            let mut mmap = self.mmap_mut();
-            let file = self.file_mut();
-            // sync_all syncs both data and metadata (block allocation), which is
-            // necessary for hole punching since it modifies sparse file metadata
-            file.sync_all()?;
-            *mmap = create_mmap(&file)?;
+            let file = self.file();
+            file.sync_data()?;
         }
 
         Ok(())

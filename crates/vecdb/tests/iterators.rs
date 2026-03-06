@@ -1710,7 +1710,8 @@ mod raw_features {
             vecdb::ReadWriteRawVec::update_at(self, index, T::from(value))
         }
         fn fill_first_hole_or_push(&mut self, value: i32) -> Result<usize> {
-            vecdb::ReadWriteRawVec::fill_first_hole_or_push(self, T::from(value)).map(|i| i.to_usize())
+            vecdb::ReadWriteRawVec::fill_first_hole_or_push(self, T::from(value))
+                .map(|i| i.to_usize())
         }
     }
 

@@ -180,8 +180,17 @@ impl Regions {
         Ok(())
     }
 
+    /// Schedules metadata writeback (non-blocking `MS_ASYNC`).
+    ///
+    /// Caller must follow with `sync_data()` to guarantee durability.
     pub(crate) fn flush(&self) -> Result<()> {
-        self.mmap.flush()?;
+        self.mmap.flush_async()?;
+        Ok(())
+    }
+
+    /// Syncs the regions metadata file to durable storage.
+    pub(crate) fn sync_data(&self) -> Result<()> {
+        self.file.sync_data()?;
         Ok(())
     }
 

@@ -1,6 +1,6 @@
 use rawdb::likely;
 
-use crate::{Error, ValueStrategy, Result};
+use crate::{Error, Result, ValueStrategy};
 
 /// Trait for compression strategies used by ReadWriteCompressedVec.
 pub trait CompressionStrategy<T>: ValueStrategy<T> {
@@ -78,7 +78,11 @@ pub trait CompressionStrategy<T>: ValueStrategy<T> {
 
         Err(Error::DecompressionMismatch {
             expected_len,
-            actual_len: if Self::IS_NATIVE_LAYOUT { bytes.len() / size_of::<T>() } else { dst.len() },
+            actual_len: if Self::IS_NATIVE_LAYOUT {
+                bytes.len() / size_of::<T>()
+            } else {
+                dst.len()
+            },
         })
     }
 }

@@ -353,7 +353,9 @@ where
             .ok_or(Error::Underflow)?;
 
         let truncated_values = if truncated_count > 0 {
-            len = size_of_t.checked_mul(truncated_count).ok_or(Error::Overflow)?;
+            len = size_of_t
+                .checked_mul(truncated_count)
+                .ok_or(Error::Overflow)?;
             check_bounds(bytes, pos, len)?;
             let vals = bytes[pos..pos + len]
                 .chunks(size_of_t)
@@ -369,7 +371,9 @@ where
         check_bounds(bytes, pos, len)?;
         let prev_pushed_len = usize::from_bytes(&bytes[pos..pos + len])?;
         pos += len;
-        len = size_of_t.checked_mul(prev_pushed_len).ok_or(Error::Overflow)?;
+        len = size_of_t
+            .checked_mul(prev_pushed_len)
+            .ok_or(Error::Overflow)?;
         check_bounds(bytes, pos, len)?;
         let prev_pushed = bytes[pos..pos + len]
             .chunks(size_of_t)

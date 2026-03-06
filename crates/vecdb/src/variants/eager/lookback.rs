@@ -1,6 +1,4 @@
-use crate::{
-    AnyVec, Error, Exit, WritableVec, ReadableVec, Result, StoredVec, VecIndex, VecValue,
-};
+use crate::{AnyVec, Error, Exit, ReadableVec, Result, StoredVec, VecIndex, VecValue, WritableVec};
 
 use super::{CheckedSub, EagerVec};
 
@@ -102,11 +100,12 @@ where
         })
     }
 
-    pub fn compute_percentage_change<A>(
+    fn compute_ratio_change_scaled<A>(
         &mut self,
         max_from: V::I,
         source: &impl ReadableVec<V::I, A>,
         len: usize,
+        multiplier: f32,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -120,9 +119,39 @@ where
             } else {
                 let current_f32 = f32::from(current);
                 let previous_f32 = f32::from(previous);
-                V::T::from(((current_f32 / previous_f32) - 1.0) * 100.0)
+                V::T::from(((current_f32 / previous_f32) - 1.0) * multiplier)
             }
         })
+    }
+
+    pub fn compute_ratio_change<A>(
+        &mut self,
+        max_from: V::I,
+        source: &impl ReadableVec<V::I, A>,
+        len: usize,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        A: VecValue + Default,
+        f32: From<A>,
+        V::T: From<f32>,
+    {
+        self.compute_ratio_change_scaled(max_from, source, len, 1.0, exit)
+    }
+
+    pub fn compute_percentage_change<A>(
+        &mut self,
+        max_from: V::I,
+        source: &impl ReadableVec<V::I, A>,
+        len: usize,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        A: VecValue + Default,
+        f32: From<A>,
+        V::T: From<f32>,
+    {
+        self.compute_ratio_change_scaled(max_from, source, len, 100.0, exit)
     }
 
     /// Shared helper for rolling computations using variable window starts.
@@ -140,37 +169,75 @@ where
         V::T: From<f64>,
         F: Fn(f64, f64) -> f64,
     {
-        self.compute_init(window_starts.version() + values.version(), max_from, exit, |this| {
-            let skip = this.len();
-            let source_len = window_starts.len().min(values.len());
-            let end = this.batch_end(source_len);
-            if skip >= end {
-                return Ok(());
-            }
+        self.compute_init(
+            window_starts.version() + values.version(),
+            max_from,
+            exit,
+            |this| {
+                let skip = this.len();
+                let source_len = window_starts.len().min(values.len());
+                let end = this.batch_end(source_len);
+                if skip >= end {
+                    return Ok(());
+                }
 
-            let starts_batch = window_starts.collect_range_at(skip, end);
-            let values_batch = values.collect_range_at(skip, end);
+                let starts_batch = window_starts.collect_range_at(skip, end);
+                let values_batch = values.collect_range_at(skip, end);
 
-            let mut cached_start = usize::MAX;
-            let mut cached_prev = f64::NAN;
+                let mut cached_start = usize::MAX;
+                let mut cached_prev = f64::NAN;
 
-            for (j, (start, current)) in starts_batch.into_iter().zip(values_batch).enumerate() {
-                let i = skip + j;
-                let start_usize = start.to_usize();
-                let result = if start_usize >= i {
-                    compute(f64::from(current), f64::NAN)
+                for (j, (start, current)) in starts_batch.into_iter().zip(values_batch).enumerate()
+                {
+                    let i = skip + j;
+                    let start_usize = start.to_usize();
+                    let result = if start_usize > i {
+                        compute(f64::from(current), f64::NAN)
+                    } else if start_usize == i {
+                        let v = f64::from(current);
+                        compute(v, v)
+                    } else {
+                        if start_usize != cached_start {
+                            cached_prev = f64::from(values.collect_one_at(start_usize).unwrap());
+                            cached_start = start_usize;
+                        }
+                        compute(f64::from(current), cached_prev)
+                    };
+                    this.checked_push_at(i, V::T::from(result))?;
+                }
+
+                Ok(())
+            },
+        )
+    }
+
+    /// Compute ratio change using variable window starts (lookback vec).
+    /// For each index i, computes `values[i] / values[window_starts[i]] - 1`.
+    pub fn compute_rolling_ratio_change<A>(
+        &mut self,
+        max_from: V::I,
+        window_starts: &impl ReadableVec<V::I, V::I>,
+        values: &impl ReadableVec<V::I, A>,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        A: VecValue,
+        f64: From<A>,
+        V::T: From<f64>,
+    {
+        self.compute_rolling_from_window_starts(
+            max_from,
+            window_starts,
+            values,
+            exit,
+            |current, previous| {
+                if previous.is_nan() || previous == 0.0 {
+                    f64::NAN
                 } else {
-                    if start_usize != cached_start {
-                        cached_prev = f64::from(values.collect_one_at(start_usize).unwrap());
-                        cached_start = start_usize;
-                    }
-                    compute(f64::from(current), cached_prev)
-                };
-                this.checked_push_at(i, V::T::from(result))?;
-            }
-
-            Ok(())
-        })
+                    current / previous - 1.0
+                }
+            },
+        )
     }
 
     /// Compute percentage change using variable window starts (lookback vec).
@@ -187,13 +254,19 @@ where
         f64: From<A>,
         V::T: From<f64>,
     {
-        self.compute_rolling_from_window_starts(max_from, window_starts, values, exit, |current, previous| {
-            if previous.is_nan() || previous == 0.0 {
-                f64::NAN
-            } else {
-                (current / previous - 1.0) * 100.0
-            }
-        })
+        self.compute_rolling_from_window_starts(
+            max_from,
+            window_starts,
+            values,
+            exit,
+            |current, previous| {
+                if previous.is_nan() || previous == 0.0 {
+                    f64::NAN
+                } else {
+                    (current / previous - 1.0) * 100.0
+                }
+            },
+        )
     }
 
     /// Compute change using variable window starts (lookback vec).
@@ -210,13 +283,19 @@ where
         f64: From<A>,
         V::T: From<f64>,
     {
-        self.compute_rolling_from_window_starts(max_from, window_starts, values, exit, |current, previous| {
-            if previous.is_nan() {
-                0.0
-            } else {
-                current - previous
-            }
-        })
+        self.compute_rolling_from_window_starts(
+            max_from,
+            window_starts,
+            values,
+            exit,
+            |current, previous| {
+                if previous.is_nan() {
+                    0.0
+                } else {
+                    current - previous
+                }
+            },
+        )
     }
 
     pub fn compute_cagr<A>(
@@ -248,6 +327,55 @@ where
                 (i, V::T::from(cagr))
             },
             exit,
+        )
+    }
+
+    /// For each index i, output[i] = source[window_starts[i]].
+    /// Efficiently caches lookups since window_starts are monotonically non-decreasing.
+    pub fn compute_lookback<A>(
+        &mut self,
+        max_from: V::I,
+        window_starts: &impl ReadableVec<V::I, V::I>,
+        source: &impl ReadableVec<V::I, A>,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        A: VecValue,
+        V::T: From<A>,
+    {
+        self.compute_init(
+            window_starts.version() + source.version(),
+            max_from,
+            exit,
+            |this| {
+                let skip = this.len();
+                let source_len = window_starts.len().min(source.len());
+                let end = this.batch_end(source_len);
+                if skip >= end {
+                    return Ok(());
+                }
+
+                let starts_batch = window_starts.collect_range_at(skip, end);
+
+                let mut cached_start = usize::MAX;
+                let mut cached_value: Option<A> = None;
+
+                for (j, start) in starts_batch.into_iter().enumerate() {
+                    let i = skip + j;
+                    let start_usize = start.to_usize();
+                    let value = if start_usize == cached_start {
+                        cached_value.clone().unwrap()
+                    } else {
+                        let v = source.collect_one_at(start_usize).unwrap();
+                        cached_start = start_usize;
+                        cached_value = Some(v.clone());
+                        v
+                    };
+                    this.checked_push_at(i, V::T::from(value))?;
+                }
+
+                Ok(())
+            },
         )
     }
 }

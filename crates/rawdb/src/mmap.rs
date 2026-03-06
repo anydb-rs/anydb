@@ -22,7 +22,11 @@ pub fn write_to_mmap(mmap: &MmapMut, offset: usize, data: &[u8]) {
     let end = offset
         .checked_add(data.len())
         .expect("offset + data.len() overflow");
-    assert!(end <= mmap.len(), "write beyond mmap bounds: end={end}, mmap.len()={}", mmap.len());
+    assert!(
+        end <= mmap.len(),
+        "write beyond mmap bounds: end={end}, mmap.len()={}",
+        mmap.len()
+    );
 
     // SAFETY: MmapMut guarantees the memory is valid and writable.
     // We've verified the bounds above.

@@ -7,8 +7,8 @@ mod sources;
 #[cfg(feature = "zstd")]
 mod zstd;
 
-pub use inner::{CompressionStrategy, ReadOnlyCompressedVec};
 pub(crate) use inner::*;
+pub use inner::{CompressionStrategy, ReadOnlyCompressedVec};
 #[cfg(feature = "lz4")]
 pub use lz4::*;
 #[cfg(feature = "pco")]

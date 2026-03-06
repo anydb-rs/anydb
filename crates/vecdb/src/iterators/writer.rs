@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use crate::{Error, Formattable, Result, VecValue};
 
 /// Stateful writer for streaming values one at a time to a string buffer.
@@ -15,12 +13,11 @@ pub trait ValueWriter {
 }
 
 /// Iterator-backed writer that formats values as CSV.
-pub struct VecIteratorWriter<'a, I, T> {
-    pub iter: Box<dyn Iterator<Item = T> + 'a>,
-    pub _phantom: PhantomData<I>,
+pub struct VecIteratorWriter<T> {
+    pub iter: std::vec::IntoIter<T>,
 }
 
-impl<'a, I, T> ValueWriter for VecIteratorWriter<'a, I, T>
+impl<T> ValueWriter for VecIteratorWriter<T>
 where
     T: VecValue + Formattable,
 {

@@ -1,5 +1,6 @@
 use crate::{
-    AnyVec, BinaryTransform, Exit, WritableVec, ReadableVec, Result, StoredVec, VecIndex, VecValue, Version,
+    AnyVec, BinaryTransform, Cursor, Exit, ReadableVec, Result, StoredVec, VecIndex, VecValue,
+    Version, WritableVec,
 };
 
 use super::EagerVec;
@@ -108,24 +109,29 @@ where
         B: VecValue,
         F: FnMut((V::I, A, B, &Self)) -> (V::I, V::T),
     {
-        self.compute_init(other1.version() + other2.version(), max_from, exit, |this| {
-            let skip = this.len();
-            let source_end = other1.len().min(other2.len());
-            let end = this.batch_end(source_end);
-            if skip >= end {
-                return Ok(());
-            }
+        self.compute_init(
+            other1.version() + other2.version(),
+            max_from,
+            exit,
+            |this| {
+                let skip = this.len();
+                let source_end = other1.len().min(other2.len());
+                let end = this.batch_end(source_end);
+                if skip >= end {
+                    return Ok(());
+                }
 
-            let batch2 = other2.collect_range_at(skip, end);
-            let mut iter2 = batch2.into_iter();
-            let mut i = skip;
+                let batch2 = other2.collect_range_at(skip, end);
+                let mut iter2 = batch2.into_iter();
+                let mut i = skip;
 
-            other1.try_fold_range_at(skip, end, (), |(), b: A| {
-                let (idx, v) = t((V::I::from(i), b, iter2.next().unwrap(), &*this));
-                i += 1;
-                this.checked_push(idx, v)
-            })
-        })
+                other1.try_fold_range_at(skip, end, (), |(), b: A| {
+                    let (idx, v) = t((V::I::from(i), b, iter2.next().unwrap(), &*this));
+                    i += 1;
+                    this.checked_push(idx, v)
+                })
+            },
+        )
     }
 
     pub fn compute_binary<A, B, F>(
@@ -169,31 +175,32 @@ where
             max_from,
             exit,
             |this| {
-            let skip = this.len();
-            let source_end = other1.len().min(other2.len()).min(other3.len());
-            let end = this.batch_end(source_end);
-            if skip >= end {
-                return Ok(());
-            }
+                let skip = this.len();
+                let source_end = other1.len().min(other2.len()).min(other3.len());
+                let end = this.batch_end(source_end);
+                if skip >= end {
+                    return Ok(());
+                }
 
-            let batch2 = other2.collect_range_at(skip, end);
-            let batch3 = other3.collect_range_at(skip, end);
-            let mut iter2 = batch2.into_iter();
-            let mut iter3 = batch3.into_iter();
-            let mut i = skip;
+                let batch2 = other2.collect_range_at(skip, end);
+                let batch3 = other3.collect_range_at(skip, end);
+                let mut iter2 = batch2.into_iter();
+                let mut iter3 = batch3.into_iter();
+                let mut i = skip;
 
-            other1.try_fold_range_at(skip, end, (), |(), b: A| {
-                let (idx, v) = t((
-                    V::I::from(i),
-                    b,
-                    iter2.next().unwrap(),
-                    iter3.next().unwrap(),
-                    &*this,
-                ));
-                i += 1;
-                this.checked_push(idx, v)
-            })
-        })
+                other1.try_fold_range_at(skip, end, (), |(), b: A| {
+                    let (idx, v) = t((
+                        V::I::from(i),
+                        b,
+                        iter2.next().unwrap(),
+                        iter3.next().unwrap(),
+                        &*this,
+                    ));
+                    i += 1;
+                    this.checked_push(idx, v)
+                })
+            },
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -219,43 +226,45 @@ where
             max_from,
             exit,
             |this| {
-            let skip = this.len();
-            let source_end = other1
-                .len()
-                .min(other2.len())
-                .min(other3.len())
-                .min(other4.len());
-            let end = this.batch_end(source_end);
-            if skip >= end {
-                return Ok(());
-            }
+                let skip = this.len();
+                let source_end = other1
+                    .len()
+                    .min(other2.len())
+                    .min(other3.len())
+                    .min(other4.len());
+                let end = this.batch_end(source_end);
+                if skip >= end {
+                    return Ok(());
+                }
 
-            let batch2 = other2.collect_range_at(skip, end);
-            let batch3 = other3.collect_range_at(skip, end);
-            let batch4 = other4.collect_range_at(skip, end);
-            let mut iter2 = batch2.into_iter();
-            let mut iter3 = batch3.into_iter();
-            let mut iter4 = batch4.into_iter();
-            let mut i = skip;
+                let batch2 = other2.collect_range_at(skip, end);
+                let batch3 = other3.collect_range_at(skip, end);
+                let batch4 = other4.collect_range_at(skip, end);
+                let mut iter2 = batch2.into_iter();
+                let mut iter3 = batch3.into_iter();
+                let mut iter4 = batch4.into_iter();
+                let mut i = skip;
 
-            other1.try_fold_range_at(skip, end, (), |(), b: A| {
-                let (idx, v) = t((
-                    V::I::from(i),
-                    b,
-                    iter2.next().unwrap(),
-                    iter3.next().unwrap(),
-                    iter4.next().unwrap(),
-                    &*this,
-                ));
-                i += 1;
-                this.checked_push(idx, v)
-            })
-        })
+                other1.try_fold_range_at(skip, end, (), |(), b: A| {
+                    let (idx, v) = t((
+                        V::I::from(i),
+                        b,
+                        iter2.next().unwrap(),
+                        iter3.next().unwrap(),
+                        iter4.next().unwrap(),
+                        &*this,
+                    ));
+                    i += 1;
+                    this.checked_push(idx, v)
+                })
+            },
+        )
     }
 
     /// Compute values through an indirection: for each index i, produces
-    /// `source2[source1[i]]`. Collects both sources in bulk to avoid per-element lookups.
-    pub fn compute_indirect<A>(
+    /// `source2[source1[i]]`. Keys from source1 must be monotonically increasing
+    /// so that source2 access is sequential (cursor-friendly).
+    pub fn compute_indirect_sequential<A>(
         &mut self,
         max_from: V::I,
         source1: &impl ReadableVec<V::I, A>,
@@ -265,24 +274,43 @@ where
     where
         A: VecValue + VecIndex,
     {
-        self.compute_init(source1.version() + source2.version(), max_from, exit, |this| {
-            let skip = this.len();
-            let end = this.batch_end(source1.len());
-            if skip >= end {
-                return Ok(());
-            }
+        self.compute_init(
+            source1.version() + source2.version(),
+            max_from,
+            exit,
+            |this| {
+                let skip = this.len();
+                let end = this.batch_end(source1.len());
+                if skip >= end {
+                    return Ok(());
+                }
 
-            let keys: Vec<A> = source1.collect_range_at(skip, end);
-            let values: Vec<V::T> = source2.collect();
+                let keys: Vec<A> = source1.collect_range_at(skip, end);
+                let mut cursor = Cursor::new(source2);
+                let mut cursor_pos: usize = 0;
+                let mut last_v: Option<V::T> = None;
 
-            for (j, key) in keys.into_iter().enumerate() {
-                let idx = V::I::from(skip + j);
-                let v = values[key.to_usize()].clone();
-                this.checked_push(idx, v)?;
-            }
+                for (j, key) in keys.into_iter().enumerate() {
+                    let key_pos = key.to_usize();
+                    let v = if key_pos >= cursor_pos {
+                        if key_pos > cursor_pos {
+                            cursor.advance(key_pos - cursor_pos);
+                        }
+                        let v = cursor.next().unwrap();
+                        cursor_pos = key_pos + 1;
+                        v
+                    } else {
+                        // Duplicate key from gap-filled periods — reuse previous value
+                        last_v.clone().unwrap()
+                    };
+                    last_v = Some(v.clone());
+                    let idx = V::I::from(skip + j);
+                    this.checked_push(idx, v)?;
+                }
 
-            Ok(())
-        })
+                Ok(())
+            },
+        )
     }
 
     pub fn compute_first_per_index(
@@ -299,7 +327,8 @@ where
 
         self.repeat_until_complete(exit, |this| {
             let skip = if this.len() > 0 {
-                this.collect_last().unwrap()
+                this.collect_last()
+                    .unwrap()
                     .to_usize()
                     .min(max_from.to_usize())
             } else {

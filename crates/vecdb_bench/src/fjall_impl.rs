@@ -104,6 +104,10 @@ impl DatabaseBenchmark for FjallBench {
             }
             Ok(total)
         }
-        if path.exists() { Ok(sum_dir(path)?) } else { Ok(0) }
+        if path.exists() {
+            Ok(sum_dir(path)?)
+        } else {
+            Ok(0)
+        }
     }
 }

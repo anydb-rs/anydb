@@ -389,7 +389,8 @@ where
     }
 
     fn deserialize_then_undo_changes(&mut self, bytes: &[u8]) -> Result<()> {
-        let change = ReadWriteBaseVec::<I, T>::parse_change_data(bytes, Self::SIZE_OF_T, |b| S::read(b))?;
+        let change =
+            ReadWriteBaseVec::<I, T>::parse_change_data(bytes, Self::SIZE_OF_T, |b| S::read(b))?;
         let mut pos = change.bytes_consumed;
         let mut len = SIZE_OF_U64;
 
@@ -945,7 +946,10 @@ where
             return None;
         }
         if self.has_dirty_stored() {
-            return self.get_any_or_read_at(index, &self.create_reader()).ok().flatten();
+            return self
+                .get_any_or_read_at(index, &self.create_reader())
+                .ok()
+                .flatten();
         }
         let stored_len = self.stored_len();
         if index >= stored_len {
@@ -979,8 +983,10 @@ where
                 let reader = self.create_reader();
                 let src = unsafe {
                     std::slice::from_raw_parts(
-                        reader.prefixed(HEADER_OFFSET).as_ptr().add(from * Self::SIZE_OF_T)
-                            as *const T,
+                        reader
+                            .prefixed(HEADER_OFFSET)
+                            .as_ptr()
+                            .add(from * Self::SIZE_OF_T) as *const T,
                         stored_to - from,
                     )
                 };
@@ -1005,13 +1011,7 @@ where
     }
 
     #[inline]
-    fn fold_range_at<B, F: FnMut(B, T) -> B>(
-        &self,
-        from: usize,
-        to: usize,
-        init: B,
-        mut f: F,
-    ) -> B
+    fn fold_range_at<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, mut f: F) -> B
     where
         Self: Sized,
     {

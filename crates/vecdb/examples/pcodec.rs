@@ -1,8 +1,7 @@
 use std::{fs, path::Path};
 
 use vecdb::{
-    AnyStoredVec, AnyVec, Database, WritableVec, ImportableVec, PcoVec,
-    ReadableVec, Stamp, Version,
+    AnyStoredVec, AnyVec, Database, ImportableVec, PcoVec, ReadableVec, Stamp, Version, WritableVec,
 };
 
 #[allow(clippy::upper_case_acronyms)]

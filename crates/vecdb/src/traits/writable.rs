@@ -207,11 +207,7 @@ where
 
     /// Flushes with the given stamp, optionally saving changes for rollback.
     #[inline]
-    fn stamped_write_maybe_with_changes(
-        &mut self,
-        stamp: Stamp,
-        with_changes: bool,
-    ) -> Result<()> {
+    fn stamped_write_maybe_with_changes(&mut self, stamp: Stamp, with_changes: bool) -> Result<()> {
         if with_changes {
             self.stamped_write_with_changes(stamp)
         } else {

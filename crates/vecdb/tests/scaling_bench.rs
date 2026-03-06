@@ -13,7 +13,9 @@ use std::{
 
 use rawdb::Database;
 use tempfile::TempDir;
-use vecdb::{AnyStoredVec, AnyVec, ImportableVec, ReadableVec, Result, StoredVec, Version, WritableVec};
+use vecdb::{
+    AnyStoredVec, AnyVec, ImportableVec, ReadableVec, Result, StoredVec, Version, WritableVec,
+};
 
 #[cfg(feature = "pco")]
 use vecdb::PcoVec;
@@ -69,7 +71,10 @@ fn run_benchmark(config: &Config) -> Result<(usize, usize, usize)> {
                         let idx = len - 1;
                         if let Some(v) = reader.collect_one(idx) {
                             if v != idx as u64 {
-                                eprintln!("ERROR: idx={} expected={} got={} len={}", idx, idx, v, len);
+                                eprintln!(
+                                    "ERROR: idx={} expected={} got={} len={}",
+                                    idx, idx, v, len
+                                );
                                 local_errors += 1;
                             }
                             local_reads += 1;
@@ -125,7 +130,10 @@ fn run_benchmark(config: &Config) -> Result<(usize, usize, usize)> {
 #[cfg(feature = "pco")]
 fn test_scale_readers() -> Result<()> {
     println!("\n=== Scaling Readers (fixed write interval: 10ms, batch: 100) ===\n");
-    println!("{:>8} {:>12} {:>12} {:>8}", "Readers", "Writes", "Reads", "Errors");
+    println!(
+        "{:>8} {:>12} {:>12} {:>8}",
+        "Readers", "Writes", "Reads", "Errors"
+    );
     println!("{:-<44}", "");
 
     for num_readers in [1, 2, 4, 8, 16, 32, 64] {
@@ -137,7 +145,10 @@ fn test_scale_readers() -> Result<()> {
         };
 
         let (writes, reads, errors) = run_benchmark(&config)?;
-        println!("{:>8} {:>12} {:>12} {:>8}", num_readers, writes, reads, errors);
+        println!(
+            "{:>8} {:>12} {:>12} {:>8}",
+            num_readers, writes, reads, errors
+        );
 
         if errors > 0 {
             println!(">>> ERRORS DETECTED - stopping scale test");
@@ -153,7 +164,10 @@ fn test_scale_readers() -> Result<()> {
 #[cfg(feature = "pco")]
 fn test_scale_write_frequency() -> Result<()> {
     println!("\n=== Scaling Write Frequency (fixed readers: 4, batch: 100) ===\n");
-    println!("{:>12} {:>12} {:>12} {:>8}", "Interval(us)", "Writes", "Reads", "Errors");
+    println!(
+        "{:>12} {:>12} {:>12} {:>8}",
+        "Interval(us)", "Writes", "Reads", "Errors"
+    );
     println!("{:-<48}", "");
 
     for write_interval_us in [100_000, 50_000, 10_000, 5_000, 1_000, 500, 100, 0] {
@@ -165,7 +179,10 @@ fn test_scale_write_frequency() -> Result<()> {
         };
 
         let (writes, reads, errors) = run_benchmark(&config)?;
-        println!("{:>12} {:>12} {:>12} {:>8}", write_interval_us, writes, reads, errors);
+        println!(
+            "{:>12} {:>12} {:>12} {:>8}",
+            write_interval_us, writes, reads, errors
+        );
 
         if errors > 0 {
             println!(">>> ERRORS DETECTED - stopping scale test");
@@ -181,7 +198,10 @@ fn test_scale_write_frequency() -> Result<()> {
 #[cfg(feature = "pco")]
 fn test_scale_batch_size() -> Result<()> {
     println!("\n=== Scaling Batch Size (fixed readers: 4, interval: 1ms) ===\n");
-    println!("{:>12} {:>12} {:>12} {:>8}", "Batch Size", "Writes", "Reads", "Errors");
+    println!(
+        "{:>12} {:>12} {:>12} {:>8}",
+        "Batch Size", "Writes", "Reads", "Errors"
+    );
     println!("{:-<48}", "");
 
     for batch_size in [10, 50, 100, 500, 1000, 5000, 10000] {
@@ -193,7 +213,10 @@ fn test_scale_batch_size() -> Result<()> {
         };
 
         let (writes, reads, errors) = run_benchmark(&config)?;
-        println!("{:>12} {:>12} {:>12} {:>8}", batch_size, writes, reads, errors);
+        println!(
+            "{:>12} {:>12} {:>12} {:>8}",
+            batch_size, writes, reads, errors
+        );
 
         if errors > 0 {
             println!(">>> ERRORS DETECTED - stopping scale test");

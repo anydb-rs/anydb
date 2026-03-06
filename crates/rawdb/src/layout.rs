@@ -23,34 +23,31 @@ pub struct Layout {
 
 impl From<&Regions> for Layout {
     fn from(regions: &Regions) -> Self {
-        let mut start_to_region = BTreeMap::new();
-
-        regions
+        let start_to_region: BTreeMap<usize, Region> = regions
             .index_to_region()
             .iter()
             .flatten()
-            .for_each(|region| {
-                start_to_region.insert(region.meta().start(), region.clone());
-            });
+            .map(|region| (region.meta().start(), region.clone()))
+            .collect();
 
         let mut layout = Self {
-            start_to_region: start_to_region.clone(),
             start_to_hole: BTreeMap::default(),
             hole_to_starts: BTreeMap::default(),
             start_to_reserved: BTreeMap::default(),
             pending_holes: BTreeMap::default(),
+            start_to_region: BTreeMap::default(),
         };
 
         let mut prev_end = 0;
-        for (start, region) in start_to_region {
+        for (&start, region) in &start_to_region {
             if prev_end != start {
                 let size = start - prev_end;
                 layout.insert_hole(prev_end, size);
             }
-            let reserved = region.meta().reserved();
-            prev_end = start + reserved;
+            prev_end = start + region.meta().reserved();
         }
 
+        layout.start_to_region = start_to_region;
         layout
     }
 }
@@ -86,28 +83,17 @@ impl Layout {
 
     pub fn len(&self) -> usize {
         let mut len = 0;
-        let mut start = 0;
-        if let Some((start_reserved, reserved)) = self.get_last_reserved() {
-            start = start_reserved;
-            len = start + reserved;
+        if let Some((start, reserved)) = self.get_last_reserved() {
+            len = len.max(start + reserved);
         }
-        if let Some((hole_start, gap)) = self.get_last_hole()
-            && hole_start >= start
-        {
-            start = hole_start;
-            len = start + gap;
+        if let Some((start, gap)) = self.get_last_hole() {
+            len = len.max(start + gap);
         }
-        // Include pending holes (from recently deleted regions, not yet promoted)
-        if let Some((&pending_start, &pending_size)) = self.pending_holes.last_key_value()
-            && pending_start >= start
-        {
-            start = pending_start;
-            len = start + pending_size;
+        if let Some((&start, &size)) = self.pending_holes.last_key_value() {
+            len = len.max(start + size);
         }
-        if let Some((region_start, region)) = self.get_last_region()
-            && region_start >= start
-        {
-            len = region_start + region.meta().reserved();
+        if let Some((start, region)) = self.get_last_region() {
+            len = len.max(start + region.meta().reserved());
         }
         len
     }

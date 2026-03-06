@@ -1,14 +1,11 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicU8, Ordering},
-};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 /// Tracks the dirty/clean state of a region's metadata.
 ///
 /// State transitions: NEEDS_WRITE -> NEEDS_FLUSH -> IS_CLEAN
 /// Uses Release/Acquire ordering to ensure proper synchronization across threads.
-#[derive(Debug, Clone)]
-pub struct RegionState(Arc<AtomicU8>);
+#[derive(Debug)]
+pub struct RegionState(AtomicU8);
 
 impl RegionState {
     pub const IS_CLEAN: u8 = 0;
@@ -18,13 +15,13 @@ impl RegionState {
     /// Creates a dirty state for a newly created region (needs write).
     #[inline(always)]
     pub fn new_dirty() -> Self {
-        Self(Arc::new(AtomicU8::new(Self::NEEDS_WRITE)))
+        Self(AtomicU8::new(Self::NEEDS_WRITE))
     }
 
     /// Creates a clean state for a region loaded from disk.
     #[inline(always)]
     pub fn new_clean() -> Self {
-        Self(Arc::new(AtomicU8::new(Self::IS_CLEAN)))
+        Self(AtomicU8::new(Self::IS_CLEAN))
     }
 
     #[inline(always)]
@@ -43,7 +40,6 @@ impl RegionState {
     }
 
     #[inline(always)]
-    #[allow(unused)]
     pub fn needs_flush(&self) -> bool {
         self.load() == Self::NEEDS_FLUSH
     }

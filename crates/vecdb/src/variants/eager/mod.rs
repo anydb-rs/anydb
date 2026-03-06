@@ -16,9 +16,8 @@ pub use checked_sub::*;
 pub use saturating_add::*;
 
 use crate::{
-    AnyStoredVec, AnyVec, Exit, ReadableBoxedVec, ReadableCloneableVec, WritableVec, Header,
-    ImportOptions, ImportableVec, ReadableVec, Result, Stamp, StoredVec, TypedVec,
-    Version,
+    AnyStoredVec, AnyVec, Exit, Header, ImportOptions, ImportableVec, ReadableBoxedVec,
+    ReadableCloneableVec, ReadableVec, Result, Stamp, StoredVec, TypedVec, Version, WritableVec,
     traits::writable::MAX_CACHE_SIZE,
 };
 
@@ -294,13 +293,7 @@ where
     }
 
     #[inline]
-    fn fold_range_at<B, F: FnMut(B, V::T) -> B>(
-        &self,
-        from: usize,
-        to: usize,
-        init: B,
-        f: F,
-    ) -> B
+    fn fold_range_at<B, F: FnMut(B, V::T) -> B>(&self, from: usize, to: usize, init: B, f: F) -> B
     where
         Self: Sized,
     {

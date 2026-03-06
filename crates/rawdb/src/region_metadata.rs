@@ -8,7 +8,7 @@ const MAX_REGION_ID_LEN: usize = 1024;
 const MAX_RESERVED_SIZE: usize = 1024 * GiB; // 1 TiB
 
 /// Metadata tracking a region's location, size, and identity.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct RegionMetadata {
     /// Starting offset in the database file (must be multiple of 4096).
     start: usize,
@@ -133,10 +133,10 @@ impl RegionMetadata {
         } else if state.needs_write() {
             return Err(Error::RegionMetadataUnwritten);
         }
-        // Flush first, then mark clean (if flush fails, retry will still see needs_flush)
+        // Schedule writeback, then mark clean. Caller ensures durability via sync_data().
         regions
             .mmap()
-            .flush_range(index * SIZE_OF_REGION_METADATA, SIZE_OF_REGION_METADATA)?;
+            .flush_async_range(index * SIZE_OF_REGION_METADATA, SIZE_OF_REGION_METADATA)?;
         state.set_is_clean();
         Ok(true)
     }
@@ -248,6 +248,18 @@ impl RegionMetadata {
             reserved,
             state: RegionState::new_clean(), // Loaded from disk
         })
+    }
+}
+
+impl Clone for RegionMetadata {
+    fn clone(&self) -> Self {
+        Self {
+            start: self.start,
+            len: self.len,
+            reserved: self.reserved,
+            id: self.id.clone(),
+            state: RegionState::new_clean(),
+        }
     }
 }
 

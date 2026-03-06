@@ -67,13 +67,7 @@ pub trait ReadableVec<I: VecIndex, T: VecValue>: AnyVec {
     ///
     /// Every implementor must provide an optimal path — there is intentionally
     /// no default to prevent silent fallback to a slow buffered path.
-    fn fold_range_at<B, F: FnMut(B, T) -> B>(
-        &self,
-        from: usize,
-        to: usize,
-        init: B,
-        f: F,
-    ) -> B
+    fn fold_range_at<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, init: B, f: F) -> B
     where
         Self: Sized;
 
@@ -102,7 +96,7 @@ pub trait ReadableVec<I: VecIndex, T: VecValue>: AnyVec {
     /// Creates a forward-only `Cursor` that reuses an internal buffer across
     /// chunked `read_into_at` calls. One allocation for the lifetime of the cursor.
     #[inline]
-    fn cursor(&self) -> Cursor<'_, I, T>
+    fn cursor(&self) -> Cursor<'_, I, T, Self>
     where
         Self: Sized,
     {
@@ -280,7 +274,11 @@ pub trait ReadableVec<I: VecIndex, T: VecValue>: AnyVec {
     #[inline]
     fn collect_last(&self) -> Option<T> {
         let len = self.len();
-        if len > 0 { self.collect_one_at(len - 1) } else { None }
+        if len > 0 {
+            self.collect_one_at(len - 1)
+        } else {
+            None
+        }
     }
 
     /// Collects values using signed indices. Negative indices count from the end
@@ -291,7 +289,9 @@ pub trait ReadableVec<I: VecIndex, T: VecValue>: AnyVec {
         Self: Sized,
     {
         let from = from.map(|i| self.i64_to_usize(i)).unwrap_or(0);
-        let to = to.map(|i| self.i64_to_usize(i)).unwrap_or_else(|| self.len());
+        let to = to
+            .map(|i| self.i64_to_usize(i))
+            .unwrap_or_else(|| self.len());
         self.collect_range_at(from, to)
     }
 
@@ -299,7 +299,9 @@ pub trait ReadableVec<I: VecIndex, T: VecValue>: AnyVec {
     #[inline]
     fn collect_signed_range_dyn(&self, from: Option<i64>, to: Option<i64>) -> Vec<T> {
         let from = from.map(|i| self.i64_to_usize(i)).unwrap_or(0);
-        let to = to.map(|i| self.i64_to_usize(i)).unwrap_or_else(|| self.len());
+        let to = to
+            .map(|i| self.i64_to_usize(i))
+            .unwrap_or_else(|| self.len());
         self.collect_range_dyn(from, to)
     }
 

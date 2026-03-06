@@ -9,7 +9,9 @@ use rawdb::{Region, RegionMetadata};
 
 use crate::{AnyStoredVec, BUFFER_SIZE, Pages, VecIndex, VecValue, unlikely};
 
-use super::super::inner::{ReadWriteCompressedVec, CompressionStrategy, MAX_UNCOMPRESSED_PAGE_SIZE};
+use super::super::inner::{
+    CompressionStrategy, MAX_UNCOMPRESSED_PAGE_SIZE, ReadWriteCompressedVec,
+};
 
 /// Buffered file I/O source for reading stored compressed data.
 ///
@@ -226,5 +228,4 @@ where
         }
         Ok(accum)
     }
-
 }

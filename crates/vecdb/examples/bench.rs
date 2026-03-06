@@ -175,7 +175,6 @@ fn populate<V: WritableVec<usize, u64> + ImportableVec + AnyStoredVec>(
 
 // --- Benchmark helpers ---
 
-
 // --- Benchmark runners ---
 
 struct BenchResult {
@@ -276,7 +275,9 @@ impl StoredFold for ZstdVec<usize, u64> {
 
 // --- Unified benchmark ---
 
-fn bench_vec<V: ReadableVec<usize, u64> + StoredFold + AnyStoredVec + StoredVec<I = usize, T = u64>>(
+fn bench_vec<
+    V: ReadableVec<usize, u64> + StoredFold + AnyStoredVec + StoredVec<I = usize, T = u64>,
+>(
     vec: &V,
     label: &str,
     count: usize,
@@ -303,7 +304,12 @@ fn bench_vec<V: ReadableVec<usize, u64> + StoredFold + AnyStoredVec + StoredVec<
     println!("--- Full scan ({full_passes} passes, random order) ---");
 
     let method_names: [&str; 6] = [
-        "fold_stored_io", "fold_stored_mmap", "fold_range", "try_fold_range", "for_each_dyn", "for_each",
+        "fold_stored_io",
+        "fold_stored_mmap",
+        "fold_range",
+        "try_fold_range",
+        "for_each_dyn",
+        "for_each",
     ];
     let mut times = [Duration::ZERO; 6];
     let mut sum = 0u64;
@@ -317,13 +323,19 @@ fn bench_vec<V: ReadableVec<usize, u64> + StoredFold + AnyStoredVec + StoredVec<
         }
 
         for &method in &order {
-            if can_purge { drop_caches(); }
+            if can_purge {
+                drop_caches();
+            }
             let t = Instant::now();
             match method {
                 0 => sum = vec.fold_stored_io_sum(0, count, sum),
                 1 => sum = vec.fold_stored_mmap_sum(0, count, sum),
                 2 => sum = vec.fold_range(0, count, sum, |a, v: u64| a.wrapping_add(v)),
-                3 => sum = vec.try_fold_range(0, count, sum, |a, v: u64| Ok::<_, ()>(a.wrapping_add(v))).unwrap(),
+                3 => {
+                    sum = vec
+                        .try_fold_range(0, count, sum, |a, v: u64| Ok::<_, ()>(a.wrapping_add(v)))
+                        .unwrap()
+                }
                 4 => vec.for_each_range_dyn(0, count, &mut |v: u64| sum = sum.wrapping_add(v)),
                 5 => vec.for_each_range(0, count, |v: u64| sum = sum.wrapping_add(v)),
                 _ => unreachable!(),
@@ -366,7 +378,9 @@ fn bench_vec<V: ReadableVec<usize, u64> + StoredFold + AnyStoredVec + StoredVec<
             }
 
             for &method in &order {
-                if can_purge { drop_caches(); }
+                if can_purge {
+                    drop_caches();
+                }
                 let t = Instant::now();
                 for &s in &starts {
                     let from = s;
@@ -375,8 +389,15 @@ fn bench_vec<V: ReadableVec<usize, u64> + StoredFold + AnyStoredVec + StoredVec<
                         0 => sum = vec.fold_stored_io_sum(from, to, sum),
                         1 => sum = vec.fold_stored_mmap_sum(from, to, sum),
                         2 => sum = vec.fold_range(from, to, sum, |a, v: u64| a.wrapping_add(v)),
-                        3 => sum = vec.try_fold_range(from, to, sum, |a, v: u64| Ok::<_, ()>(a.wrapping_add(v))).unwrap(),
-                        4 => vec.for_each_range_dyn(from, to, &mut |v: u64| sum = sum.wrapping_add(v)),
+                        3 => {
+                            sum = vec
+                                .try_fold_range(from, to, sum, |a, v: u64| {
+                                    Ok::<_, ()>(a.wrapping_add(v))
+                                })
+                                .unwrap()
+                        }
+                        4 => vec
+                            .for_each_range_dyn(from, to, &mut |v: u64| sum = sum.wrapping_add(v)),
                         5 => vec.for_each_range(from, to, |v: u64| sum = sum.wrapping_add(v)),
                         _ => unreachable!(),
                     }
@@ -389,12 +410,30 @@ fn bench_vec<V: ReadableVec<usize, u64> + StoredFold + AnyStoredVec + StoredVec<
 
         let divisor = (reps * passes) as u32;
         let row = vec![
-            BenchResult { name: "IO", duration: times[0] / divisor },
-            BenchResult { name: "Mmap", duration: times[1] / divisor },
-            BenchResult { name: "fold", duration: times[2] / divisor },
-            BenchResult { name: "try_fold", duration: times[3] / divisor },
-            BenchResult { name: "dyn", duration: times[4] / divisor },
-            BenchResult { name: "static", duration: times[5] / divisor },
+            BenchResult {
+                name: "IO",
+                duration: times[0] / divisor,
+            },
+            BenchResult {
+                name: "Mmap",
+                duration: times[1] / divisor,
+            },
+            BenchResult {
+                name: "fold",
+                duration: times[2] / divisor,
+            },
+            BenchResult {
+                name: "try_fold",
+                duration: times[3] / divisor,
+            },
+            BenchResult {
+                name: "dyn",
+                duration: times[4] / divisor,
+            },
+            BenchResult {
+                name: "static",
+                duration: times[5] / divisor,
+            },
         ];
         print_range_row(range_size, &row);
     }
@@ -406,7 +445,12 @@ fn bench_vec<V: ReadableVec<usize, u64> + StoredFold + AnyStoredVec + StoredVec<
     let ro_passes = range_passes();
     println!("\n--- Read-only full scan ({ro_passes} passes, random order) ---");
 
-    let ro_method_names: [&str; 4] = ["ro_fold_range", "ro_try_fold_range", "ro_for_each_dyn", "ro_for_each"];
+    let ro_method_names: [&str; 4] = [
+        "ro_fold_range",
+        "ro_try_fold_range",
+        "ro_for_each_dyn",
+        "ro_for_each",
+    ];
     let mut ro_times = [Duration::ZERO; 4];
     let mut sum = 0u64;
     let mut rng = 0xBEEFu64;
@@ -419,11 +463,17 @@ fn bench_vec<V: ReadableVec<usize, u64> + StoredFold + AnyStoredVec + StoredVec<
         }
 
         for &method in &order {
-            if can_purge { drop_caches(); }
+            if can_purge {
+                drop_caches();
+            }
             let t = Instant::now();
             match method {
                 0 => sum = ro.fold_range(0, count, sum, |a, v: u64| a.wrapping_add(v)),
-                1 => sum = ro.try_fold_range(0, count, sum, |a, v: u64| Ok::<_, ()>(a.wrapping_add(v))).unwrap(),
+                1 => {
+                    sum = ro
+                        .try_fold_range(0, count, sum, |a, v: u64| Ok::<_, ()>(a.wrapping_add(v)))
+                        .unwrap()
+                }
                 2 => ro.for_each_range_dyn(0, count, &mut |v: u64| sum = sum.wrapping_add(v)),
                 3 => ro.for_each_range(0, count, |v: u64| sum = sum.wrapping_add(v)),
                 _ => unreachable!(),
@@ -464,15 +514,25 @@ fn bench_vec<V: ReadableVec<usize, u64> + StoredFold + AnyStoredVec + StoredVec<
             }
 
             for &method in &order {
-                if can_purge { drop_caches(); }
+                if can_purge {
+                    drop_caches();
+                }
                 let t = Instant::now();
                 for &s in &starts {
                     let from = s;
                     let to = s + range_size;
                     match method {
                         0 => sum = ro.fold_range(from, to, sum, |a, v: u64| a.wrapping_add(v)),
-                        1 => sum = ro.try_fold_range(from, to, sum, |a, v: u64| Ok::<_, ()>(a.wrapping_add(v))).unwrap(),
-                        2 => ro.for_each_range_dyn(from, to, &mut |v: u64| sum = sum.wrapping_add(v)),
+                        1 => {
+                            sum = ro
+                                .try_fold_range(from, to, sum, |a, v: u64| {
+                                    Ok::<_, ()>(a.wrapping_add(v))
+                                })
+                                .unwrap()
+                        }
+                        2 => {
+                            ro.for_each_range_dyn(from, to, &mut |v: u64| sum = sum.wrapping_add(v))
+                        }
                         3 => ro.for_each_range(from, to, |v: u64| sum = sum.wrapping_add(v)),
                         _ => unreachable!(),
                     }
@@ -485,10 +545,22 @@ fn bench_vec<V: ReadableVec<usize, u64> + StoredFold + AnyStoredVec + StoredVec<
 
         let divisor = (reps * ro_passes) as u32;
         let row = vec![
-            BenchResult { name: "fold", duration: times[0] / divisor },
-            BenchResult { name: "try_fold", duration: times[1] / divisor },
-            BenchResult { name: "dyn", duration: times[2] / divisor },
-            BenchResult { name: "static", duration: times[3] / divisor },
+            BenchResult {
+                name: "fold",
+                duration: times[0] / divisor,
+            },
+            BenchResult {
+                name: "try_fold",
+                duration: times[1] / divisor,
+            },
+            BenchResult {
+                name: "dyn",
+                duration: times[2] / divisor,
+            },
+            BenchResult {
+                name: "static",
+                duration: times[3] / divisor,
+            },
         ];
         print_range_row(range_size, &row);
     }
@@ -509,7 +581,9 @@ fn cleanup_bench_dir() {
     }
 }
 
-fn run_bench<V: ReadableVec<usize, u64> + StoredFold + AnyStoredVec + StoredVec<I = usize, T = u64>>(
+fn run_bench<
+    V: ReadableVec<usize, u64> + StoredFold + AnyStoredVec + StoredVec<I = usize, T = u64>,
+>(
     label: &str,
     count: usize,
     can_purge: bool,

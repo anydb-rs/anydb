@@ -1,12 +1,12 @@
 use memmap2::MmapMut;
 use parking_lot::RwLockReadGuard;
 
-use crate::{Database, Region, RegionMetadata};
+use crate::{Database, Region};
 
 /// Zero-copy reader for accessing region data from memory-mapped storage.
 ///
-/// Holds a lock on the memory map and a snapshot of region metadata.
-/// The metadata is cloned at reader creation time, providing snapshot isolation
+/// Holds a lock on the memory map and a snapshot of region start/len.
+/// The snapshot is taken at reader creation time, providing snapshot isolation
 /// and avoiding lock ordering deadlocks with writers.
 ///
 /// # Important: Lock Duration
@@ -22,22 +22,22 @@ use crate::{Database, Region, RegionMetadata};
 /// underlying data structures remain valid for the lifetime of the guards.
 #[must_use = "Reader holds locks and should be used for reading"]
 pub struct Reader {
-    // SAFETY: Field order is critical! Rust drops fields in declaration order (first field first).
-    // The Arc-wrapped structures (_db, _region) MUST be declared BEFORE the guards so they are
-    // dropped AFTER the guards. This ensures the RwLock remains valid while the guard exists.
+    // SAFETY: Field order is critical! Rust drops struct fields in declaration order
+    // (first declared = first dropped). The guard MUST be declared BEFORE the Arcs
+    // so it is dropped FIRST — releasing the lock while the RwLock is still alive.
     // DO NOT REORDER these fields without understanding the safety implications.
-    _db: Database,
-    _region: Region,
-    meta: RegionMetadata,
     mmap: RwLockReadGuard<'static, MmapMut>,
+    start: usize,
+    len: usize,
+    _region: Region,
+    _db: Database,
 }
 
 impl Reader {
     /// Creates a new Reader for the given region.
     ///
-    /// Clones the region metadata to provide snapshot isolation and avoid
-    /// lock ordering deadlocks with writers. The metadata lock is held only
-    /// briefly during clone, then released.
+    /// Snapshots region start/len (two usizes, no heap allocation) to provide
+    /// snapshot isolation and avoid lock ordering deadlocks with writers.
     ///
     /// # Safety
     /// This uses transmute to extend the mmap guard lifetime to 'static. This is safe because:
@@ -50,22 +50,26 @@ impl Reader {
         let db = region.db();
         let region = region.clone();
 
-        // Clone metadata, releasing the lock immediately.
+        // Snapshot start/len under a brief read lock (no heap allocation).
         // This avoids lock ordering deadlocks with writers who need region.meta().write()
         // while holding pages.write().
-        let meta = region.meta().clone();
+        let meta = region.meta();
+        let start = meta.start();
+        let len = meta.len();
+        drop(meta);
 
         // SAFETY: The guard borrows from a RwLock inside the Arc-wrapped Database.
         // We store a clone of this Arc in the Reader struct. Rust drops fields in
-        // declaration order (first field first), and _db is declared BEFORE mmap,
-        // so _db is dropped AFTER mmap. This guarantees the RwLock remains valid
-        // for the entire lifetime of the guard.
+        // declaration order (first declared = first dropped). Since mmap is declared
+        // BEFORE _db, mmap drops first — while the Arc (_db) is still alive.
+        // This guarantees the RwLock remains valid for the guard's entire lifetime.
         let mmap: RwLockReadGuard<'static, MmapMut> = unsafe { std::mem::transmute(db.mmap()) };
 
         Self {
             _db: db,
             _region: region,
-            meta,
+            start,
+            len,
             mmap,
         }
     }
@@ -95,13 +99,13 @@ impl Reader {
     /// Returns the starting offset of this region in the database file.
     #[inline(always)]
     fn start(&self) -> usize {
-        self.meta.start()
+        self.start
     }
 
     /// Returns the length of data in the region.
     #[inline(always)]
     pub fn len(&self) -> usize {
-        self.meta.len()
+        self.len
     }
 
     /// Returns true if the region is empty.

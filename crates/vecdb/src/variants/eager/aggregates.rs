@@ -1,8 +1,7 @@
 use std::ops::Add;
 
 use crate::{
-    AnyVec, Error, Exit, WritableVec, ReadableVec, Result, StoredVec, VecIndex, VecValue,
-    Version,
+    AnyVec, Error, Exit, ReadableVec, Result, StoredVec, VecIndex, VecValue, Version, WritableVec,
 };
 
 use super::{CheckedSub, EagerVec, SaturatingAdd};
@@ -28,26 +27,31 @@ where
             ));
         }
 
-        self.compute_init(others.iter().map(|v| v.version()).sum(), max_from, exit, |this| {
-            let skip = this.len();
-            let source_end = others.iter().map(|v| v.len()).min().unwrap();
-            let end = this.batch_end(source_end);
-            if skip >= end {
-                return Ok(());
-            }
+        self.compute_init(
+            others.iter().map(|v| v.version()).sum(),
+            max_from,
+            exit,
+            |this| {
+                let skip = this.len();
+                let source_end = others.iter().map(|v| v.len()).min().unwrap();
+                let end = this.batch_end(source_end);
+                if skip >= end {
+                    return Ok(());
+                }
 
-            let batches: Vec<Vec<V::T>> = others
-                .iter()
-                .map(|v| v.collect_range_at(skip, end))
-                .collect();
+                let batches: Vec<Vec<V::T>> = others
+                    .iter()
+                    .map(|v| v.collect_range_at(skip, end))
+                    .collect();
 
-            for j in 0..(end - skip) {
-                let i = skip + j;
-                this.checked_push_at(i, aggregate(&batches, j))?;
-            }
+                for j in 0..(end - skip) {
+                    let i = skip + j;
+                    this.checked_push_at(i, aggregate(&batches, j))?;
+                }
 
-            Ok(())
-        })
+                Ok(())
+            },
+        )
     }
 
     pub fn compute_sum_of_others<O>(
@@ -61,7 +65,11 @@ where
         V::T: Add<V::T, Output = V::T>,
     {
         self.compute_aggregate_of_others(max_from, others, exit, |batches, j| {
-            batches.iter().map(|b| b[j].clone()).reduce(|sum, v| sum + v).unwrap()
+            batches
+                .iter()
+                .map(|b| b[j].clone())
+                .reduce(|sum, v| sum + v)
+                .unwrap()
         })
     }
 
@@ -131,55 +139,56 @@ where
             max_from,
             exit,
             |this| {
-            let skip = this.len();
+                let skip = this.len();
 
-            let source_end = weights
-                .iter()
-                .map(|w| w.len())
-                .chain(values.iter().map(|v| v.len()))
-                .min()
-                .unwrap_or(0);
-            let end = this.batch_end(source_end);
+                let source_end = weights
+                    .iter()
+                    .map(|w| w.len())
+                    .chain(values.iter().map(|v| v.len()))
+                    .min()
+                    .unwrap_or(0);
+                let end = this.batch_end(source_end);
 
-            if skip >= end {
-                return Ok(());
-            }
-
-            let weight_batches: Vec<Vec<W>> = weights
-                .iter()
-                .map(|w| w.collect_range_at(skip, end))
-                .collect();
-            let value_batches: Vec<Vec<V::T>> = values
-                .iter()
-                .map(|v| v.collect_range_at(skip, end))
-                .collect();
-
-            for j in 0..(end - skip) {
-                let i = skip + j;
-                let mut total_weight = 0.0_f64;
-                let mut weighted_sum = 0.0_f64;
-
-                for (w_batch, v_batch) in weight_batches.iter().zip(value_batches.iter()) {
-                    let weight: f64 = w_batch[j].clone().into();
-                    let value: f64 = v_batch[j].clone().into();
-
-                    if weight > 0.0 {
-                        total_weight += weight;
-                        weighted_sum += weight * value;
-                    }
+                if skip >= end {
+                    return Ok(());
                 }
 
-                let result = if total_weight > 0.0 {
-                    V::T::from(weighted_sum / total_weight)
-                } else {
-                    V::T::from(0.0)
-                };
+                let weight_batches: Vec<Vec<W>> = weights
+                    .iter()
+                    .map(|w| w.collect_range_at(skip, end))
+                    .collect();
+                let value_batches: Vec<Vec<V::T>> = values
+                    .iter()
+                    .map(|v| v.collect_range_at(skip, end))
+                    .collect();
 
-                this.checked_push_at(i, result)?;
-            }
+                for j in 0..(end - skip) {
+                    let i = skip + j;
+                    let mut total_weight = 0.0_f64;
+                    let mut weighted_sum = 0.0_f64;
 
-            Ok(())
-        })
+                    for (w_batch, v_batch) in weight_batches.iter().zip(value_batches.iter()) {
+                        let weight: f64 = w_batch[j].clone().into();
+                        let value: f64 = v_batch[j].clone().into();
+
+                        if weight > 0.0 {
+                            total_weight += weight;
+                            weighted_sum += weight * value;
+                        }
+                    }
+
+                    let result = if total_weight > 0.0 {
+                        V::T::from(weighted_sum / total_weight)
+                    } else {
+                        V::T::from(0.0)
+                    };
+
+                    this.checked_push_at(i, result)?;
+                }
+
+                Ok(())
+            },
+        )
     }
 
     pub fn compute_sum_from_indexes<A, B>(
@@ -226,42 +235,43 @@ where
             max_from,
             exit,
             |this| {
-            let skip = this.len();
-            let source_end = indexes_count.len();
-            let end = this.batch_end(source_end);
-            if skip >= end {
-                return Ok(());
-            }
+                let skip = this.len();
+                let source_end = indexes_count.len();
+                let end = this.batch_end(source_end);
+                if skip >= end {
+                    return Ok(());
+                }
 
-            // Get the starting position in source
-            let pos = if skip < first_indexes.len() {
-                first_indexes.collect_one_at(skip).unwrap().to_usize()
-            } else {
-                return Ok(());
-            };
+                // Get the starting position in source
+                let pos = if skip < first_indexes.len() {
+                    first_indexes.collect_one_at(skip).unwrap().to_usize()
+                } else {
+                    return Ok(());
+                };
 
-            let counts_batch: Vec<usize> = indexes_count
-                .collect_range_at(skip, end)
-                .into_iter()
-                .map(usize::from)
-                .collect();
-            let total_count: usize = counts_batch.iter().sum();
+                let counts_batch: Vec<usize> = indexes_count
+                    .collect_range_at(skip, end)
+                    .into_iter()
+                    .map(usize::from)
+                    .collect();
+                let total_count: usize = counts_batch.iter().sum();
 
-            // Single batch read instead of per-element allocations
-            let all_values = source.collect_range_at(pos, pos + total_count);
-            let mut offset = 0;
-            for (j, &count) in counts_batch.iter().enumerate() {
-                let i = skip + j;
-                let sum = all_values[offset..offset + count]
-                    .iter()
-                    .filter(|v| filter(v))
-                    .fold(V::T::default(), |acc, val| acc.saturating_add(val.clone()));
-                offset += count;
-                this.checked_push_at(i, sum)?;
-            }
+                // Single batch read instead of per-element allocations
+                let all_values = source.collect_range_at(pos, pos + total_count);
+                let mut offset = 0;
+                for (j, &count) in counts_batch.iter().enumerate() {
+                    let i = skip + j;
+                    let sum = all_values[offset..offset + count]
+                        .iter()
+                        .filter(|v| filter(v))
+                        .fold(V::T::default(), |acc, val| acc.saturating_add(val.clone()));
+                    offset += count;
+                    this.checked_push_at(i, sum)?;
+                }
 
-            Ok(())
-        })
+                Ok(())
+            },
+        )
     }
 
     pub fn compute_count_from_indexes<A, B>(
@@ -312,31 +322,39 @@ where
         B: VecValue,
         <A as TryInto<V::T>>::Error: core::error::Error + 'static,
     {
-        self.compute_init(first_indexes.version() + other_to_else.version(), max_from, exit, |this| {
-            let skip = this.len();
-            let source_end = first_indexes.len();
-            let end = this.batch_end(source_end);
-            if skip >= end {
-                return Ok(());
-            }
+        self.compute_init(
+            first_indexes.version() + other_to_else.version(),
+            max_from,
+            exit,
+            |this| {
+                let skip = this.len();
+                let source_end = first_indexes.len();
+                let end = this.batch_end(source_end);
+                if skip >= end {
+                    return Ok(());
+                }
 
-            let fi_batch = first_indexes.collect_range_at(skip, end);
-            for (j, first_index) in fi_batch.iter().enumerate() {
-                let i = skip + j;
-                let next_first = if i + 1 < first_indexes.len() {
-                    fi_batch.get(j + 1).map(|fi| fi.to_usize()).unwrap_or_else(|| {
-                        first_indexes.collect_one_at(i + 1).unwrap().to_usize()
-                    })
-                } else {
-                    other_to_else.len()
-                };
+                let fi_batch = first_indexes.collect_range_at(skip, end);
+                for (j, first_index) in fi_batch.iter().enumerate() {
+                    let i = skip + j;
+                    let next_first = if i + 1 < first_indexes.len() {
+                        fi_batch
+                            .get(j + 1)
+                            .map(|fi| fi.to_usize())
+                            .unwrap_or_else(|| {
+                                first_indexes.collect_one_at(i + 1).unwrap().to_usize()
+                            })
+                    } else {
+                        other_to_else.len()
+                    };
 
-                let range = first_index.to_usize()..next_first;
-                let count = range.into_iter().filter(|i| filter(A::from(*i))).count();
-                this.checked_push_at(i, V::T::from(A::from(count)))?;
-            }
+                    let range = first_index.to_usize()..next_first;
+                    let count = range.into_iter().filter(|i| filter(A::from(*i))).count();
+                    this.checked_push_at(i, V::T::from(A::from(count)))?;
+                }
 
-            Ok(())
-        })
+                Ok(())
+            },
+        )
     }
 }

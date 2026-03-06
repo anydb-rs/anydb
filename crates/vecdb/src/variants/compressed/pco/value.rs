@@ -60,7 +60,9 @@ where
 
     fn as_inner_slice_mut(&mut self) -> &mut [T::NumberType] {
         // SAFETY: Compile-time assertions ensure T and T::NumberType have identical layout
-        unsafe { std::slice::from_raw_parts_mut(self.as_mut_ptr() as *mut T::NumberType, self.len()) }
+        unsafe {
+            std::slice::from_raw_parts_mut(self.as_mut_ptr() as *mut T::NumberType, self.len())
+        }
     }
 }
 

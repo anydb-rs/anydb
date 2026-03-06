@@ -9,8 +9,8 @@ use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, WritableVec, ImportOptions, ImportableVec, RawStrategy, ReadWriteRawVec, Reader,
-    Result, ReadableVec, Stamp, StoredVec, Version,
+    AnyStoredVec, ImportOptions, ImportableVec, RawStrategy, ReadWriteRawVec, ReadableVec, Reader,
+    Result, Stamp, StoredVec, Version, WritableVec,
 };
 
 // ============================================================================
@@ -105,7 +105,9 @@ fn compute_directory_hash(dir: &Path) -> Result<String, Box<dyn std::error::Erro
     let regions_dir = dir.join("regions");
     if regions_dir.exists() {
         fn collect_files(dir: &Path, files: &mut Vec<PathBuf>) {
-            let Ok(entries) = fs::read_dir(dir) else { return };
+            let Ok(entries) = fs::read_dir(dir) else {
+                return;
+            };
             for entry in entries.filter_map(|e| e.ok()) {
                 let path = entry.path();
                 if path.components().any(|c| c.as_os_str() == "changes") {

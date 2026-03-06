@@ -1,7 +1,9 @@
 use anyhow::Result;
 use rayon::prelude::*;
 use std::path::Path;
-use vecdb::{AnyStoredVec, AnyVec, Database, WritableVec, ImportableVec, PcoVec, ReadableVec, Version};
+use vecdb::{
+    AnyStoredVec, AnyVec, Database, ImportableVec, PcoVec, ReadableVec, Version, WritableVec,
+};
 
 use crate::database::DatabaseBenchmark;
 
@@ -37,7 +39,9 @@ impl DatabaseBenchmark for PcoVecBench {
     }
 
     fn read_sequential(&self) -> Result<u64> {
-        Ok(self.vec.fold_range(0, self.vec.len(), 0u64, |acc, v| acc.wrapping_add(v)))
+        Ok(self
+            .vec
+            .fold_range(0, self.vec.len(), 0u64, |acc, v| acc.wrapping_add(v)))
     }
 
     fn read_random(&self, indices: &[u64]) -> Result<u64> {

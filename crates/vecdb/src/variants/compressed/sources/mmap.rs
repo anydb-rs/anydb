@@ -5,7 +5,9 @@ use rawdb::{Reader, Region};
 
 use crate::{AnyStoredVec, Pages, VecIndex, VecValue, unlikely};
 
-use super::super::inner::{ReadWriteCompressedVec, CompressionStrategy, MAX_UNCOMPRESSED_PAGE_SIZE};
+use super::super::inner::{
+    CompressionStrategy, MAX_UNCOMPRESSED_PAGE_SIZE, ReadWriteCompressedVec,
+};
 
 /// Read-only mmap-backed source over a compressed vector.
 ///
@@ -135,5 +137,4 @@ where
         }
         Ok(accum)
     }
-
 }

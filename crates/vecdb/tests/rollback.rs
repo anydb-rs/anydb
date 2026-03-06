@@ -10,8 +10,8 @@ use rawdb::Database;
 use std::ops::DerefMut;
 use tempfile::TempDir;
 use vecdb::{
-    AnyStoredVec, WritableVec, ImportOptions, ImportableVec, Result, ReadableVec, Stamp,
-    StoredVec, Version,
+    AnyStoredVec, ImportOptions, ImportableVec, ReadableVec, Result, Stamp, StoredVec, Version,
+    WritableVec,
 };
 
 // ============================================================================
@@ -1590,7 +1590,9 @@ mod integration {
         let regions_dir = dir.join("regions");
         if regions_dir.exists() {
             fn collect_files(dir: &Path, files: &mut Vec<PathBuf>) {
-                let Ok(entries) = fs::read_dir(dir) else { return };
+                let Ok(entries) = fs::read_dir(dir) else {
+                    return;
+                };
                 for entry in entries.filter_map(|e| e.ok()) {
                     let path = entry.path();
                     if path.components().any(|c| c.as_os_str() == "changes") {

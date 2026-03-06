@@ -70,11 +70,17 @@ where
     }
 
     #[inline(always)]
-    fn fold_source<B, F: FnMut(B, T) -> B>(&self, from: usize, to: usize, len: usize, init: B, f: F) -> B {
+    fn fold_source<B, F: FnMut(B, T) -> B>(
+        &self,
+        from: usize,
+        to: usize,
+        len: usize,
+        init: B,
+        f: F,
+    ) -> B {
         let range_bytes = (to - from) * size_of::<T>();
         if range_bytes > MMAP_CROSSOVER_BYTES {
-            RawIoSource::<I, T, S>::new_from_parts(self.base.region(), len, from, to)
-                .fold(init, f)
+            RawIoSource::<I, T, S>::new_from_parts(self.base.region(), len, from, to).fold(init, f)
         } else {
             RawMmapSource::<I, T, S>::new_from_parts(self.base.region(), len, from, to)
                 .fold(init, f)
@@ -156,7 +162,12 @@ where
             return None;
         }
         let reader = self.base.region().create_reader();
-        Some(unsafe { S::read_from_ptr(reader.prefixed(HEADER_OFFSET).as_ptr(), index * size_of::<T>()) })
+        Some(unsafe {
+            S::read_from_ptr(
+                reader.prefixed(HEADER_OFFSET).as_ptr(),
+                index * size_of::<T>(),
+            )
+        })
     }
 
     #[inline(always)]

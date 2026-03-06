@@ -95,7 +95,7 @@ where
             let map_end = (to + 1).min(mapping.len());
             let heights = mapping.collect_range_dyn(from, map_end);
             let source_len = source.len();
-            let mut cursor = Cursor::from_dyn(&**source);
+            let mut cursor = Cursor::new(&**source);
             for idx in 0..(to - from) {
                 let next_first = heights
                     .get(idx + 1)
@@ -151,7 +151,7 @@ where
             let map_end = (to + 1).min(mapping.len());
             let indices = mapping.collect_range_dyn(from, map_end);
             let source_len = source.len();
-            let mut cursor = Cursor::from_dyn(&**source);
+            let mut cursor = Cursor::new(&**source);
 
             for idx in 0..(to - from) {
                 let current_first = indices[idx].to_usize();
