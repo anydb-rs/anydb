@@ -2,12 +2,11 @@ use std::fs::File;
 
 use crate::Result;
 
-/// Represents actual disk usage of a file (accounting for sparse files and holes).
+/// Actual disk usage (accounts for sparse files / holes).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiskUsage(u64);
 
 impl DiskUsage {
-    /// Creates a DiskUsage from a file handle.
     #[cfg(unix)]
     pub fn from_file(file: &File) -> Result<Self> {
         use std::os::unix::io::AsRawFd;
@@ -17,18 +16,14 @@ impl DiskUsage {
         if result == -1 {
             return Err(std::io::Error::last_os_error().into());
         }
-        // st_blocks is in 512-byte units
         Ok(Self(stat.st_blocks as u64 * 512))
     }
 
-    /// Creates a DiskUsage from a file handle.
-    /// On non-Unix platforms, falls back to logical file size.
     #[cfg(not(unix))]
     pub fn from_file(file: &File) -> Result<Self> {
         Ok(Self(file.metadata()?.len()))
     }
 
-    /// Returns the disk usage in bytes.
     #[inline]
     pub fn bytes(&self) -> u64 {
         self.0

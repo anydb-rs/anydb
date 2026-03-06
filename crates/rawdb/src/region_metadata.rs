@@ -7,18 +7,13 @@ const SIZE_OF_U64: usize = std::mem::size_of::<u64>();
 const MAX_REGION_ID_LEN: usize = 1024;
 const MAX_RESERVED_SIZE: usize = 1024 * GiB; // 1 TiB
 
-/// Metadata tracking a region's location, size, and identity.
+/// Serializable metadata for a region (one page, atomic writes).
 #[derive(Debug)]
 pub struct RegionMetadata {
-    /// Starting offset in the database file (must be multiple of 4096).
     start: usize,
-    /// Current length of data in the region.
     len: usize,
-    /// Reserved space for the region (must be multiple of 4096, >= len).
     reserved: usize,
-    /// Unique identifier for the region.
     id: String,
-    /// Whether metadata has been modified since last flush.
     state: RegionState,
 }
 
@@ -110,7 +105,6 @@ impl RegionMetadata {
         }
     }
 
-    /// Returns the amount of reserved space not yet used by data.
     #[inline(always)]
     pub fn remaining(&self) -> usize {
         self.reserved - self.len
@@ -124,8 +118,6 @@ impl RegionMetadata {
         }
     }
 
-    /// Flushes metadata to disk if dirty.
-    /// Returns `Ok(true)` if flushed, `Ok(false)` if not dirty.
     pub(crate) fn flush(&self, index: usize, regions: &Regions) -> Result<bool> {
         let state = &self.state;
         if state.is_clean() {
@@ -141,19 +133,16 @@ impl RegionMetadata {
         Ok(true)
     }
 
-    /// Returns true if metadata needs to be flushed (written but not synced).
     #[inline]
     pub(crate) fn needs_flush(&self) -> bool {
         self.state.needs_flush()
     }
 
-    /// Marks metadata as clean.
     #[inline]
     pub(crate) fn mark_clean(&self) {
         self.state.set_is_clean();
     }
 
-    /// Serialize to bytes using little endian encoding
     fn to_bytes(&self) -> [u8; SIZE_OF_REGION_METADATA] {
         let mut pos = 0;
         let mut bytes = [0u8; SIZE_OF_REGION_METADATA];
@@ -177,7 +166,6 @@ impl RegionMetadata {
         bytes
     }
 
-    /// Deserialize from bytes using little endian encoding
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         if bytes.len() != SIZE_OF_REGION_METADATA {
             return Err(Error::InvalidMetadataSize {
@@ -191,12 +179,10 @@ impl RegionMetadata {
         let reserved = u64::from_le_bytes(bytes[16..24].try_into().unwrap()) as usize;
         let id_len = u64::from_le_bytes(bytes[24..32].try_into().unwrap()) as usize;
 
-        // Check for empty/uninitialized metadata first
         if start == 0 && len == 0 && reserved == 0 && id_len == 0 {
             return Err(Error::EmptyMetadata);
         }
 
-        // Validate id_len before slicing to prevent out-of-bounds access
         if id_len > MAX_REGION_ID_LEN {
             return Err(Error::CorruptedMetadata(format!(
                 "id_len {} exceeds maximum {}",
@@ -204,7 +190,6 @@ impl RegionMetadata {
             )));
         }
 
-        // Validate id_len fits in remaining bytes (32 bytes header + id)
         if 32 + id_len > SIZE_OF_REGION_METADATA {
             return Err(Error::CorruptedMetadata(format!(
                 "id_len {} would exceed metadata size",
@@ -215,7 +200,6 @@ impl RegionMetadata {
         let id = String::from_utf8(bytes[32..32 + id_len].to_vec())
             .map_err(|_| Error::InvalidRegionId)?;
 
-        // Validate invariants that must hold for metadata
         if !start.is_multiple_of(PAGE_SIZE) {
             return Err(Error::CorruptedMetadata(format!(
                 "start {} is not page-aligned",

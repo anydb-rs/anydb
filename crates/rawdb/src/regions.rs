@@ -47,8 +47,6 @@ impl Regions {
         Ok(self.file.metadata()?.len() as usize)
     }
 
-    /// Fill `index_to_region`.
-    /// Needs to be called after `open()`
     pub(crate) fn fill(&mut self, db: &Database) -> Result<()> {
         let file_len = self.file_len()?;
 
@@ -128,19 +126,16 @@ impl Regions {
     }
 
     pub(crate) fn rename(&mut self, old_id: &str, new_id: &str) -> Result<()> {
-        // Check that old_id exists
         let index = self
             .id_to_index
             .get(old_id)
             .copied()
             .ok_or(Error::RegionNotFound)?;
 
-        // Check that new_id doesn't already exist
         if self.id_to_index.contains_key(new_id) {
             return Err(Error::RegionAlreadyExists);
         }
 
-        // Update the id_to_index mapping
         self.id_to_index.remove(old_id);
         self.id_to_index.insert(new_id.to_string(), index);
 
@@ -148,9 +143,7 @@ impl Regions {
     }
 
     pub(crate) fn remove(&mut self, region: &Region) -> Result<()> {
-        // We check 2, because:
-        // 1. Is the passed region
-        // 2. Is in self.index_to_region
+        // Expected 2: one from caller, one from self.index_to_region.
         let ref_count = Arc::strong_count(region.arc());
         debug!(
             "regions.remove '{}': arc count = {} (expected <= 2)",
@@ -180,15 +173,12 @@ impl Regions {
         Ok(())
     }
 
-    /// Schedules metadata writeback (non-blocking `MS_ASYNC`).
-    ///
-    /// Caller must follow with `sync_data()` to guarantee durability.
+    /// Schedules metadata writeback. Caller must follow with `sync_data()`.
     pub(crate) fn flush(&self) -> Result<()> {
         self.mmap.flush_async()?;
         Ok(())
     }
 
-    /// Syncs the regions metadata file to durable storage.
     pub(crate) fn sync_data(&self) -> Result<()> {
         self.file.sync_data()?;
         Ok(())

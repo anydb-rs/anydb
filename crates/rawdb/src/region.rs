@@ -5,10 +5,7 @@ use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::{Database, Error, Reader, RegionMetadata, Result, WeakDatabase};
 
-/// Named region within a database providing isolated storage space.
-///
-/// Regions grow dynamically as data is written and can be moved within the
-/// database file to optimize space usage. Each region has a unique ID for lookup.
+/// Named, dynamically-sized region within a database.
 #[derive(Debug, Clone)]
 #[must_use = "Region should be stored to access the data"]
 pub struct Region(Arc<RegionInner>);
@@ -18,9 +15,7 @@ pub(crate) struct RegionInner {
     db: WeakDatabase,
     index: usize,
     meta: RwLock<RegionMetadata>,
-    /// Dirty bounding box (min_offset, max_offset) relative to region start.
-    /// (usize::MAX, 0) means clean (no dirty data).
-    /// Separate from meta to allow flush without blocking iterators.
+    /// (min_offset, max_offset) relative to region start. (usize::MAX, 0) = clean.
     dirty_bounds: Mutex<(usize, usize)>,
 }
 
@@ -51,11 +46,6 @@ impl Region {
         }))
     }
 
-    /// Creates a reader for zero-copy access to this region's data.
-    ///
-    /// The Reader holds read locks on both the memory map and region metadata,
-    /// blocking writes until dropped. Drop the reader as soon as you're done
-    /// reading to avoid blocking other operations.
     #[inline]
     pub fn create_reader(&self) -> Reader {
         Reader::new(self)
@@ -65,36 +55,19 @@ impl Region {
         self.db().open_read_only_file()
     }
 
-    /// Appends data to the end of the region.
-    ///
-    /// The region will automatically grow and relocate if needed.
-    /// Data is written to the mmap but not durable until `flush()` is called.
+    /// Appends data to the region. Not durable until `flush()`.
     #[inline]
     pub fn write(&self, data: &[u8]) -> Result<()> {
         self.write_with(data, None, false)
     }
 
-    /// Writes data at a specific offset within the region.
-    ///
-    /// The offset must be within the current region length.
-    /// Data written past the current end will extend the length.
-    /// Data is written to the mmap but not durable until `flush()` is called.
+    /// Writes data at offset within the region. Not durable until `flush()`.
     #[inline]
     pub fn write_at(&self, data: &[u8], at: usize) -> Result<()> {
         self.write_with(data, Some(at), false)
     }
 
-    /// Writes values directly to the mmap with dirty range tracking.
-    ///
-    /// All writes must be within the current region length (no extension).
-    /// Tracks dirty ranges to avoid flushing unchanged data.
-    ///
-    /// - `iter`: Iterator yielding (offset, value) pairs where offset is relative to region start
-    /// - `value_len`: The byte size of each value
-    /// - `write_fn`: Called for each (value, slice) to serialize the value into the slice
-    ///
-    /// # Panics
-    /// Panics if any write would exceed the region length or mmap bounds.
+    /// Writes (offset, value) pairs directly to the mmap within region bounds.
     #[inline]
     pub fn batch_write_each<T, F>(
         &self,
@@ -113,7 +86,6 @@ impl Region {
         let mmap = db.mmap();
         let ptr = mmap.as_ptr() as *mut u8;
 
-        // Track bounding box instead of per-value ranges
         let mut dirty_start = usize::MAX;
         let mut dirty_end = 0usize;
 
@@ -121,13 +93,8 @@ impl Region {
             let end_offset = offset
                 .checked_add(value_len)
                 .expect("offset + value_len overflow");
-            assert!(
-                end_offset <= region_len,
-                "batch_write_each: write at offset {offset} with len {value_len} exceeds region length {region_len}"
-            );
+            assert!(end_offset <= region_len);
 
-            // SAFETY: region_start + offset + value_len <= region_start + region_len <= mmap_len
-            // (region fits within mmap is an invariant maintained by write_with/set_min_len)
             let abs_offset = region_start + offset;
             let slice = unsafe { std::slice::from_raw_parts_mut(ptr.add(abs_offset), value_len) };
             write_fn(&value, slice);
@@ -142,13 +109,7 @@ impl Region {
         }
     }
 
-    /// Truncates the region to the specified length.
-    ///
-    /// This reduces the logical length but doesn't modify existing data bytes.
-    /// The truncated data becomes inaccessible even though the bytes remain in the mmap.
-    /// Changes are not durable until `flush()` is called.
     pub fn truncate(&self, from: usize) -> Result<()> {
-        // Check current length first (quick read, guard dropped immediately)
         let len = self.meta().len();
         if from == len {
             return Ok(());
@@ -168,11 +129,7 @@ impl Region {
         Ok(())
     }
 
-    /// Truncates the region to a specific offset and writes data there.
-    ///
-    /// This is an atomic truncate + write operation. The final length will be
-    /// exactly `at + data.len()` regardless of the previous length.
-    /// Changes are not durable until `flush()` is called.
+    /// Truncates to `at`, then writes data there.
     #[inline]
     pub fn truncate_write(&self, at: usize, data: &[u8]) -> Result<()> {
         self.write_with(data, Some(at), true)
@@ -190,9 +147,6 @@ impl Region {
 
         let data_len = data.len();
 
-        // Validate write position if specified
-        // Note: checking `at > len` is sufficient since `len <= reserved` is always true
-        // Therefore if `at <= len`, then `at <= reserved` must also be true
         if let Some(at_val) = at
             && at_val > len
         {
@@ -202,7 +156,6 @@ impl Region {
             });
         }
 
-        // Offset within region where write starts (append position if at=None)
         let write_offset = at.unwrap_or(len);
         let new_len = at.map_or(len + data_len, |at| {
             let new_len = at + data_len;
@@ -210,14 +163,12 @@ impl Region {
         });
         let write_start = start + write_offset;
 
-        // Write to reserved space if possible
+        // --- Fits in reserved space ---
         if new_len <= reserved {
             db.write(write_start, data);
             self.mark_dirty_abs(start, write_start, data_len);
 
-            // Fast path: in-place update doesn't change length, skip metadata locks
             if new_len != len {
-                // Lock order: regions → meta
                 let regions = db.regions();
                 let mut meta = self.meta_mut();
                 meta.set_len(new_len);
@@ -227,14 +178,12 @@ impl Region {
             return Ok(());
         }
 
-        // Need to grow: validate reserved is non-zero to avoid infinite loop
         if reserved == 0 {
             return Err(Error::InvariantViolation(format!(
                 "reserved is 0 which would cause infinite loop! start={start}, len={len}, index={index}, new_len={new_len}"
             )));
         }
 
-        // Double reserved until it fits new_len
         let mut new_reserved = reserved;
         while new_len > new_reserved {
             new_reserved = new_reserved
@@ -246,9 +195,6 @@ impl Region {
         }
         let added_reserve = new_reserved - reserved;
 
-        // Amount of existing data to copy when relocating:
-        // - truncate=true: only copy up to write position (discard rest)
-        // - truncate=false: copy all existing data to preserve bytes after write
         let copy_len = if truncate { write_offset } else { len };
 
         trace!(
@@ -258,20 +204,15 @@ impl Region {
         );
         let mut layout = db.layout_mut();
 
-        // If is last, extend reserved in place (no relocation needed)
+        // --- Extend last region in file ---
         if layout.is_last_anything(self) {
             let target_len = start + new_reserved;
-            // Update reserved BEFORE dropping layout. Layout::len() reads
-            // region.meta().reserved() for the last region, so other threads
-            // see the expanded end immediately — no retry needed.
-            // Lock order: layout (held) → meta — correct per ordering rules.
+            // Update reserved before dropping layout so Layout::len() is correct.
             {
                 let mut meta = self.meta_mut();
                 meta.set_reserved(new_reserved);
             }
-            // Release layout BEFORE calling set_min_len to avoid deadlock.
-            // set_min_len needs mmap_mut, and another thread may hold mmap read
-            // while waiting for layout_mut, causing deadlock if we hold layout here.
+            // Drop layout before set_min_len (needs mmap_mut — would deadlock).
             drop(layout);
 
             if let Err(e) = db.set_min_len(target_len) {
@@ -291,7 +232,7 @@ impl Region {
             return Ok(());
         }
 
-        // Expand region to the right if gap is wide enough
+        // --- Expand into adjacent hole ---
         let hole_start = start + reserved;
         if layout
             .get_hole(hole_start)
@@ -306,7 +247,6 @@ impl Region {
             db.write(write_start, data);
 
             self.mark_dirty_abs(start, write_start, data_len);
-            // Acquire regions READ lock BEFORE metadata WRITE lock to prevent deadlock.
             let regions = db.regions();
             let mut meta = self.meta_mut();
             meta.set_len(new_len);
@@ -315,7 +255,7 @@ impl Region {
             return Ok(());
         }
 
-        // Relocate: find a hole or allocate at end of file
+        // --- Relocate to a hole or append at end ---
         let new_start = if let Some(hole_start) = layout.find_smallest_adequate_hole(new_reserved) {
             debug!(
                 "{}: '{}' relocating to hole at {} (need {})",
@@ -338,13 +278,9 @@ impl Region {
                 new_start,
                 new_reserved
             );
-            // Reserve space in the layout BEFORE dropping the lock.
-            // This ensures other threads see the updated layout.len() immediately,
-            // preventing thundering-herd retries when many regions grow at once.
+            // Reserve before dropping layout so other threads see updated len().
             layout.reserve(new_start, new_reserved);
-            // Release layout BEFORE calling set_min_len to avoid deadlock.
-            // set_min_len needs mmap_mut, and another thread may hold mmap read
-            // while waiting for layout_mut, causing deadlock if we hold layout here.
+            // Drop layout before set_min_len (needs mmap_mut — would deadlock).
             drop(layout);
 
             if let Err(e) = db.set_min_len(target_len) {
@@ -367,9 +303,7 @@ impl Region {
         layout.move_region(new_start, self)?;
         assert!(layout.take_reserved(new_start) == Some(new_reserved));
 
-        // Region moved, mark all data as dirty (relative to new start)
         self.mark_dirty(0, new_len);
-        // Lock order: layout (held) → regions → meta
         let regions = db.regions();
         let mut meta = self.meta_mut();
         meta.set_start(new_start);
@@ -380,10 +314,6 @@ impl Region {
         Ok(())
     }
 
-    /// Renames the region to a new ID.
-    ///
-    /// The new ID must not already be in use.
-    /// Changes are not durable until `flush()` is called.
     pub fn rename(&self, new_id: &str) -> Result<()> {
         let old_id = self.meta().id().to_string();
         let db = self.db();
@@ -401,10 +331,7 @@ impl Region {
         Ok(())
     }
 
-    /// Removes the region from the database.
-    ///
-    /// The space is marked as a pending hole that will become reusable after
-    /// the next `flush()`. This consumes the region to prevent use-after-free.
+    /// Space becomes reusable after the next `flush()`.
     pub fn remove(self) -> Result<()> {
         let db = self.db();
         let id = self.meta().id().to_string();
@@ -420,16 +347,10 @@ impl Region {
         Ok(())
     }
 
-    /// Flushes this region's dirty data and metadata to disk.
-    ///
-    /// Flushes if any data writes or metadata-only changes (truncate, rename) were made.
-    /// Returns `Ok(true)` if anything was flushed, `Ok(false)` if nothing was dirty.
+    /// Flushes dirty data and metadata to disk. Returns whether anything was flushed.
     pub fn flush(&self) -> Result<bool> {
         let db = self.db();
         let dirty_bounds = self.take_dirty_bounds();
-
-        // Lock order: regions → mmap → meta
-        // Must acquire regions before mmap to avoid deadlock with punch_holes
         let regions = db.regions();
 
         let data_flushed = if let Some((min, max)) = dirty_bounds {
@@ -458,7 +379,6 @@ impl Region {
         Ok(data_flushed || meta_flushed)
     }
 
-    /// Returns true if two Region handles point to the same underlying region.
     #[inline(always)]
     pub fn ptr_eq(&self, other: &Region) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
@@ -489,8 +409,6 @@ impl Region {
         self.0.db.upgrade()
     }
 
-    /// Marks a range as dirty (needing flush).
-    /// `offset` is relative to region start.
     #[inline]
     pub fn mark_dirty(&self, offset: usize, len: usize) {
         let end = offset + len;
@@ -499,16 +417,12 @@ impl Region {
         bounds.1 = bounds.1.max(end);
     }
 
-    /// Marks a range as dirty using absolute file positions.
-    /// Converts to relative offsets internally.
     #[inline]
     fn mark_dirty_abs(&self, region_start: usize, abs_start: usize, len: usize) {
         let offset = abs_start - region_start;
         self.mark_dirty(offset, len);
     }
 
-    /// Takes the dirty bounding box, resetting to clean.
-    /// Returns `Some((min, max))` if dirty, `None` if clean.
     #[inline]
     pub(crate) fn take_dirty_bounds(&self) -> Option<(usize, usize)> {
         let mut bounds = self.0.dirty_bounds.lock();
@@ -519,7 +433,6 @@ impl Region {
         }
     }
 
-    /// Restores dirty bounds (used when flush fails to allow retry).
     #[inline]
     pub(crate) fn restore_dirty_bounds(&self, min: usize, max: usize) {
         let mut bounds = self.0.dirty_bounds.lock();

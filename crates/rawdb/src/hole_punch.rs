@@ -5,17 +5,10 @@ use std::os::unix::io::AsRawFd;
 
 use crate::{Error, Result};
 
-/// Punches a hole in a file, deallocating the specified range.
-///
-/// This is a platform-specific operation that marks a range of bytes as sparse,
-/// potentially reclaiming disk space on filesystems that support it.
+/// Deallocates file blocks without changing file size (platform-specific).
 pub struct HolePunch;
 
 impl HolePunch {
-    /// Punches a hole in the file at the specified offset and length.
-    ///
-    /// On supported platforms (macOS, Linux, FreeBSD), this deallocates the
-    /// specified range, potentially reclaiming disk space.
     #[cfg(target_os = "macos")]
     pub fn punch(file: &File, start: usize, length: usize) -> Result<()> {
         let fpunchhole = FPunchhole {

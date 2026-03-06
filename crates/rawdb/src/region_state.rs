@@ -1,9 +1,6 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 
-/// Tracks the dirty/clean state of a region's metadata.
-///
-/// State transitions: NEEDS_WRITE -> NEEDS_FLUSH -> IS_CLEAN
-/// Uses Release/Acquire ordering to ensure proper synchronization across threads.
+/// State transitions: NEEDS_WRITE → NEEDS_FLUSH → IS_CLEAN.
 #[derive(Debug)]
 pub struct RegionState(AtomicU8);
 
@@ -12,13 +9,11 @@ impl RegionState {
     pub const NEEDS_FLUSH: u8 = 1;
     pub const NEEDS_WRITE: u8 = 2;
 
-    /// Creates a dirty state for a newly created region (needs write).
     #[inline(always)]
     pub fn new_dirty() -> Self {
         Self(AtomicU8::new(Self::NEEDS_WRITE))
     }
 
-    /// Creates a clean state for a region loaded from disk.
     #[inline(always)]
     pub fn new_clean() -> Self {
         Self(AtomicU8::new(Self::IS_CLEAN))

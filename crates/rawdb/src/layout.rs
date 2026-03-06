@@ -5,19 +5,15 @@ use smallvec::SmallVec;
 
 use crate::{Error, Region, Regions, Result};
 
-/// Tracks the layout of regions and holes in the database file.
-///
-/// Maintains a dual-index for holes: `start_to_hole` for O(1) lookup by position,
-/// and `hole_to_starts` for O(log n) lookup of smallest adequate hole.
+/// Tracks regions, holes, and reservations in the database file.
 #[derive(Debug, Default)]
 pub struct Layout {
     start_to_region: BTreeMap<usize, Region>,
     start_to_hole: BTreeMap<usize, usize>,
-    /// Secondary index: hole size -> list of starts with that size.
-    /// Enables O(log n) best-fit hole search.
+    /// hole_size → starts: enables O(log n) best-fit search.
     hole_to_starts: BTreeMap<usize, SmallVec<[usize; 1]>>,
     start_to_reserved: BTreeMap<usize, usize>,
-    /// Holes from region moves that can't be reused until flush
+    /// Holes from region moves, reusable after flush.
     pending_holes: BTreeMap<usize, usize>,
 }
 
@@ -53,13 +49,11 @@ impl From<&Regions> for Layout {
 }
 
 impl Layout {
-    /// Inserts a hole and updates both indexes.
     fn insert_hole(&mut self, start: usize, size: usize) {
         self.start_to_hole.insert(start, size);
         self.hole_to_starts.entry(size).or_default().push(start);
     }
 
-    /// Removes a hole and updates both indexes.
     fn remove_hole(&mut self, start: usize) -> Option<usize> {
         let size = self.start_to_hole.remove(&start)?;
 
@@ -167,12 +161,7 @@ impl Layout {
         self.start_to_hole.get(&start).copied()
     }
 
-    /// Finds the smallest hole that can fit the requested size.
-    ///
-    /// Uses a secondary index for O(log n) best-fit lookup.
-    /// Returns the start position of the smallest adequate hole.
     pub fn find_smallest_adequate_hole(&self, min_size: usize) -> Option<usize> {
-        // Find the smallest size >= min_size
         self.hole_to_starts
             .range(min_size..)
             .next()
@@ -185,10 +174,8 @@ impl Layout {
         };
 
         if size == compress_by {
-            // Hole fully consumed, already removed
             Ok(())
         } else if size > compress_by {
-            // Hole partially consumed, insert remainder
             let new_start = start + compress_by;
             let new_size = size - compress_by;
             self.insert_hole(new_start, new_size);
@@ -207,14 +194,10 @@ impl Layout {
         }
     }
 
-    /// Takes the reserved space at the given start position, removing it from tracking.
-    /// Returns None if no reservation exists at this position.
     pub fn take_reserved(&mut self, start: usize) -> Option<usize> {
         self.start_to_reserved.remove(&start)
     }
 
-    /// Promote pending holes to real holes after flush.
-    /// Safe to reuse now that metadata changes are durable.
     pub fn promote_pending_holes(&mut self, name: &str) {
         let count = self.pending_holes.len();
         if count > 0 {

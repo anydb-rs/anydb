@@ -46,50 +46,29 @@ pub const PAGE_SIZE_MINUS_1: usize = PAGE_SIZE - 1;
 #[allow(non_upper_case_globals)]
 pub const GiB: usize = 1024 * 1024 * 1024;
 
-/// Memory-mapped database with dynamic space allocation and hole punching.
-///
-/// Provides efficient storage through memory mapping with automatic region management,
-/// space reclamation via hole punching, and dynamic file growth as needed.
+/// Memory-mapped database with region-based storage and hole punching.
 #[derive(Debug, Clone)]
 #[must_use = "Database should be stored to keep the database open"]
 pub struct Database(Arc<DatabaseInner>);
 
-/// # Lock Ordering
-///
-/// To prevent deadlocks, locks must always be acquired in this order:
-///
-/// ```text
-/// 1. layout     (Database-level: allocation and hole tracking)
-/// 2. regions    (Database-level: region registry)
-/// 3. mmap       (Database-level: memory-mapped file)
-/// 4. file       (Database-level: file handle)
-/// 5. meta       (Region-level: per-region metadata)
-/// 6. dirty_bounds (Region-level: per-region dirty tracking)
-/// ```
-///
-/// If you need multiple locks, acquire them top-to-bottom. Never hold a
-/// lower lock while acquiring a higher one.
+/// Lock ordering: layout → regions → mmap → file → meta → dirty_bounds.
 #[derive(Debug)]
 struct DatabaseInner {
     path: PathBuf,
     name: String,
-    // Lock order: layout → regions → mmap → file
     layout: RwLock<Layout>,
     regions: RwLock<Regions>,
     mmap: RwLock<MmapMut>,
     file: RwLock<File>,
-    /// Cached file length (updated under file write lock, read lock-free).
-    /// Avoids fstat syscalls on the hot path of set_min_len.
     cached_file_len: AtomicUsize,
 }
 
 impl Database {
-    /// Opens or creates a database at the specified path.
+    /// Opens or creates a database at `path`.
     pub fn open(path: &Path) -> Result<Self> {
         Self::open_with_min_len(path, 0)
     }
 
-    /// Opens or creates a database with a minimum initial file size.
     pub fn open_with_min_len(path: &Path, min_len: usize) -> Result<Self> {
         let name = path
             .file_name()
@@ -136,24 +115,16 @@ impl Database {
         Ok(db)
     }
 
-    /// Returns the current length of the database file in bytes.
-    ///
-    /// Uses a cached value (no syscall). The cache is updated under the file
-    /// write lock whenever the file grows.
+    /// Cached file length (no syscall).
     #[inline]
     pub fn file_len(&self) -> usize {
         self.0.cached_file_len.load(Ordering::Relaxed)
     }
 
-    /// Ensures the database file is at least the specified length.
-    ///
-    /// Doubles the file size when growth is needed, with a 1 MiB floor.
-    /// Empty space is free (sparse file), so this amortizes mmap recreations
-    /// when many regions grow at once.
+    /// Grows the file if needed (doubles size, 1 MiB floor, sparse-file friendly).
     pub fn set_min_len(&self, len: usize) -> Result<()> {
         let len = Self::ceil_number_to_page_size_multiple(len);
 
-        // Quick check via cached length (no syscall, no lock)
         if self.file_len() >= len {
             return Ok(());
         }
@@ -163,8 +134,7 @@ impl Database {
         trace!("{}: set_min_len acquiring file_mut", self);
         let file = self.file_mut();
 
-        // Re-check after acquiring lock - another thread may have extended the file
-        // while we were waiting. Without this check, we could TRUNCATE the file.
+        // Re-check after acquiring lock (another thread may have grown the file).
         let current_len = self.file_len();
         if current_len >= len {
             return Ok(());
@@ -180,27 +150,21 @@ impl Database {
         Ok(())
     }
 
-    /// Pre-allocates space for at least the specified number of regions.
-    ///
-    /// This avoids expensive reallocations when creating many regions.
     pub fn set_min_regions(&self, regions: usize) -> Result<()> {
         self.regions_mut()
             .set_min_len(regions * SIZE_OF_REGION_METADATA)?;
         self.set_min_len(regions * PAGE_SIZE)
     }
 
-    /// Gets an existing region by ID.
     pub fn get_region(&self, id: &str) -> Option<Region> {
         self.regions().get_from_id(id).cloned()
     }
 
-    /// Creates a region with the given ID, or returns it if it already exists.
     pub fn create_region_if_needed(&self, id: &str) -> Result<Region> {
         if let Some(region) = self.get_region(id) {
             return Ok(region);
         }
 
-        // Pre-extend outside lock so file I/O doesn't block other threads
         let layout = self.layout();
         if layout.find_smallest_adequate_hole(PAGE_SIZE).is_none() {
             let end = layout.len();
@@ -210,7 +174,6 @@ impl Database {
             drop(layout);
         }
 
-        // Lock order: layout → regions
         debug!("{}: create_region_if_needed '{}'", self, id);
         trace!(
             "{}: create_region_if_needed '{}' acquiring layout_mut",
@@ -223,7 +186,6 @@ impl Database {
         );
         let mut regions = self.regions_mut();
 
-        // Double-check after lock (another thread may have created it)
         if let Some(region) = regions.get_from_id(id).cloned() {
             return Ok(region);
         }
@@ -245,9 +207,6 @@ impl Database {
         write_to_mmap(&self.mmap(), start, data);
     }
 
-    /// Copy data within the mmap.
-    ///
-    /// Returns an error if source and destination ranges overlap.
     pub(crate) fn copy(&self, src: usize, dst: usize, len: usize) -> Result<()> {
         if len == 0 {
             return Ok(());
@@ -269,9 +228,6 @@ impl Database {
         Ok(())
     }
 
-    /// Removes a region by ID if it exists, otherwise does nothing.
-    ///
-    /// Returns `Ok(())` whether the region existed or not.
     pub fn remove_region_if_exists(&self, id: &str) -> Result<()> {
         match self.remove_region(id) {
             Ok(()) | Err(Error::RegionNotFound) => Ok(()),
@@ -279,9 +235,6 @@ impl Database {
         }
     }
 
-    /// Removes a region by ID.
-    ///
-    /// Returns `Error::RegionNotFound` if the region doesn't exist.
     pub fn remove_region(&self, id: &str) -> Result<()> {
         let Some(region) = self.get_region(id) else {
             return Err(Error::RegionNotFound);
@@ -289,10 +242,7 @@ impl Database {
         region.remove()
     }
 
-    /// Removes all regions except those in the provided set.
-    ///
-    /// This is useful for garbage collection - keeping only regions that are
-    /// still in use and removing all others.
+    /// Removes all regions except those in `ids`.
     pub fn retain_regions(&self, mut ids: HashSet<String>) -> Result<()> {
         debug!(
             "{}: retain_regions called with {} ids to keep",
@@ -300,8 +250,6 @@ impl Database {
             ids.len()
         );
 
-        // Collect regions to remove first to avoid deadlock
-        // (holding read lock while calling region.remove() which needs write lock)
         let regions = self.regions();
         let regions_to_remove: Vec<_> = regions
             .id_to_index()
@@ -332,7 +280,6 @@ impl Database {
             );
         }
 
-        // Now remove them (read lock is released)
         for region in regions_to_remove {
             let ref_count = std::sync::Arc::strong_count(region.arc());
             debug!(
@@ -346,28 +293,18 @@ impl Database {
         Ok(())
     }
 
-    /// Open a dedicated file handle for sequential reading
-    /// This enables optimal kernel readahead for iteration
+    /// Opens the data file read-only (for external consumers like mmap readers).
     #[inline]
     pub fn open_read_only_file(&self) -> Result<File> {
         File::open(self.data_path()).map_err(Error::from)
     }
 
-    /// Returns the actual disk usage (accounting for sparse files and hole punching).
-    ///
-    /// On Unix systems, this uses `fstat` to get the number of blocks actually allocated.
-    /// On Windows, this falls back to the logical file size (less accurate for sparse files).
     pub fn disk_usage(&self) -> Result<DiskUsage> {
         DiskUsage::from_file(&self.file())
     }
 
-    /// Flushes all dirty data and metadata to disk.
-    ///
-    /// This ensures durability - all writes are persisted and will survive a crash.
-    /// Also promotes pending holes so they can be reused by future allocations.
-    /// Returns the number of regions that had dirty data or metadata.
+    /// Flushes all dirty data and metadata to disk. Returns number of flushed regions.
     pub fn flush(&self) -> Result<usize> {
-        // Collect dirty regions (take bounds, clearing them atomically)
         let dirty_regions: Vec<(Region, Option<(usize, usize)>)> = self
             .regions()
             .index_to_region()
@@ -389,8 +326,6 @@ impl Database {
             return Ok(0);
         }
 
-        // Compute bounding box of all dirty bounds for a single async writeback hint.
-        // No need to sort/merge per-range — fdatasync flushes all dirty pages regardless.
         let (flush_start, flush_end) = dirty_regions
             .iter()
             .filter_map(|(r, bounds)| {
@@ -415,9 +350,7 @@ impl Database {
             }
         }
 
-        // Schedule metadata writeback, then sync to disk.
-        // Data MUST be durable before metadata — if we crash after metadata sync
-        // but before data sync, metadata could reference unwritten data.
+        // Data must be durable before metadata (crash safety).
         self.regions().flush()?;
         self.file().sync_data()?;
         self.regions().sync_data()?;
@@ -430,9 +363,7 @@ impl Database {
         Ok(dirty_regions.len())
     }
 
-    /// Compact the database by promoting pending holes and punching holes in the file.
-    ///
-    /// This flushes all dirty data first to ensure consistency.
+    /// Flushes, then punches holes to reclaim disk space.
     #[inline]
     pub fn compact(&self) -> Result<()> {
         use std::time::Instant;
@@ -453,11 +384,8 @@ impl Database {
     }
 
     fn punch_holes(&self) -> Result<()> {
-        // Hold layout READ throughout to prevent write_with from allocating in holes.
-        trace!("{}: punch_holes acquiring layout", self);
         let layout = self.layout();
 
-        // Collect regions that may have punchable reserved space
         let regions_to_check: Vec<Region> = {
             let regions = self.regions();
             regions
@@ -516,9 +444,7 @@ impl Database {
         drop(file);
         drop(layout);
 
-        // Sync if we punched anything. Mmap recreation is unnecessary: hole punching
-        // uses KEEP_SIZE so the file length is unchanged, and the kernel transparently
-        // returns zeros for punched pages through the existing mapping.
+        // No mmap recreation needed: KEEP_SIZE preserves file length, kernel zeroes punched pages.
         if punched > 0 {
             debug!("{}: punch_holes syncing after {} punches", self, punched);
             let file = self.file();
@@ -528,8 +454,7 @@ impl Database {
         Ok(())
     }
 
-    /// Check if a hole region likely contains non-zero data worth punching.
-    /// Uses pread to avoid holding mmap lock.
+    /// Samples a few bytes via pread to check if a hole has non-zero data.
     fn approx_has_punchable_data(file: &File, start: usize, len: usize) -> bool {
         use std::os::unix::io::AsRawFd;
 
@@ -540,7 +465,6 @@ impl Database {
         let mut buf = [0u8; 1];
 
         let mut check_page = |page_start: usize| -> bool {
-            // Check first byte
             let n = unsafe {
                 libc::pread(
                     fd,
@@ -553,7 +477,6 @@ impl Database {
                 return true;
             }
 
-            // Check last byte
             let page_end = page_start + PAGE_SIZE - 1;
             let n = unsafe {
                 libc::pread(
@@ -566,18 +489,15 @@ impl Database {
             n == 1 && buf[0] != 0
         };
 
-        // Check first page
         if check_page(start) {
             return true;
         }
 
-        // Check last page
         let last_page_start = start + len - PAGE_SIZE;
         if last_page_start != start && check_page(last_page_start) {
             return true;
         }
 
-        // For very large holes, also check at GB boundaries
         if len > GiB {
             let num_gb_checks = len / GiB;
             for i in 1..num_gb_checks {
@@ -655,7 +575,6 @@ impl Database {
         WeakDatabase(Arc::downgrade(&self.0))
     }
 
-    /// Returns the database name (last path component) for logging.
     #[inline]
     pub fn name(&self) -> &str {
         &self.0.name
@@ -668,10 +587,7 @@ impl fmt::Display for Database {
     }
 }
 
-/// Weak reference to a Database that doesn't prevent it from being dropped.
-///
-/// Used internally by regions to avoid circular references while maintaining
-/// access to the parent database.
+/// Weak reference to a [`Database`], held by regions to avoid reference cycles.
 #[derive(Debug, Clone)]
 pub struct WeakDatabase(Weak<DatabaseInner>);
 
