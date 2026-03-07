@@ -234,8 +234,6 @@ where
         )
     }
 
-
-
     /// Compute rolling average with variable window starts.
     /// For each index i, computes mean of values from `window_starts[i]` to i (inclusive).
     pub fn compute_rolling_average<A>(
@@ -255,7 +253,7 @@ where
         let mut leaving = values.cursor();
 
         self.compute_init(
-            window_starts.version() + values.version(),
+            window_starts.version() + values.version() + Version::ONE,
             max_from,
             exit,
             |this| {
@@ -266,17 +264,18 @@ where
                     return Ok(());
                 }
 
-                // Recover running_sum from stored average * window_count.
-                // Reads 2 values instead of window_count from source.
+                // Recover running_sum by summing actual window values from source.
                 let (mut running_sum, mut prev_start) = if skip > 0 {
                     let prev_idx = skip - 1;
                     let prev_start = window_starts.collect_one_at(prev_idx).unwrap();
-                    let stored_avg = f64::from(this.collect_one_at(prev_idx).unwrap());
-                    let window_count = prev_idx + 1 - prev_start.to_usize();
                     if leaving.position() < prev_start.to_usize() {
                         leaving.advance(prev_start.to_usize() - leaving.position());
                     }
-                    (stored_avg * window_count as f64, prev_start)
+                    let sum =
+                        values.fold_range_at(prev_start.to_usize(), skip, 0.0_f64, |acc, v: A| {
+                            acc + f64::from(v)
+                        });
+                    (sum, prev_start)
                 } else {
                     (0.0_f64, V::I::from(0))
                 };
@@ -404,44 +403,39 @@ where
         f64: From<A> + From<B> + From<V::T>,
         V::T: From<f64>,
     {
-        self.compute_init(
-            values.version() + mean.version(),
-            max_from,
-            exit,
-            |this| {
-                let skip = this.len();
-                let source_len = values.len().min(mean.len());
-                let end = this.batch_end(source_len);
-                if skip >= end {
-                    return Ok(());
-                }
+        self.compute_init(values.version() + mean.version(), max_from, exit, |this| {
+            let skip = this.len();
+            let source_len = values.len().min(mean.len());
+            let end = this.batch_end(source_len);
+            if skip >= end {
+                return Ok(());
+            }
 
-                let mut running_sum_sq = if skip > 0 {
-                    let count = skip as f64;
-                    let sd_val = f64::from(this.collect_one_at(skip - 1).unwrap());
-                    let mean_val = f64::from(mean.collect_one_at(skip - 1).unwrap());
-                    (sd_val * sd_val + mean_val * mean_val) * count
-                } else {
-                    0.0f64
-                };
+            let mut running_sum_sq = if skip > 0 {
+                let count = skip as f64;
+                let sd_val = f64::from(this.collect_one_at(skip - 1).unwrap());
+                let mean_val = f64::from(mean.collect_one_at(skip - 1).unwrap());
+                (sd_val * sd_val + mean_val * mean_val) * count
+            } else {
+                0.0f64
+            };
 
-                let values_batch = values.collect_range_at(skip, end);
-                let mean_batch = mean.collect_range_at(skip, end);
+            let values_batch = values.collect_range_at(skip, end);
+            let mean_batch = mean.collect_range_at(skip, end);
 
-                for (j, (value, m)) in values_batch.into_iter().zip(mean_batch).enumerate() {
-                    let i = skip + j;
-                    let val = f64::from(value);
-                    running_sum_sq += val * val;
+            for (j, (value, m)) in values_batch.into_iter().zip(mean_batch).enumerate() {
+                let i = skip + j;
+                let val = f64::from(value);
+                running_sum_sq += val * val;
 
-                    let count = (i + 1) as f64;
-                    let mean_val = f64::from(m);
-                    let variance = (running_sum_sq / count - mean_val * mean_val).max(0.0);
-                    this.checked_push_at(i, V::T::from(variance.sqrt()))?;
-                }
+                let count = (i + 1) as f64;
+                let mean_val = f64::from(m);
+                let variance = (running_sum_sq / count - mean_val * mean_val).max(0.0);
+                this.checked_push_at(i, V::T::from(variance.sqrt()))?;
+            }
 
-                Ok(())
-            },
-        )
+            Ok(())
+        })
     }
 
     /// Compute rolling EMA with variable window starts.
