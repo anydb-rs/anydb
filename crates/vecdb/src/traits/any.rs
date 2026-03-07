@@ -40,8 +40,7 @@ pub trait AnyVec: Send + Sync {
             "{}-{}-{}",
             to.map_or(len, |to| {
                 if to.is_negative() {
-                    len.checked_sub(to.unsigned_abs() as usize)
-                        .unwrap_or_default()
+                    len.saturating_sub(to.unsigned_abs() as usize)
                 } else {
                     to as usize
                 }

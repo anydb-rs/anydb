@@ -62,7 +62,7 @@ where
             let mut deque: VecDeque<(usize, A)> = VecDeque::with_capacity(window.min(1024));
 
             // Rebuild deque state from source
-            let rebuild_start = skip.checked_sub(window).unwrap_or_default();
+            let rebuild_start = skip.saturating_sub(window);
             let mut rebuild_i = rebuild_start;
             source.for_each_range_dyn_at(rebuild_start, skip, &mut |value: A| {
                 update_deque(&mut deque, rebuild_i, value, window, &should_pop);
@@ -253,7 +253,7 @@ where
         let mut leaving = values.cursor();
 
         self.compute_init(
-            window_starts.version() + values.version() + Version::ONE,
+            window_starts.version() + values.version() + Version::new(2),
             max_from,
             exit,
             |this| {

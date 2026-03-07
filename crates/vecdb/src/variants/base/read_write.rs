@@ -241,7 +241,7 @@ where
     ) -> Result<Vec<u8>> {
         let prev_stored_len = self.prev_stored_len();
         let stored_len = self.stored_len();
-        let truncated = prev_stored_len.checked_sub(stored_len).unwrap_or_default();
+        let truncated = prev_stored_len.saturating_sub(stored_len);
 
         let value_count = truncated + self.prev_pushed().len() + self.pushed().len();
         let mut bytes = Vec::with_capacity(6 * SIZE_OF_U64 + value_count * size_of_t);

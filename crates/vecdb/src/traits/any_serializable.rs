@@ -1,5 +1,7 @@
-use super::AnyReadableVec;
+#[cfg(feature = "serde")]
 use crate::Formattable;
+
+use super::AnyReadableVec;
 
 /// Type-erased trait for serializable vectors.
 pub trait AnySerializableVec: AnyReadableVec {
