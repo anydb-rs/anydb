@@ -1108,6 +1108,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
+name = "ryu"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
 name = "schemars"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1455,12 +1461,14 @@ checksum = "8f54a172d0620933a27a4360d3db3e2ae0dd6cceae9730751a036bbf182c4b23"
 name = "vecdb"
 version = "0.6.8"
 dependencies = [
+ "itoa",
  "libc",
  "log",
  "lz4_flex 0.12.0",
  "parking_lot",
  "pco",
  "rawdb",
+ "ryu",
  "schemars",
  "serde",
  "serde_json",

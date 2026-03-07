@@ -264,18 +264,16 @@ where
                     return Ok(());
                 }
 
-                // Recover running_sum by summing actual window values from source.
+                // Recover running_sum from stored average (fast but lossy).
                 let (mut running_sum, mut prev_start) = if skip > 0 {
                     let prev_idx = skip - 1;
                     let prev_start = window_starts.collect_one_at(prev_idx).unwrap();
                     if leaving.position() < prev_start.to_usize() {
                         leaving.advance(prev_start.to_usize() - leaving.position());
                     }
-                    let sum =
-                        values.fold_range_at(prev_start.to_usize(), skip, 0.0_f64, |acc, v: A| {
-                            acc + f64::from(v)
-                        });
-                    (sum, prev_start)
+                    let stored_avg = f64::from(this.collect_one_at(prev_idx).unwrap());
+                    let window_count = prev_idx + 1 - prev_start.to_usize();
+                    (stored_avg * window_count as f64, prev_start)
                 } else {
                     (0.0_f64, V::I::from(0))
                 };
@@ -292,6 +290,10 @@ where
                         leaving.for_each(n, |v: A| {
                             running_sum -= f64::from(v);
                         });
+                        // Clamp to 0 to guard against float drift from lossy resume recovery.
+                        if running_sum < 0.0 {
+                            running_sum = 0.0;
+                        }
                         prev_start = start;
                     }
 
