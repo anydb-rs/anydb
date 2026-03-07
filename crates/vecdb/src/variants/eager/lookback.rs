@@ -182,26 +182,23 @@ where
                 }
 
                 let starts_batch = window_starts.collect_range_at(skip, end);
-                let values_batch = values.collect_range_at(skip, end);
 
-                let mut cached_start = usize::MAX;
-                let mut cached_prev = f64::NAN;
+                // Pre-collect values from earliest ago height to end in one shot.
+                // Window starts are monotonically non-decreasing, so first is the minimum.
+                let min_start = starts_batch[0].to_usize().min(skip);
+                let values_data = values.collect_range_at(min_start, end);
 
-                for (j, (start, current)) in starts_batch.into_iter().zip(values_batch).enumerate()
-                {
+                for (j, start) in starts_batch.into_iter().enumerate() {
                     let i = skip + j;
                     let start_usize = start.to_usize();
+                    let current = f64::from(values_data[i - min_start].clone());
                     let result = if start_usize > i {
-                        compute(f64::from(current), f64::NAN)
+                        compute(current, f64::NAN)
                     } else if start_usize == i {
-                        let v = f64::from(current);
-                        compute(v, v)
+                        compute(current, current)
                     } else {
-                        if start_usize != cached_start {
-                            cached_prev = f64::from(values.collect_one_at(start_usize).unwrap());
-                            cached_start = start_usize;
-                        }
-                        compute(f64::from(current), cached_prev)
+                        let previous = f64::from(values_data[start_usize - min_start].clone());
+                        compute(current, previous)
                     };
                     this.checked_push_at(i, V::T::from(result))?;
                 }
@@ -357,21 +354,14 @@ where
 
                 let starts_batch = window_starts.collect_range_at(skip, end);
 
-                let mut cached_start = usize::MAX;
-                let mut cached_value: Option<A> = None;
+                // Pre-collect source from earliest ago height to end.
+                let min_start = starts_batch[0].to_usize().min(skip);
+                let source_data = source.collect_range_at(min_start, end);
 
                 for (j, start) in starts_batch.into_iter().enumerate() {
-                    let i = skip + j;
                     let start_usize = start.to_usize();
-                    let value = if start_usize == cached_start {
-                        cached_value.clone().unwrap()
-                    } else {
-                        let v = source.collect_one_at(start_usize).unwrap();
-                        cached_start = start_usize;
-                        cached_value = Some(v.clone());
-                        v
-                    };
-                    this.checked_push_at(i, V::T::from(value))?;
+                    let value = source_data[start_usize - min_start].clone();
+                    this.checked_push_at(skip + j, V::T::from(value))?;
                 }
 
                 Ok(())
