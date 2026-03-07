@@ -290,10 +290,6 @@ where
                         leaving.for_each(n, |v: A| {
                             running_sum -= f64::from(v);
                         });
-                        // Clamp to 0 to guard against float drift from lossy resume recovery.
-                        if running_sum < 0.0 {
-                            running_sum = 0.0;
-                        }
                         prev_start = start;
                     }
 

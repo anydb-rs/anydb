@@ -42,6 +42,9 @@ where
         let from_idx = from.unwrap_or(0);
         let to_idx = to.unwrap_or(len).min(len);
 
+        let count = to_idx.saturating_sub(from_idx);
+        buf.reserve(count * 20 + 2);
+
         buf.push(b'[');
         let mut first = true;
         self.for_each_range_at(from_idx, to_idx, |value: V::T| {
@@ -74,6 +77,9 @@ where
         let len = self.len();
         let from_idx = from.unwrap_or(0);
         let to_idx = to.unwrap_or(len).min(len);
+
+        let count = to_idx.saturating_sub(from_idx);
+        buf.reserve(count * 20);
 
         self.for_each_range_at(from_idx, to_idx, |value: V::T| {
             value.fmt_csv(buf).expect("csv formatting failed");
