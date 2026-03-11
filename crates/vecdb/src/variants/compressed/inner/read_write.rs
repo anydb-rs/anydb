@@ -598,29 +598,33 @@ where
         buf.reserve(to - from);
         let stored_len = self.stored_len();
 
-        // Stored portion: page-based decompress + extend_from_slice.
-        // Each page decompresses into a reusable buffer, then we memcpy
-        // the relevant slice — much faster than per-element push.
+        // Stored portion: decompress pages directly into buf when possible.
         if from < stored_len {
             let stored_to = to.min(stored_len);
             let reader = self.create_reader();
             let pages = self.pages.read();
             let start_page = Self::index_to_page_index(from);
             let end_page = Self::index_to_page_index(stored_to - 1);
-            let mut page_buf = Vec::with_capacity(Self::PER_PAGE);
-
             for page_idx in start_page..=end_page {
                 let page_start = Self::page_index_to_index(page_idx);
                 let page = pages
                     .get(page_idx)
                     .expect("page should exist after bounds check");
                 let compressed = reader.unchecked_read(page.start as usize, page.bytes as usize);
-                S::decompress_into(compressed, page.values as usize, &mut page_buf)
-                    .expect("decompression failed in read_into_at");
-
                 let local_from = from.saturating_sub(page_start);
-                let local_to = (stored_to - page_start).min(page_buf.len());
-                buf.extend_from_slice(&page_buf[local_from..local_to]);
+                let local_to = (stored_to - page_start).min(page.values as usize);
+
+                if likely(local_from == 0) {
+                    let before = buf.len();
+                    S::decompress_append(compressed, page.values as usize, buf)
+                        .expect("decompression failed in read_into_at");
+                    buf.truncate(before + local_to);
+                } else {
+                    let mut page_buf = Vec::with_capacity(Self::PER_PAGE);
+                    S::decompress_into(compressed, page.values as usize, &mut page_buf)
+                        .expect("decompression failed in read_into_at");
+                    buf.extend_from_slice(&page_buf[local_from..local_to]);
+                }
             }
         }
 

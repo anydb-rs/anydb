@@ -1,6 +1,6 @@
-use rawdb::{Database, Region};
+use rawdb::{Database, Region, unlikely};
 
-use crate::{Bytes, Result};
+use crate::{Bytes, Error, Result};
 
 use super::Page;
 
@@ -71,10 +71,11 @@ impl Pages {
 
     /// Pushes a new page, returning an error if the page_index doesn't match the current length.
     pub fn checked_push(&mut self, page_index: usize, page: Page) -> Result<()> {
-        if page_index != self.vec.len() {
-            return Err(crate::Error::UnexpectedIndex {
+        if unlikely(page_index != self.vec.len()) {
+            return Err(Error::UnexpectedIndex {
                 expected: self.vec.len(),
                 got: page_index,
+                name: self.region.meta().id().to_string(),
             });
         }
 

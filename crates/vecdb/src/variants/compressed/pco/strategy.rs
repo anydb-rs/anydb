@@ -43,9 +43,16 @@ where
         })
     }
 
+    #[inline]
     fn decompress_into(bytes: &[u8], expected_len: usize, dst: &mut Vec<T>) -> Result<()> {
         dst.clear();
+        Self::decompress_append(bytes, expected_len, dst)
+    }
+
+    #[inline]
+    fn decompress_append(bytes: &[u8], expected_len: usize, dst: &mut Vec<T>) -> Result<()> {
         dst.reserve(expected_len);
+        let old_len = dst.len();
 
         // SAFETY: MaybeUninit<T::NumberType> has the same layout as T::NumberType.
         // simple_decompress_into will initialize the memory, and we only set_len
@@ -59,7 +66,7 @@ where
 
         // SAFETY: simple_decompress_into initialized progress.n_processed elements.
         unsafe {
-            dst.set_len(progress.n_processed);
+            dst.set_len(old_len + progress.n_processed);
         }
 
         if likely(progress.n_processed == expected_len) {

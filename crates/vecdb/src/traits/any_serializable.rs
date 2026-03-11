@@ -18,6 +18,10 @@ pub trait AnySerializableVec: AnyReadableVec {
     #[cfg(feature = "serde")]
     fn write_json_value(&self, from: Option<usize>, buf: &mut Vec<u8>) -> crate::Result<()>;
 
+    /// Return the last value as a serde_json::Value, or None if empty
+    #[cfg(feature = "serde_json")]
+    fn last_json_value(&self) -> Option<serde_json::Value>;
+
     /// Write all values as CSV cells (newline-separated) directly without materializing a Vec.
     fn write_csv_column(
         &self,
@@ -68,6 +72,16 @@ where
         }
 
         Ok(())
+    }
+
+    #[cfg(feature = "serde_json")]
+    fn last_json_value(&self) -> Option<serde_json::Value> {
+        let len = self.len();
+        if len == 0 {
+            return None;
+        }
+        let value: V::T = self.collect_one_at(len - 1)?;
+        serde_json::to_value(&value).ok()
     }
 
     fn write_csv_column(

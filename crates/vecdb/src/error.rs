@@ -52,8 +52,8 @@ pub enum Error {
         len: usize,
         name: String,
     },
-    #[error("Unexpected index: expected {expected}, got {got}")]
-    UnexpectedIndex { expected: usize, got: usize },
+    #[error("Unexpected index: expected {expected}, got {got} ({name})")]
+    UnexpectedIndex { expected: usize, got: usize, name: String },
     #[error("Expect vec to have index")]
     ExpectVecToHaveIndex,
     #[error("Failed to convert key to usize")]

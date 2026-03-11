@@ -10,12 +10,21 @@ pub trait CompressionStrategy<T>: ValueStrategy<T> {
     /// Decompress bytes into a vector of values.
     fn decompress(bytes: &[u8], expected_len: usize) -> Result<Vec<T>>;
 
-    /// Decompress bytes into an existing buffer.
+    /// Decompress bytes into an existing buffer (replace semantics).
     /// Implementations should reuse dst's allocation when possible (see PcodecStrategy).
     /// Default implementation replaces dst with a new Vec from `decompress`.
     #[inline]
     fn decompress_into(bytes: &[u8], expected_len: usize, dst: &mut Vec<T>) -> Result<()> {
         *dst = Self::decompress(bytes, expected_len)?;
+        Ok(())
+    }
+
+    /// Decompress bytes, appending to dst without clearing it.
+    /// Default implementation decompresses then appends via extend.
+    #[inline]
+    fn decompress_append(bytes: &[u8], expected_len: usize, dst: &mut Vec<T>) -> Result<()> {
+        let tmp = Self::decompress(bytes, expected_len)?;
+        dst.extend(tmp);
         Ok(())
     }
 

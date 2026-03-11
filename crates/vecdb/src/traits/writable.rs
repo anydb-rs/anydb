@@ -125,6 +125,7 @@ where
             return Err(Error::UnexpectedIndex {
                 expected: len,
                 got: index,
+                name: self.name().to_string(),
             });
         }
 

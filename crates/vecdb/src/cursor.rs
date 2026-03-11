@@ -2,11 +2,14 @@ use std::marker::PhantomData;
 
 use crate::{READ_CHUNK_SIZE, ReadableVec, VecIndex, VecValue};
 
-/// Forward-only reader that reuses an internal buffer across chunked `read_into_at` calls.
+/// Buffered reader that reuses an internal buffer across chunked `read_into_at` calls.
 ///
 /// One allocation for the lifetime of the cursor. Ideal for sequential access patterns
 /// (iterating tx-indexed vecs, computing rolling windows) where repeated `collect_one`
 /// calls would decompress the same page thousands of times.
+///
+/// Reads are aligned to chunk boundaries so that each underlying page is decompressed
+/// at most once, even when access positions don't start at page-aligned offsets.
 ///
 /// # Example
 /// ```ignore
@@ -20,7 +23,7 @@ pub struct Cursor<'a, I: VecIndex, T: VecValue, V: ReadableVec<I, T> + ?Sized = 
     buf: Vec<T>,
     /// Absolute position of buf[0] in the source vec.
     buf_start: usize,
-    /// Current absolute position in the source vec.
+    /// Current absolute position in the source vec (used by sequential methods).
     pos: usize,
     chunk_size: usize,
     len: usize,
@@ -61,11 +64,25 @@ impl<'a, I: VecIndex, T: VecValue, V: ReadableVec<I, T> + ?Sized> Cursor<'a, I, 
         self.pos = self.pos.saturating_add(n).min(self.len);
     }
 
+    /// Returns the value at absolute `index`, using the buffer when possible.
+    ///
+    /// If `index` falls within the currently buffered chunk, returns instantly.
+    /// Otherwise decompresses the aligned chunk containing `index`.
+    /// Does **not** modify the sequential position used by [`next`](Self::next).
+    #[inline]
+    pub fn get(&mut self, index: usize) -> Option<T> {
+        if index >= self.len {
+            return None;
+        }
+        let local = self.ensure_buffered_at(index)?;
+        Some(self.buf[local].clone())
+    }
+
     /// Returns the next value and advances position, or `None` if exhausted.
     #[inline]
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<T> {
-        let local = self.ensure_buffered()?;
+        let local = self.ensure_buffered_at(self.pos)?;
         let val = self.buf[local].clone();
         self.pos += 1;
         Some(val)
@@ -83,7 +100,7 @@ impl<'a, I: VecIndex, T: VecValue, V: ReadableVec<I, T> + ?Sized> Cursor<'a, I, 
         let mut acc = init;
 
         while self.pos < target {
-            if self.ensure_buffered().is_none() {
+            if self.ensure_buffered_at(self.pos).is_none() {
                 break;
             }
             let local = self.pos - self.buf_start;
@@ -104,25 +121,28 @@ impl<'a, I: VecIndex, T: VecValue, V: ReadableVec<I, T> + ?Sized> Cursor<'a, I, 
         self.fold(n, (), |(), v| f(v));
     }
 
-    /// Ensures the buffer contains data at `self.pos`.
-    /// Returns the local index within `buf`, or `None` if exhausted.
+    /// Ensures the buffer contains data at `at`.
+    /// Reads are aligned to `chunk_size` boundaries so that each underlying
+    /// compressed page is decompressed at most once across sequential accesses.
+    /// Returns the local index within `buf`, or `None` if out of bounds.
     #[inline]
-    fn ensure_buffered(&mut self) -> Option<usize> {
-        if self.pos >= self.len {
+    fn ensure_buffered_at(&mut self, at: usize) -> Option<usize> {
+        if at >= self.len {
             return None;
         }
 
         let buf_end = self.buf_start + self.buf.len();
-        if self.pos < buf_end {
-            return Some(self.pos - self.buf_start);
+        if at >= self.buf_start && at < buf_end {
+            return Some(at - self.buf_start);
         }
 
-        // Refill: read a full chunk from current position.
+        // Refill aligned to chunk boundary to avoid cross-page decompression.
         self.buf.clear();
-        let end = self.pos.saturating_add(self.chunk_size).min(self.len);
-        self.buf_start = self.pos;
-        self.source.read_into_at(self.pos, end, &mut self.buf);
+        let aligned = (at / self.chunk_size) * self.chunk_size;
+        let end = (aligned + self.chunk_size).min(self.len);
+        self.buf_start = aligned;
+        self.source.read_into_at(aligned, end, &mut self.buf);
 
-        if self.buf.is_empty() { None } else { Some(0) }
+        if self.buf.is_empty() { None } else { Some(at - aligned) }
     }
 }

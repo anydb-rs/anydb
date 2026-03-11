@@ -61,6 +61,15 @@ fn main() -> Result<()> {
 }
 ```
 
+## Sparse files
+
+rawdb relies on **sparse file** support. Files grow via `set_len()` which creates logical size without allocating physical blocks, and `compact()` punches holes to reclaim unused blocks. This means:
+
+- The filesystem must support sparse files (ext4, XFS, APFS, ZFS, Btrfs — most modern filesystems do)
+- `du` and `ls -s` show actual disk usage; `ls -l` shows the larger logical size
+- Copying with `cp` may "densify" the file unless you use `cp --sparse=always` (Linux) or a sparse-aware tool
+- Backups should use sparse-aware tools to avoid inflating archives
+
 ## Durability
 
 Operations become durable after calling `flush()`. Before flush, writes are visible in memory but not guaranteed to survive crashes.

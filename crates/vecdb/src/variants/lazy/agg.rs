@@ -93,24 +93,18 @@ where
             f: &mut dyn FnMut(O),
         ) {
             let map_end = (to + 1).min(mapping.len());
-            let heights = mapping.collect_range_dyn(from, map_end);
+            let mapping_vec = mapping.collect_range_dyn(from, map_end);
             let source_len = source.len();
             let mut cursor = Cursor::new(&**source);
             for idx in 0..(to - from) {
-                let next_first = heights
+                let next_first = mapping_vec
                     .get(idx + 1)
                     .map(|h| h.to_usize())
                     .unwrap_or(source_len);
                 if next_first == 0 {
                     continue;
                 }
-                let target = next_first - 1;
-                if cursor.position() <= target {
-                    cursor.advance(target - cursor.position());
-                    if let Some(v) = cursor.next() {
-                        f(v);
-                    }
-                } else if let Some(v) = source.collect_one_at(target) {
+                if let Some(v) = cursor.get(next_first - 1) {
                     f(v);
                 }
             }
@@ -160,27 +154,12 @@ where
                     .map(|h| h.to_usize())
                     .unwrap_or(source_len);
 
-                // Empty period: no elements belong to this slot
                 if next_first == 0 || current_first >= next_first {
                     f(None);
                     continue;
                 }
 
-                // Last position in this period
-                let target = next_first - 1;
-
-                if cursor.position() <= target {
-                    cursor.advance(target - cursor.position());
-                    match cursor.next() {
-                        Some(v) => f(Some(v)),
-                        None => f(None),
-                    }
-                } else {
-                    match source.collect_one_at(target) {
-                        Some(v) => f(Some(v)),
-                        None => f(None),
-                    }
-                }
+                f(cursor.get(next_first - 1));
             }
         }
         Self {
