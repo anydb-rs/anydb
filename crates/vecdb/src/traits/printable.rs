@@ -23,6 +23,9 @@ pub fn short_type_name<T: 'static>() -> &'static str {
 
 /// Shortens a type name by removing path prefixes, including inside generics.
 /// `some::module::Close<another::path::Dollars>` -> `Close<Dollars>`
+///
+/// Also unwraps `Option<T>` to just `T` since Option is a serialization
+/// concern (null in JSON) not a type identity.
 fn shorten_type_name(full: &str) -> String {
     // Find where generic params start (if any)
     let generic_start = full.find('<');
@@ -34,6 +37,13 @@ fn shorten_type_name(full: &str) -> String {
 
     // Shorten the base type (take last segment after ::)
     let short_base = base.rsplit("::").next().unwrap_or(base);
+
+    // Unwrap Option<T> → T (Option is a serialization concern, not type identity)
+    if short_base == "Option"
+        && let Some(inner) = generics
+    {
+        return shorten_type_name(inner.trim());
+    }
 
     match generics {
         Some(params) => {
