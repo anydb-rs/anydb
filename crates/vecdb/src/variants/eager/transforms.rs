@@ -344,8 +344,14 @@ where
 
             let mut prev_i = None;
             let batch = other.collect_range_at(skip, end);
+
+            if let Some(&first_target) = batch.first() {
+                this.truncate_if_needed(first_target)?;
+            }
+
             for (j, i) in batch.into_iter().enumerate() {
                 let v = V::T::from(skip + j);
+                debug_assert!(prev_i.is_none_or(|prev| prev <= i));
                 if prev_i.is_some_and(|prev_i| prev_i == i) {
                     continue;
                 }
@@ -355,7 +361,7 @@ where
                     while this.len() < i_usize {
                         this.push(v);
                     }
-                    this.truncate_push(i, v)?;
+                    this.push(v);
                 }
                 prev_i.replace(i);
             }

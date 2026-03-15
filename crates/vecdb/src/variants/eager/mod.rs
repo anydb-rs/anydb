@@ -215,6 +215,10 @@ where
         self.0.remove()
     }
 
+    fn any_truncate_if_needed_at(&mut self, index: usize) -> Result<()> {
+        self.truncate_if_needed_at(index)
+    }
+
     fn any_reset(&mut self) -> Result<()> {
         self.reset()
     }

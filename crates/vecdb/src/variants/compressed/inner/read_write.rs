@@ -511,6 +511,10 @@ where
         Self::remove(self)
     }
 
+    fn any_truncate_if_needed_at(&mut self, index: usize) -> Result<()> {
+        <Self as WritableVec<I, T>>::truncate_if_needed_at(self, index)
+    }
+
     fn any_reset(&mut self) -> Result<()> {
         <Self as WritableVec<I, T>>::reset(self)
     }

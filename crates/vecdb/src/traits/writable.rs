@@ -133,32 +133,6 @@ where
         Ok(())
     }
 
-    /// Pushes a value at the given index, truncating if necessary.
-    #[inline]
-    fn truncate_push(&mut self, index: I, value: T) -> Result<()> {
-        self.truncate_push_at(index.to_usize(), value)
-    }
-
-    /// Pushes a value at the given usize index, truncating if necessary.
-    #[inline]
-    fn truncate_push_at(&mut self, index: usize, value: T) -> Result<()> {
-        let len = self.len();
-
-        if unlikely(len < index) {
-            return Err(Error::IndexTooHigh {
-                index,
-                len,
-                name: self.name().to_string(),
-            });
-        } else if unlikely(len > index) {
-            self.truncate_if_needed_at(index)?;
-        }
-
-        self.push(value);
-
-        Ok(())
-    }
-
     /// Truncates the vector to the given index if the current length exceeds it.
     fn truncate_if_needed(&mut self, index: I) -> Result<()> {
         self.truncate_if_needed_at(index.to_usize())

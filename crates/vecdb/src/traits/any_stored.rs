@@ -78,6 +78,10 @@ pub trait AnyStoredVec: AnyVec {
     /// Removes this vector's region from the database.
     fn remove(self) -> Result<()>;
 
+    /// Truncates the vector to the given length if it is longer.
+    /// Prefixed with `any_` to avoid conflict with `WritableVec::truncate_if_needed_at`.
+    fn any_truncate_if_needed_at(&mut self, index: usize) -> Result<()>;
+
     /// Resets the vector state, clearing all data.
     fn any_reset(&mut self) -> Result<()>;
 }

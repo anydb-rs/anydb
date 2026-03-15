@@ -183,6 +183,10 @@ macro_rules! impl_vec_wrapper {
                 self.0.remove()
             }
 
+            fn any_truncate_if_needed_at(&mut self, index: usize) -> $crate::Result<()> {
+                $crate::WritableVec::truncate_if_needed_at(&mut self.0, index)
+            }
+
             fn any_reset(&mut self) -> $crate::Result<()> {
                 $crate::WritableVec::reset(self)
             }
