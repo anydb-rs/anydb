@@ -293,11 +293,11 @@ where
         <A as TryInto<V::T>>::Error: core::error::Error + 'static,
         B: VecValue,
     {
-        self.compute_filtered_count_from_indexes(
+        self.compute_count_from_indexes_with(
             max_from,
             first_indexes,
             other_to_else,
-            |_| true,
+            |first, next_first| next_first - first,
             exit,
         )
     }
@@ -308,6 +308,35 @@ where
         first_indexes: &impl ReadableVec<V::I, A>,
         other_to_else: &impl ReadableVec<A, B>,
         mut filter: impl FnMut(A) -> bool,
+        exit: &Exit,
+    ) -> Result<()>
+    where
+        V::T: From<A>,
+        A: VecValue
+            + VecIndex
+            + Copy
+            + Add<usize, Output = A>
+            + CheckedSub<A>
+            + TryInto<V::T>
+            + Default,
+        B: VecValue,
+        <A as TryInto<V::T>>::Error: core::error::Error + 'static,
+    {
+        self.compute_count_from_indexes_with(
+            max_from,
+            first_indexes,
+            other_to_else,
+            |first, next_first| (first..next_first).filter(|i| filter(A::from(*i))).count(),
+            exit,
+        )
+    }
+
+    fn compute_count_from_indexes_with<A, B>(
+        &mut self,
+        max_from: V::I,
+        first_indexes: &impl ReadableVec<V::I, A>,
+        other_to_else: &impl ReadableVec<A, B>,
+        mut count_fn: impl FnMut(usize, usize) -> usize,
         exit: &Exit,
     ) -> Result<()>
     where
@@ -348,8 +377,7 @@ where
                         other_to_else.len()
                     };
 
-                    let range = first_index.to_usize()..next_first;
-                    let count = range.into_iter().filter(|i| filter(A::from(*i))).count();
+                    let count = count_fn(first_index.to_usize(), next_first);
                     this.checked_push_at(i, V::T::from(A::from(count)))?;
                 }
 

@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    AnyVec, ReadOnlyClone, ReadableBoxedVec, ReadableVec, TypedVec, VecIndex, VecValue, Version,
-    short_type_name,
+    AnyVec, READ_CHUNK_SIZE, ReadOnlyClone, ReadableBoxedVec, ReadableVec, TypedVec, VecIndex,
+    VecValue, Version, short_type_name,
 };
 
 mod transform;
@@ -115,6 +115,51 @@ where
     }
 }
 
+impl<I, T, S1I, S1T> LazyVecFrom1<I, T, S1I, S1T>
+where
+    I: VecIndex,
+    T: VecValue,
+    S1I: VecIndex,
+    S1T: VecValue,
+{
+    /// Core chunked iteration with fold + early exit support.
+    /// Reads source in batches via `read_into_at` (one vtable call per chunk)
+    /// instead of `for_each_range_dyn_at` (one per element).
+    #[inline]
+    fn chunked_try_fold<B, E>(
+        &self,
+        from: usize,
+        to: usize,
+        init: B,
+        mut f: impl FnMut(B, T) -> std::result::Result<B, E>,
+    ) -> std::result::Result<B, E> {
+        let compute = self.compute;
+        let cap = READ_CHUNK_SIZE.min(to.saturating_sub(from));
+        let mut buf = Vec::with_capacity(cap);
+        let mut acc = init;
+        let mut pos = from;
+        while pos < to {
+            let end = (pos + READ_CHUNK_SIZE).min(to);
+            buf.clear();
+            self.source.read_into_at(pos, end, &mut buf);
+            for (local, v) in buf.drain(..).enumerate() {
+                acc = f(acc, compute(I::from(pos + local), v))?;
+            }
+            pos = end;
+        }
+        Ok(acc)
+    }
+
+    #[inline]
+    fn chunked_for_each(&self, from: usize, to: usize, mut each: impl FnMut(T)) {
+        self.chunked_try_fold(from, to, (), |(), v| {
+            each(v);
+            Ok::<_, std::convert::Infallible>(())
+        })
+        .unwrap_or_else(|e: std::convert::Infallible| match e {})
+    }
+}
+
 impl<I, T, S1I, S1T> ReadableVec<I, T> for LazyVecFrom1<I, T, S1I, S1T>
 where
     I: VecIndex,
@@ -125,24 +170,13 @@ where
     #[inline]
     fn read_into_at(&self, from: usize, to: usize, buf: &mut Vec<T>) {
         let to = to.min(self.len());
-        let compute = self.compute;
         buf.reserve(to.saturating_sub(from));
-        let mut offset = from;
-        self.source.for_each_range_dyn_at(from, to, &mut |v| {
-            buf.push(compute(I::from(offset), v));
-            offset += 1;
-        });
+        self.chunked_for_each(from, to, |v| buf.push(v));
     }
 
     #[inline]
     fn for_each_range_dyn_at(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
-        let to = to.min(self.len());
-        let compute = self.compute;
-        let mut offset = from;
-        self.source.for_each_range_dyn_at(from, to, &mut |v| {
-            f(compute(I::from(offset), v));
-            offset += 1;
-        });
+        self.chunked_for_each(from, to.min(self.len()), f);
     }
 
     #[inline]
@@ -154,14 +188,10 @@ where
         if from >= to {
             return init;
         }
-        let compute = self.compute;
-        let mut offset = from;
-        let mut acc = Some(init);
-        self.source.for_each_range_dyn_at(from, to, &mut |v| {
-            acc = Some(f(acc.take().unwrap(), compute(I::from(offset), v)));
-            offset += 1;
-        });
-        acc.unwrap()
+        self.chunked_try_fold(from, to, init, |acc, v| {
+            Ok::<_, std::convert::Infallible>(f(acc, v))
+        })
+        .unwrap_or_else(|e: std::convert::Infallible| match e {})
     }
 
     #[inline]
@@ -170,7 +200,7 @@ where
         from: usize,
         to: usize,
         init: B,
-        mut f: F,
+        f: F,
     ) -> std::result::Result<B, E>
     where
         Self: Sized,
@@ -179,16 +209,7 @@ where
         if from >= to {
             return Ok(init);
         }
-        let compute = self.compute;
-        let mut offset = from;
-        let mut acc: Option<std::result::Result<B, E>> = Some(Ok(init));
-        self.source.for_each_range_dyn_at(from, to, &mut |v| {
-            if let Some(Ok(a)) = acc.take() {
-                acc = Some(f(a, compute(I::from(offset), v)));
-            }
-            offset += 1;
-        });
-        acc.unwrap()
+        self.chunked_try_fold(from, to, init, f)
     }
 
     #[inline]

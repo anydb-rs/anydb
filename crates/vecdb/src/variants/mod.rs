@@ -1,4 +1,5 @@
 mod base;
+mod cached;
 mod compressed;
 mod eager;
 mod lazy;
@@ -7,6 +8,7 @@ mod raw;
 mod strategy;
 
 pub use base::*;
+pub use cached::*;
 pub use compressed::*;
 pub use eager::*;
 pub use lazy::*;

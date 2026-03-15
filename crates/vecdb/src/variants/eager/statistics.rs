@@ -149,10 +149,7 @@ where
                 let value = V::T::from(value);
 
                 let sum = if i >= window {
-                    let mut old = V::T::default();
-                    leaving.for_each(1, |v: A| {
-                        old = V::T::from(v);
-                    });
+                    let old = V::T::from(leaving.next().unwrap());
                     match prev_sum.clone().checked_sub(old) {
                         Some(diff) => diff + value,
                         None => return Err(Error::Underflow),

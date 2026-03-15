@@ -152,16 +152,23 @@ where
     S3I: VecIndex,
     S3T: VecValue,
 {
-    /// Chunked iteration over all three sources with reusable buffers.
+    /// Core chunked iteration with fold + early exit support.
     /// Only 3 small buffers are allocated total (capacity min(4096, range)),
     /// reused across chunks via `clear()`.
     #[inline]
-    fn chunked_for_each(&self, from: usize, to: usize, mut each: impl FnMut(T)) {
+    fn chunked_try_fold<B, E>(
+        &self,
+        from: usize,
+        to: usize,
+        init: B,
+        mut f: impl FnMut(B, T) -> std::result::Result<B, E>,
+    ) -> std::result::Result<B, E> {
         let compute = self.compute;
         let cap = READ_CHUNK_SIZE.min(to.saturating_sub(from));
         let mut buf1 = Vec::with_capacity(cap);
         let mut buf2 = Vec::with_capacity(cap);
         let mut buf3 = Vec::with_capacity(cap);
+        let mut acc = init;
         let mut pos = from;
         while pos < to {
             let end = (pos + READ_CHUNK_SIZE).min(to);
@@ -177,10 +184,20 @@ where
                 .zip(buf3.drain(..))
                 .enumerate()
             {
-                each(compute(I::from(pos + local), v1, v2, v3));
+                acc = f(acc, compute(I::from(pos + local), v1, v2, v3))?;
             }
             pos = end;
         }
+        Ok(acc)
+    }
+
+    #[inline]
+    fn chunked_for_each(&self, from: usize, to: usize, mut each: impl FnMut(T)) {
+        self.chunked_try_fold(from, to, (), |(), v| {
+            each(v);
+            Ok::<_, std::convert::Infallible>(())
+        })
+        .unwrap_or_else(|e: std::convert::Infallible| match e {})
     }
 }
 
@@ -217,11 +234,10 @@ where
         if from >= to {
             return init;
         }
-        let mut acc = Some(init);
-        self.chunked_for_each(from, to, |v| {
-            acc = Some(f(acc.take().unwrap(), v));
-        });
-        acc.unwrap()
+        self.chunked_try_fold(from, to, init, |acc, v| {
+            Ok::<_, std::convert::Infallible>(f(acc, v))
+        })
+        .unwrap_or_else(|e: std::convert::Infallible| match e {})
     }
 
     #[inline]
@@ -230,7 +246,7 @@ where
         from: usize,
         to: usize,
         init: B,
-        mut f: F,
+        f: F,
     ) -> std::result::Result<B, E>
     where
         Self: Sized,
@@ -239,13 +255,7 @@ where
         if from >= to {
             return Ok(init);
         }
-        let mut acc: Option<std::result::Result<B, E>> = Some(Ok(init));
-        self.chunked_for_each(from, to, |v| {
-            if let Some(Ok(a)) = acc.take() {
-                acc = Some(f(a, v));
-            }
-        });
-        acc.unwrap()
+        self.chunked_try_fold(from, to, init, f)
     }
 
     #[inline]

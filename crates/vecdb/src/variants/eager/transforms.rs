@@ -274,6 +274,11 @@ where
     where
         A: VecValue + VecIndex,
     {
+        // Cursor persists across batches to avoid re-decompressing pages.
+        let mut cursor = Cursor::new(source2);
+        let mut cursor_pos: usize = 0;
+        let mut last_v: Option<V::T> = None;
+
         self.compute_init(
             source1.version() + source2.version(),
             max_from,
@@ -286,9 +291,6 @@ where
                 }
 
                 let keys: Vec<A> = source1.collect_range_at(skip, end);
-                let mut cursor = Cursor::new(source2);
-                let mut cursor_pos: usize = 0;
-                let mut last_v: Option<V::T> = None;
 
                 for (j, key) in keys.into_iter().enumerate() {
                     let key_pos = key.to_usize();
