@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     marker::PhantomData,
+    mem,
     path::PathBuf,
 };
 
@@ -733,25 +734,25 @@ where
         let from = stored_len * Self::SIZE_OF_T + HEADER_OFFSET;
 
         if has_new_data {
+            // Take the pushed buffer to free its heap allocation after writing.
+            let taken = mem::take(self.base.mut_pushed());
             if S::IS_NATIVE_LAYOUT {
                 // Bulk write: memory layout matches serialized format, skip per-value
                 // serialization entirely. Single memcpy from pushed buffer to mmap.
-                let pushed = self.base.pushed();
                 let bytes = unsafe {
                     std::slice::from_raw_parts(
-                        pushed.as_ptr() as *const u8,
-                        pushed.len() * Self::SIZE_OF_T,
+                        taken.as_ptr() as *const u8,
+                        taken.len() * Self::SIZE_OF_T,
                     )
                 };
                 self.region().truncate_write(from, bytes)?;
             } else {
                 let mut bytes = Vec::with_capacity(pushed_len * Self::SIZE_OF_T);
-                for v in self.base.pushed() {
+                for v in &taken {
                     S::write_to_vec(v, &mut bytes);
                 }
                 self.region().truncate_write(from, &bytes)?;
             }
-            self.base.mut_pushed().clear();
             self.base.update_stored_len(stored_len + pushed_len);
         } else if truncated {
             self.region().truncate(from)?;

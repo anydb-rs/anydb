@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, marker::PhantomData, path::PathBuf, sync::Arc};
+use std::{collections::BTreeMap, marker::PhantomData, mem, path::PathBuf, sync::Arc};
 
 use log::info;
 use parking_lot::RwLock;
@@ -443,8 +443,12 @@ where
         };
 
         // Phase 2: Compress (no locks held)
-        values.extend_from_slice(self.base.pushed());
-        self.base.mut_pushed().clear();
+        let taken = mem::take(self.base.mut_pushed());
+        if values.is_empty() {
+            values = taken;
+        } else {
+            values.extend_from_slice(&taken);
+        }
 
         let num_pages = values.len().div_ceil(Self::PER_PAGE);
         let mut buf = Vec::with_capacity(values.len() * Self::SIZE_OF_T);

@@ -10,6 +10,8 @@ use std::{
 use log::info;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 
+pub type ExitGuard<'a> = RwLockReadGuard<'a, ()>;
+
 type Callbacks = Arc<Mutex<Vec<Box<dyn Fn() + Send + Sync>>>>;
 
 static SIGNAL_RECEIVED: AtomicBool = AtomicBool::new(false);
@@ -102,7 +104,7 @@ impl Exit {
 
     /// Acquires a read lock to protect a critical section from shutdown.
     /// The shutdown thread will wait for all read locks to be released before exiting.
-    pub fn lock(&self) -> RwLockReadGuard<'_, ()> {
+    pub fn lock(&self) -> ExitGuard<'_> {
         self.lock.read()
     }
 }
