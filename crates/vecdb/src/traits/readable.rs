@@ -198,6 +198,20 @@ pub trait ReadableVec<I: VecIndex, T: VecValue>: AnyVec {
         self.fold_range_at(from, to, (), |(), v| f(v));
     }
 
+    /// Fallible for-each over `[from, to)` by raw index with early exit on error.
+    #[inline]
+    fn try_for_each_range_at<E, F: FnMut(T) -> std::result::Result<(), E>>(
+        &self,
+        from: usize,
+        to: usize,
+        mut f: F,
+    ) -> std::result::Result<(), E>
+    where
+        Self: Sized,
+    {
+        self.try_fold_range_at(from, to, (), |(), v| f(v))
+    }
+
     /// Calls `f` for every value in the vector.
     #[inline]
     fn for_each<F: FnMut(T)>(&self, f: F)

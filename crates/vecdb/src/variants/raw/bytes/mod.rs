@@ -36,6 +36,8 @@ pub use value::*;
 #[must_use = "Vector should be stored to keep data accessible"]
 pub struct BytesVec<I, T>(pub(crate) ReadWriteRawVec<I, T, BytesStrategy<T>>);
 
+pub type BytesVecReader<I, T> = super::VecReader<I, T, BytesStrategy<T>>;
+
 impl_vec_wrapper!(
     BytesVec,
     ReadWriteRawVec<I, T, BytesStrategy<T>>,

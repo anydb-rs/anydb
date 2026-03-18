@@ -2,6 +2,7 @@ use std::ops::Add;
 
 use crate::{
     AnyVec, Error, Exit, ReadableVec, Result, StoredVec, VecIndex, VecValue, Version, WritableVec,
+    unlikely,
 };
 
 use super::{CheckedSub, EagerVec, SaturatingAdd};
@@ -196,7 +197,7 @@ where
         max_from: V::I,
         first_indexes: &impl ReadableVec<V::I, A>,
         indexes_count: &impl ReadableVec<V::I, B>,
-        source: &impl ReadableVec<A, V::T>,
+        source: &(impl ReadableVec<A, V::T> + Sized),
         exit: &Exit,
     ) -> Result<()>
     where
@@ -205,13 +206,64 @@ where
         B: VecValue,
         usize: From<B>,
     {
-        self.compute_filtered_sum_from_indexes(
+        self.compute_init(
+            first_indexes.version() + indexes_count.version() + source.version(),
             max_from,
-            first_indexes,
-            indexes_count,
-            source,
-            |_| true,
             exit,
+            |this| {
+                let skip = this.len();
+                let source_end = indexes_count.len();
+                let end = this.batch_end(source_end);
+                if skip >= end {
+                    return Ok(());
+                }
+
+                let pos = if skip < first_indexes.len() {
+                    first_indexes.collect_one_at(skip).unwrap().to_usize()
+                } else {
+                    return Ok(());
+                };
+
+                let counts_batch: Vec<usize> = indexes_count
+                    .collect_range_at(skip, end)
+                    .into_iter()
+                    .map(usize::from)
+                    .collect();
+                let total_count: usize = counts_batch.iter().sum();
+
+                let mut group_idx = 0usize;
+
+                // Skip leading zero-count groups
+                while group_idx < counts_batch.len() && counts_batch[group_idx] == 0 {
+                    this.push(V::T::default());
+                    group_idx += 1;
+                }
+
+                if group_idx < counts_batch.len() {
+                    let mut remaining = counts_batch[group_idx];
+
+                    source.fold_range_at(pos, pos + total_count, V::T::default(), |sum, val: V::T| {
+                        let sum = sum.saturating_add(val);
+                        remaining -= 1;
+                        if unlikely(remaining == 0) {
+                            this.push(sum);
+                            group_idx += 1;
+                            while group_idx < counts_batch.len() && counts_batch[group_idx] == 0 {
+                                this.push(V::T::default());
+                                group_idx += 1;
+                            }
+                            if group_idx < counts_batch.len() {
+                                remaining = counts_batch[group_idx];
+                            }
+                            V::T::default()
+                        } else {
+                            sum
+                        }
+                    });
+                }
+
+                Ok(())
+            },
         )
     }
 
@@ -220,7 +272,7 @@ where
         max_from: V::I,
         first_indexes: &impl ReadableVec<V::I, A>,
         indexes_count: &impl ReadableVec<V::I, B>,
-        source: &impl ReadableVec<A, V::T>,
+        source: &(impl ReadableVec<A, V::T> + Sized),
         mut filter: impl FnMut(&V::T) -> bool,
         exit: &Exit,
     ) -> Result<()>
@@ -242,7 +294,6 @@ where
                     return Ok(());
                 }
 
-                // Get the starting position in source
                 let pos = if skip < first_indexes.len() {
                     first_indexes.collect_one_at(skip).unwrap().to_usize()
                 } else {
@@ -256,17 +307,38 @@ where
                     .collect();
                 let total_count: usize = counts_batch.iter().sum();
 
-                // Single batch read instead of per-element allocations
-                let all_values = source.collect_range_at(pos, pos + total_count);
-                let mut offset = 0;
-                for (j, &count) in counts_batch.iter().enumerate() {
-                    let i = skip + j;
-                    let sum = all_values[offset..offset + count]
-                        .iter()
-                        .filter(|v| filter(v))
-                        .fold(V::T::default(), |acc, val| acc.saturating_add(val.clone()));
-                    offset += count;
-                    this.checked_push_at(i, sum)?;
+                let mut group_idx = 0usize;
+
+                while group_idx < counts_batch.len() && counts_batch[group_idx] == 0 {
+                    this.push(V::T::default());
+                    group_idx += 1;
+                }
+
+                if group_idx < counts_batch.len() {
+                    let mut remaining = counts_batch[group_idx];
+
+                    source.fold_range_at(pos, pos + total_count, V::T::default(), |sum, val: V::T| {
+                        let sum = if filter(&val) {
+                            sum.saturating_add(val)
+                        } else {
+                            sum
+                        };
+                        remaining -= 1;
+                        if unlikely(remaining == 0) {
+                            this.push(sum);
+                            group_idx += 1;
+                            while group_idx < counts_batch.len() && counts_batch[group_idx] == 0 {
+                                this.push(V::T::default());
+                                group_idx += 1;
+                            }
+                            if group_idx < counts_batch.len() {
+                                remaining = counts_batch[group_idx];
+                            }
+                            V::T::default()
+                        } else {
+                            sum
+                        }
+                    });
                 }
 
                 Ok(())
@@ -334,7 +406,7 @@ where
     fn compute_count_from_indexes_with<A, B>(
         &mut self,
         max_from: V::I,
-        first_indexes: &impl ReadableVec<V::I, A>,
+        first_indexes: &(impl ReadableVec<V::I, A> + Sized),
         other_to_else: &impl ReadableVec<A, B>,
         mut count_fn: impl FnMut(usize, usize) -> usize,
         exit: &Exit,
@@ -363,23 +435,21 @@ where
                     return Ok(());
                 }
 
-                let fi_batch = first_indexes.collect_range_at(skip, end);
-                for (j, first_index) in fi_batch.iter().enumerate() {
-                    let i = skip + j;
-                    let next_first = if i + 1 < first_indexes.len() {
-                        fi_batch
-                            .get(j + 1)
-                            .map(|fi| fi.to_usize())
-                            .unwrap_or_else(|| {
-                                first_indexes.collect_one_at(i + 1).unwrap().to_usize()
-                            })
-                    } else {
-                        other_to_else.len()
-                    };
+                let prev_val = first_indexes.collect_one_at(skip).unwrap().to_usize();
 
-                    let count = count_fn(first_index.to_usize(), next_first);
-                    this.checked_push_at(i, V::T::from(A::from(count)))?;
-                }
+                let last_prev =
+                    first_indexes.fold_range_at(skip + 1, end, prev_val, |prev, fi: A| {
+                        let next = fi.to_usize();
+                        this.push(V::T::from(A::from(count_fn(prev, next))));
+                        next
+                    });
+
+                let next_first = if end < first_indexes.len() {
+                    first_indexes.collect_one_at(end).unwrap().to_usize()
+                } else {
+                    other_to_else.len()
+                };
+                this.push(V::T::from(A::from(count_fn(last_prev, next_first))));
 
                 Ok(())
             },
