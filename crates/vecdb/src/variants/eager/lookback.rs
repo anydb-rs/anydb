@@ -155,7 +155,7 @@ where
     }
 
     /// Shared helper for rolling computations using variable window starts.
-    fn compute_rolling_from_window_starts<A, F>(
+    pub fn compute_rolling_from_window_starts<A, F>(
         &mut self,
         max_from: V::I,
         window_starts: &impl ReadableVec<V::I, V::I>,

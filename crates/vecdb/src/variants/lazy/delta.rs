@@ -69,15 +69,19 @@ where
 #[derive(Clone, Copy)]
 pub struct DeltaAvg;
 
-impl<T: From<f64>> DeltaOp<f64, T> for DeltaAvg {
+impl<S, T> DeltaOp<S, T> for DeltaAvg
+where
+    S: Into<f64> + Default,
+    T: From<f64>,
+{
     #[inline]
     fn ago_index(start: usize) -> Option<usize> {
         start.checked_sub(1)
     }
 
     #[inline]
-    fn ago_default() -> f64 {
-        0.0
+    fn ago_default() -> S {
+        S::default()
     }
 
     #[inline]
@@ -86,11 +90,11 @@ impl<T: From<f64>> DeltaOp<f64, T> for DeltaAvg {
     }
 
     #[inline]
-    fn combine(current: f64, ago: f64, count: usize) -> T {
+    fn combine(current: S, ago: S, count: usize) -> T {
         if count == 0 {
             T::from(0.0)
         } else {
-            T::from((current - ago) / count as f64)
+            T::from((current.into() - ago.into()) / count as f64)
         }
     }
 }
