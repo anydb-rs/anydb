@@ -1409,6 +1409,62 @@ mod raw_rollback {
         Ok(())
     }
 
+    /// Regression test: rollback-after-rollback with delete_at losing entries.
+    ///
+    /// After the first rollback, restored entries sit in `updated.current`.
+    /// If `delete_at` removes one from `updated.current` during reprocessing,
+    /// and `serialize_changes` only iterated `updated.current` keys (the old bug),
+    /// the entry's prev value would be lost from the change file.
+    /// On a second rollback, the slot would contain stale on-disk data
+    /// instead of the correct rolled-back value.
+    fn run_rollback_after_rollback_with_delete<V>() -> Result<()>
+    where
+        V: RollbackVec,
+        V::Target: RollbackOps,
+    {
+        let (db, _temp) = setup_db()?;
+        let (mut vec, _) = V::import_with_changes(&db, "test", 10)?;
+
+        // Stamp 1 (baseline): [10, 20, 30, 40, 50]
+        for &v in &[10, 20, 30, 40, 50] {
+            vec.push(v);
+        }
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(1))?;
+        assert_eq!(vec.deref_mut().collect(), vec![10, 20, 30, 40, 50]);
+
+        // Stamp 2: update slot 2 (30 → 99), delete slot 1 (creates hole)
+        vec.deref_mut().update(2, 99)?;
+        vec.deref_mut().take(1)?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(2))?;
+        assert_eq!(vec.deref_mut().collect(), vec![10, 99, 40, 50]);
+
+        // First rollback → back to stamp 1
+        vec.deref_mut().rollback()?;
+        assert_eq!(vec.deref_mut().collect(), vec![10, 20, 30, 40, 50]);
+        assert_eq!(vec.deref_mut().stamp(), Stamp::new(1));
+
+        // Now reprocess: delete slot 2 (the one we just restored), update slot 3
+        // This simulates an address becoming empty during reprocessing
+        vec.deref_mut().take(2)?; // removes 30 from updated.current
+        vec.deref_mut().update(3, 88)?;
+        vec.deref_mut().stamped_write_with_changes(Stamp::new(3))?;
+        assert_eq!(vec.deref_mut().collect(), vec![10, 20, 88, 50]);
+
+        // Second rollback → must go back to stamp 1 values
+        vec.deref_mut().rollback()?;
+        let result = vec.deref_mut().collect();
+        assert_eq!(
+            result,
+            vec![10, 20, 30, 40, 50],
+            "Second rollback must restore all original values. \
+             Slot 2 was deleted during reprocessing but its prev value (30) \
+             must still be tracked in the change file."
+        );
+        assert_eq!(vec.deref_mut().stamp(), Stamp::new(1));
+
+        Ok(())
+    }
+
     // ============================================================================
     // Test instantiation for each raw vec type
     // ============================================================================
@@ -1483,6 +1539,10 @@ mod raw_rollback {
         fn reset() -> Result<()> {
             run_reset::<V>()
         }
+        #[test]
+        fn rollback_after_rollback_with_delete() -> Result<()> {
+            run_rollback_after_rollback_with_delete::<V>()
+        }
     }
 
     mod bytes {
@@ -1553,6 +1613,10 @@ mod raw_rollback {
         #[test]
         fn reset() -> Result<()> {
             run_reset::<V>()
+        }
+        #[test]
+        fn rollback_after_rollback_with_delete() -> Result<()> {
+            run_rollback_after_rollback_with_delete::<V>()
         }
     }
 } // end mod raw_rollback

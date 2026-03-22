@@ -824,13 +824,23 @@ where
 
         let reader = self.create_reader();
         let updated = self.updated();
+        let prev_updated = self.prev_updated();
 
-        bytes.extend(updated.len().to_bytes());
-        for &i in updated.keys() {
+        // Collect all indices that need change tracking: entries currently modified
+        // AND entries that were in prev_updated but removed (e.g., by delete_at).
+        // Without the latter, rollback after rollback loses track of deleted entries.
+        let all_keys: BTreeSet<usize> = updated
+            .keys()
+            .chain(prev_updated.keys())
+            .copied()
+            .collect();
+
+        bytes.extend(all_keys.len().to_bytes());
+        for &i in &all_keys {
             bytes.extend(i.to_bytes());
         }
-        for &i in updated.keys() {
-            if let Some(v) = self.prev_updated().get(&i) {
+        for &i in &all_keys {
+            if let Some(v) = prev_updated.get(&i) {
                 S::write_to_vec(v, &mut bytes);
             } else {
                 S::write_to_vec(&self.unchecked_read_at(i, &reader), &mut bytes);
