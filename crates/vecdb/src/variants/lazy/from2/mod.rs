@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    AnyVec, READ_CHUNK_SIZE, ReadableBoxedVec, ReadableVec, TypedVec, VecIndex, VecValue, Version,
-    short_type_name,
+    AnyVec, ReadableBoxedVec, ReadableVec, TypedVec, VecIndex, VecValue, Version, short_type_name,
 };
 
 mod transform;
@@ -126,56 +125,6 @@ where
     }
 }
 
-impl<I, T, S1I, S1T, S2I, S2T> LazyVecFrom2<I, T, S1I, S1T, S2I, S2T>
-where
-    I: VecIndex,
-    T: VecValue,
-    S1I: VecIndex,
-    S1T: VecValue,
-    S2I: VecIndex,
-    S2T: VecValue,
-{
-    /// Core chunked iteration with fold + early exit support.
-    /// Only 2 small buffers are allocated total (capacity min(4096, range)),
-    /// reused across chunks via `clear()`.
-    #[inline]
-    fn chunked_try_fold<B, E>(
-        &self,
-        from: usize,
-        to: usize,
-        init: B,
-        mut f: impl FnMut(B, T) -> std::result::Result<B, E>,
-    ) -> std::result::Result<B, E> {
-        let compute = self.compute;
-        let cap = READ_CHUNK_SIZE.min(to.saturating_sub(from));
-        let mut buf1 = Vec::with_capacity(cap);
-        let mut buf2 = Vec::with_capacity(cap);
-        let mut acc = init;
-        let mut pos = from;
-        while pos < to {
-            let end = (pos + READ_CHUNK_SIZE).min(to);
-            buf1.clear();
-            buf2.clear();
-            self.source1.read_into_at(pos, end, &mut buf1);
-            self.source2.read_into_at(pos, end, &mut buf2);
-            for (local, (v1, v2)) in buf1.drain(..).zip(buf2.drain(..)).enumerate() {
-                acc = f(acc, compute(I::from(pos + local), v1, v2))?;
-            }
-            pos = end;
-        }
-        Ok(acc)
-    }
-
-    #[inline]
-    fn chunked_for_each(&self, from: usize, to: usize, mut each: impl FnMut(T)) {
-        self.chunked_try_fold(from, to, (), |(), v| {
-            each(v);
-            Ok::<_, std::convert::Infallible>(())
-        })
-        .unwrap_or_else(|e: std::convert::Infallible| match e {})
-    }
-}
-
 impl<I, T, S1I, S1T, S2I, S2T> ReadableVec<I, T> for LazyVecFrom2<I, T, S1I, S1T, S2I, S2T>
 where
     I: VecIndex,
@@ -189,12 +138,21 @@ where
     fn read_into_at(&self, from: usize, to: usize, buf: &mut Vec<T>) {
         let to = to.min(self.len());
         buf.reserve(to.saturating_sub(from));
-        self.chunked_for_each(from, to, |v| buf.push(v));
+        self.for_each_range_dyn_at(from, to, &mut |v| buf.push(v));
     }
 
     #[inline]
     fn for_each_range_dyn_at(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
-        self.chunked_for_each(from, to.min(self.len()), f);
+        let compute = self.compute;
+        let to = to.min(self.len());
+        let buf1 = self.source1.collect_range_dyn(from, to);
+        let buf2 = self.source2.collect_range_dyn(from, to);
+        buf1.into_iter()
+            .zip(buf2)
+            .enumerate()
+            .for_each(|(local, (v1, v2))| {
+                f(compute(I::from(from + local), v1, v2));
+            });
     }
 
     #[inline]
@@ -202,11 +160,7 @@ where
     where
         Self: Sized,
     {
-        let to = to.min(self.len());
-        if from >= to {
-            return init;
-        }
-        self.chunked_try_fold(from, to, init, |acc, v| {
+        self.try_fold_range_at(from, to, init, |acc, v| {
             Ok::<_, std::convert::Infallible>(f(acc, v))
         })
         .unwrap_or_else(|e: std::convert::Infallible| match e {})
@@ -218,7 +172,7 @@ where
         from: usize,
         to: usize,
         init: B,
-        f: F,
+        mut f: F,
     ) -> std::result::Result<B, E>
     where
         Self: Sized,
@@ -227,7 +181,15 @@ where
         if from >= to {
             return Ok(init);
         }
-        self.chunked_try_fold(from, to, init, f)
+        let compute = self.compute;
+        let buf1 = self.source1.collect_range_dyn(from, to);
+        let buf2 = self.source2.collect_range_dyn(from, to);
+        buf1.into_iter()
+            .zip(buf2)
+            .enumerate()
+            .try_fold(init, |acc, (local, (v1, v2))| {
+                f(acc, compute(I::from(from + local), v1, v2))
+            })
     }
 
     #[inline]

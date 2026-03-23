@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    AnyVec, READ_CHUNK_SIZE, ReadOnlyClone, ReadableBoxedVec, ReadableVec, TypedVec, VecIndex,
-    VecValue, Version, short_type_name,
+    AnyVec, ReadOnlyClone, ReadableBoxedVec, ReadableVec, TypedVec, VecIndex, VecValue, Version,
+    short_type_name,
 };
 
 mod transform;
@@ -115,51 +115,6 @@ where
     }
 }
 
-impl<I, T, S1I, S1T> LazyVecFrom1<I, T, S1I, S1T>
-where
-    I: VecIndex,
-    T: VecValue,
-    S1I: VecIndex,
-    S1T: VecValue,
-{
-    /// Core chunked iteration with fold + early exit support.
-    /// Reads source in batches via `read_into_at` (one vtable call per chunk)
-    /// instead of `for_each_range_dyn_at` (one per element).
-    #[inline]
-    fn chunked_try_fold<B, E>(
-        &self,
-        from: usize,
-        to: usize,
-        init: B,
-        mut f: impl FnMut(B, T) -> std::result::Result<B, E>,
-    ) -> std::result::Result<B, E> {
-        let compute = self.compute;
-        let cap = READ_CHUNK_SIZE.min(to.saturating_sub(from));
-        let mut buf = Vec::with_capacity(cap);
-        let mut acc = init;
-        let mut pos = from;
-        while pos < to {
-            let end = (pos + READ_CHUNK_SIZE).min(to);
-            buf.clear();
-            self.source.read_into_at(pos, end, &mut buf);
-            for (local, v) in buf.drain(..).enumerate() {
-                acc = f(acc, compute(I::from(pos + local), v))?;
-            }
-            pos = end;
-        }
-        Ok(acc)
-    }
-
-    #[inline]
-    fn chunked_for_each(&self, from: usize, to: usize, mut each: impl FnMut(T)) {
-        self.chunked_try_fold(from, to, (), |(), v| {
-            each(v);
-            Ok::<_, std::convert::Infallible>(())
-        })
-        .unwrap_or_else(|e: std::convert::Infallible| match e {})
-    }
-}
-
 impl<I, T, S1I, S1T> ReadableVec<I, T> for LazyVecFrom1<I, T, S1I, S1T>
 where
     I: VecIndex,
@@ -171,12 +126,18 @@ where
     fn read_into_at(&self, from: usize, to: usize, buf: &mut Vec<T>) {
         let to = to.min(self.len());
         buf.reserve(to.saturating_sub(from));
-        self.chunked_for_each(from, to, |v| buf.push(v));
+        self.for_each_range_dyn_at(from, to, &mut |v| buf.push(v));
     }
 
     #[inline]
     fn for_each_range_dyn_at(&self, from: usize, to: usize, f: &mut dyn FnMut(T)) {
-        self.chunked_for_each(from, to.min(self.len()), f);
+        let compute = self.compute;
+        let to = to.min(self.len());
+        let mut pos = from;
+        self.source.for_each_range_dyn_at(from, to, &mut |v| {
+            f(compute(I::from(pos), v));
+            pos += 1;
+        });
     }
 
     #[inline]
@@ -184,11 +145,7 @@ where
     where
         Self: Sized,
     {
-        let to = to.min(self.len());
-        if from >= to {
-            return init;
-        }
-        self.chunked_try_fold(from, to, init, |acc, v| {
+        self.try_fold_range_at(from, to, init, |acc, v| {
             Ok::<_, std::convert::Infallible>(f(acc, v))
         })
         .unwrap_or_else(|e: std::convert::Infallible| match e {})
@@ -200,7 +157,7 @@ where
         from: usize,
         to: usize,
         init: B,
-        f: F,
+        mut f: F,
     ) -> std::result::Result<B, E>
     where
         Self: Sized,
@@ -209,7 +166,11 @@ where
         if from >= to {
             return Ok(init);
         }
-        self.chunked_try_fold(from, to, init, f)
+        let compute = self.compute;
+        let buf = self.source.collect_range_dyn(from, to);
+        buf.into_iter().enumerate().try_fold(init, |acc, (local, v)| {
+            f(acc, compute(I::from(from + local), v))
+        })
     }
 
     #[inline]
