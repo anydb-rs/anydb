@@ -217,6 +217,16 @@ where
         let v = self.source.collect_one_at(index)?;
         Some((self.compute)(I::from(index), v))
     }
+
+    fn read_sorted_into_at(&self, indices: &[usize], out: &mut Vec<T>) {
+        let compute = self.compute;
+        let source_vals = self.source.read_sorted_at(indices);
+        out.reserve(source_vals.len());
+        indices
+            .iter()
+            .zip(source_vals)
+            .for_each(|(&i, v)| out.push(compute(I::from(i), v)));
+    }
 }
 
 impl<I, T, S1I, S1T> TypedVec for LazyVecFrom1<I, T, S1I, S1T>

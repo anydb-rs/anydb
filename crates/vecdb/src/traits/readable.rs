@@ -325,6 +325,48 @@ pub trait ReadableVec<I: VecIndex, T: VecValue>: AnyVec {
         self.collect_range_dyn(0, self.len())
     }
 
+    // ── Sparse reads ──────────────────────────────────────────────
+
+    /// Reads values at specific sorted indices (ascending), skipping holes.
+    ///
+    /// Default uses a forward-only [`Cursor`] — each underlying page is read
+    /// at most once. Lazy vecs override to map indices to their source and
+    /// call this method recursively, bottoming out at stored vecs.
+    ///
+    /// `indices` **must** be sorted ascending. Output order matches `indices`.
+    fn read_sorted_into_at(&self, indices: &[usize], out: &mut Vec<T>) {
+        let mut cursor = Cursor::new(self);
+        out.reserve(indices.len());
+        indices.iter().for_each(|&i| {
+            if let Some(v) = cursor.get(i) {
+                out.push(v);
+            }
+        });
+    }
+
+    /// Reads values at specific sorted indices (ascending), returning a new `Vec`.
+    #[inline]
+    fn read_sorted_at(&self, indices: &[usize]) -> Vec<T> {
+        let mut out = Vec::with_capacity(indices.len());
+        self.read_sorted_into_at(indices, &mut out);
+        out
+    }
+
+    /// Reads values at specific sorted typed indices, appending to `out`.
+    #[inline]
+    fn read_sorted_into(&self, indices: &[I], out: &mut Vec<T>) {
+        let raw: Vec<usize> = indices.iter().map(|i| i.to_usize()).collect();
+        self.read_sorted_into_at(&raw, out);
+    }
+
+    /// Reads values at specific sorted typed indices, returning a new `Vec`.
+    #[inline]
+    fn read_sorted(&self, indices: &[I]) -> Vec<T> {
+        let mut out = Vec::with_capacity(indices.len());
+        self.read_sorted_into(indices, &mut out);
+        out
+    }
+
     // ── Aggregations ───────────────────────────────────────────────
 
     /// Returns the minimum value in `[from, to)` by raw index, or `None` if empty.

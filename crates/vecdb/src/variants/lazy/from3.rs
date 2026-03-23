@@ -268,6 +268,18 @@ where
         let v3 = self.source3.collect_one_at(index)?;
         Some((self.compute)(I::from(index), v1, v2, v3))
     }
+
+    fn read_sorted_into_at(&self, indices: &[usize], out: &mut Vec<T>) {
+        let compute = self.compute;
+        let vals1 = self.source1.read_sorted_at(indices);
+        let vals2 = self.source2.read_sorted_at(indices);
+        let vals3 = self.source3.read_sorted_at(indices);
+        out.reserve(vals1.len().min(vals2.len()).min(vals3.len()));
+        indices
+            .iter()
+            .zip(vals1.into_iter().zip(vals2).zip(vals3))
+            .for_each(|(&i, ((v1, v2), v3))| out.push(compute(I::from(i), v1, v2, v3)));
+    }
 }
 
 impl<I, T, S1I, S1T, S2I, S2T, S3I, S3T> TypedVec
