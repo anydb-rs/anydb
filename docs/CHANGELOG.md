@@ -7,6 +7,190 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.7.2](https://github.com/anydb-rs/anydb/releases/tag/v0.7.2) - 2026-03-23
+
+### New Features
+#### `vecdb`
+- Added `read_sorted_into_at()`, `read_sorted_at()`, `read_sorted_into()`, and `read_sorted()` methods to `ReadableVec` for reading values at specific sorted ascending indices — default implementation uses `Cursor` so each page is decompressed at most once ([source](https://github.com/anydb-rs/anydb/blob/v0.7.2/crates/vecdb/src/traits/readable.rs))
+- `CachedVec` now implements `AnyVec` and `ReadableVec` directly, enabling it to be used as a first-class readable vec with `fold_range_at`, `try_fold_range_at`, `for_each_range_dyn_at`, `read_into_at`, `collect_one_at`, and `read_sorted_into_at` — all methods check cache first and fall through to source when budget is exhausted ([source](https://github.com/anydb-rs/anydb/blob/v0.7.2/crates/vecdb/src/variants/cached.rs))
+- Added `CachedVecBudget` trait for gating cache materialization with access-count-based admission control, with built-in `AtomicUsize` implementation (decrementing counter) and internal `NoBudget` (always allows) ([source](https://github.com/anydb-rs/anydb/blob/v0.7.2/crates/vecdb/src/variants/cached.rs))
+- Added `CachedVec::new_budgeted()` constructor taking a static budget reference and shared `AtomicU64` access counter ([source](https://github.com/anydb-rs/anydb/blob/v0.7.2/crates/vecdb/src/variants/cached.rs))
+- Added `CachedVec::clear()` method to reset the cache and access counter ([source](https://github.com/anydb-rs/anydb/blob/v0.7.2/crates/vecdb/src/variants/cached.rs))
+
+### Internal Changes
+#### `vecdb`
+- `CachedVec::materialize()` now performs double-check locking after acquiring write lock to avoid redundant materialization under contention ([source](https://github.com/anydb-rs/anydb/blob/v0.7.2/crates/vecdb/src/variants/cached.rs))
+- `LazyVecFrom1`, `LazyVecFrom2`, `LazyVecFrom3` replaced internal `chunked_try_fold`/`chunked_for_each` with direct delegation to source's `for_each_range_dyn_at` and `collect_range_dyn`, reducing one level of buffering indirection ([source](https://github.com/anydb-rs/anydb/blob/v0.7.2/crates/vecdb/src/variants/lazy/from1/mod.rs))
+- Added optimized `read_sorted_into_at()` overrides on `LazyVecFrom1`, `LazyVecFrom2`, `LazyVecFrom3` that delegate to source's `read_sorted_at` then apply the compute transform in-place ([source](https://github.com/anydb-rs/anydb/blob/v0.7.2/crates/vecdb/src/variants/lazy/from1/mod.rs))
+- Added optimized `read_sorted_into_at()` override on `LazyDeltaVec` that batches all needed source positions (current + lookback), deduplicates, reads sorted in one pass, then combines results ([source](https://github.com/anydb-rs/anydb/blob/v0.7.2/crates/vecdb/src/variants/lazy/delta.rs))
+- `Sparse` aggregation fold rewritten to batch-read via `read_sorted_at` instead of per-element `Cursor::get`, building a slot map and reading all needed positions in one sorted pass ([source](https://github.com/anydb-rs/anydb/blob/v0.7.2/crates/vecdb/src/variants/lazy/agg/sparse.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.7.1...v0.7.2)
+
+## [v0.7.1](https://github.com/anydb-rs/anydb/releases/tag/v0.7.1) - 2026-03-22
+
+### Bug Fixes
+#### `vecdb`
+- Fixed rollback-after-rollback data loss when `delete_at` removes an entry restored by a prior rollback — `serialize_changes` now tracks indices from both `updated` and `prev_updated`, ensuring deleted entries' previous values are preserved in change files for subsequent rollbacks ([source](https://github.com/anydb-rs/anydb/blob/v0.7.1/crates/vecdb/src/variants/raw/inner/read_write.rs))
+- Added regression test verifying that a second rollback correctly restores all values even when entries were deleted during reprocessing between rollbacks ([source](https://github.com/anydb-rs/anydb/blob/v0.7.1/crates/vecdb/tests/rollback.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.7.0...v0.7.1)
+
+## [v0.7.0](https://github.com/anydb-rs/anydb/releases/tag/v0.7.0) - 2026-03-21
+
+### Breaking Changes
+#### `vecdb`
+- Replaced iterator-based reading with `ReadableVec` trait — removed `IterableVec`, `CollectableVec`, `GenericStoredVec` traits and all vec iterator types (`RawVecIterator`, `CleanRawVecIterator`, `DirtyRawVecIterator`, compressed equivalents, `BoxedVecIterator`, `TypedVecIterator`, `VecIterator`). Reading is now done via `fold_range`, `for_each_range`, `collect_range`, `read_into`, and other `ReadableVec` methods ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/traits/readable.rs))
+- Split all vec types into read-only and read-write variants: `RawVecInner` → `ReadOnlyRawVec` + `ReadWriteRawVec`; `CompressedVecInner` → `ReadOnlyCompressedVec` + `ReadWriteCompressedVec`; `BaseVec` → `ReadOnlyBaseVec` + `ReadWriteBaseVec` ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/variants/raw/inner/mod.rs))
+- `Version` storage changed from `u64` to `u32`, halving the stored version size. `Version::new()` now takes `u32`. Added `From<usize>` and `Into<usize>` conversions ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/version.rs))
+- Header version bumped from `ONE` to `TWO` and removed 31-byte padding field, forcing re-import of all stored data ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/variants/base/header.rs))
+- `StoredVec` no longer requires `Clone` — now requires `ReadableCloneableVec` and has a `type ReadOnly` associated type for lean read-only clones ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/traits/stored.rs))
+- `BytesVec`/`ZeroCopyVec`/`EagerVec` no longer implement `Clone` (only `Debug`) — use `read_only_clone()` for read-only copies
+- `Formattable` trait redesigned: no longer extends `Display`, primary method is `write_to(&self, buf: &mut Vec<u8>)` with `fmt_into`, `fmt_csv`, `fmt_json` derived from it. Uses `itoa`/`ryu` for fast number formatting ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/traits/formattable.rs))
+- `AnyCollectableVec` renamed to `AnyReadableVec` ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/traits/any_readable.rs))
+- `compute_aggregate_of_others` closure signature changed from `Fn(Box<dyn Iterator>) -> T` to `Fn(&[Vec<T>], usize) -> T` ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/variants/eager/aggregates.rs))
+- All eager compute functions now take `&impl ReadableVec` instead of `&impl IterableVec`
+- `UnexpectedIndex` error now includes `name` field for easier debugging ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/error.rs))
+- Removed `FromCoarser` trait, `Lookback` enum, and `BytesExt` trait
+- Replaced `ctrlc` crate with custom `libc`-based signal handler — `set_ctrlc_handler()` now handles both SIGINT and SIGTERM via `sigaction` ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/exit.rs))
+- JSON serialization rewritten to stream values via `for_each_range_at` + `fmt_json` instead of collecting into Vec then serializing with serde ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/traits/any_serializable.rs))
+
+#### `rawdb`
+- `Database::file_len()` return type changed from `Result<usize>` to `usize` — now infallible via cached atomic read ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/rawdb/src/lib.rs))
+- Reader struct now stores `start`/`len` directly instead of cloning full `RegionMetadata`, reducing memory footprint ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/rawdb/src/reader.rs))
+- `RegionMetadata` no longer derives `Clone` — manual `Clone` impl resets state to clean on clone ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/rawdb/src/region_metadata.rs))
+- `RegionState` changed from `Arc<AtomicU8>` to plain `AtomicU8`, no longer `Clone` ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/rawdb/src/region_state.rs))
+- Region dirty tracking simplified from range pairs to min/max offset bounds ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/rawdb/src/region.rs))
+- `RegionStillReferenced` error now includes the region `id` field ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/rawdb/src/error.rs))
+- Removed `WriteRetryLimitExceeded` error variant ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/rawdb/src/error.rs))
+- Metadata flush changed to two-phase durability: `flush_async_range()` for non-blocking writeback followed by explicit `sync_data()` ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/rawdb/src/region_metadata.rs))
+
+### New Features
+#### `vecdb`
+- Added `ReadableVec` trait as the primary interface for reading data from any vec type, with `fold_range`, `try_fold_range`, `for_each_range`, `collect_range`, `collect_one`, `collect_first`, `collect_last`, `min`, `max`, `sum`, `collect_signed_range`, `read_into`, and `cursor` methods ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/traits/readable.rs))
+- Added `WritableVec` trait extracting all write operations (push, truncate, rollback, flush, `checked_push`, `fill_to`, `batch_limit_reached`, `validate_computed_version_or_reset`, `validate_and_truncate`) ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/traits/writable.rs))
+- Added `Cursor` struct for buffered sequential reads that reuses an internal buffer across chunked `read_into_at` calls — one allocation for the cursor's lifetime, with `next()`, `get()`, `fold()`, `for_each()`, `advance()` methods ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/cursor.rs))
+- Added `CachedVec` for cached snapshots of readable vecs, refreshed when len or version changes. Cheap to clone via Arc, all clones share the same cache ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/variants/cached.rs))
+- Added `LazyDeltaVec` for lazily computed delta operations between a source value and a lookback value, with pluggable `DeltaOp` trait and built-in implementations: `DeltaSub` (rolling sum from cumulative), `DeltaAvg` (rolling average), `DeltaChange` (point-to-point delta), `DeltaRate` (growth rate) ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/variants/lazy/delta.rs))
+- Added `LazyAggVec` for lazy aggregation mapping coarser output indices to ranges in a finer source, with `AggFold` trait for custom aggregation strategies and built-in `Sparse` strategy ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/variants/lazy/agg/mod.rs))
+- Added `StorageMode` marker trait system with `Rw`/`Ro` types for compile-time read-write vs read-only selection in composite types ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/traits/storage_mode.rs))
+- Added `ReadOnlyClone` trait for creating read-only clones of composite types (Option, BTreeMap, arrays, stored vecs) ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/traits/read_only_clone.rs))
+- Added `VecReader` struct for O(1) random-access point reads directly from mmap with `get()`, `try_get()`, `len()` methods, available via `vec.reader()` ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/variants/raw/sources/reader.rs))
+- Added IO and mmap dual-backend sources for both raw and compressed vecs: `RawIoSource`/`RawMmapSource` for raw vecs, `CompressedIoSource`/`CompressedMmapSource` for compressed vecs. IO is used for sequential scans >1 GiB (`MMAP_CROSSOVER_BYTES` threshold), mmap for smaller ranges ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/variants/raw/sources/io.rs))
+- Added `ValueStrategy` trait shared by all vec types for value serialization with `IS_NATIVE_LAYOUT` flag enabling bulk memcpy optimization on native-endian types ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/variants/strategy.rs))
+- Added `Bytes::IS_NATIVE_LAYOUT` const — true on little-endian platforms for numeric types, enabling direct pointer reads via `RawStrategy::read_from_ptr` ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/variants/raw/bytes/trait.rs))
+- Added `ReadableOptionVec` extension trait with `collect_or_default()` (replaces None with default) and `collect_one_flat()` (flattens `Option<Option<T>>`) ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/traits/readable_option.rs))
+- Added `AnySerializableVec::last_json_value()` for getting the last value as `serde_json::Value` ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/traits/any_serializable.rs))
+- Added `AnySerializableVec::write_csv_column()` for streaming CSV output without materialization ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/traits/any_serializable.rs))
+- Added `Formattable` implementation for `Option<T>` with null handling in JSON format ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/traits/formattable.rs))
+- Added `Version` serde/schemars derive support behind feature flags ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/version.rs))
+- `short_type_name` now unwraps `Option<T>` to just `T` since Option is a serialization concern ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/traits/printable.rs))
+- Signal handler second-signal behavior now prints "Shutdown already pending" instead of force-exiting, using async-signal-safe pipe notification ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/exit.rs))
+
+#### `rawdb`
+- Added `cached_file_len` (AtomicUsize) for lock-free file length reads, avoiding mutex acquisition on hot paths ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/rawdb/src/lib.rs))
+- `SharedLen` atomic ordering relaxed from `SeqCst` to `Acquire`/`Release` for lower overhead on ARM ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/src/variants/base/shared_len.rs))
+- Added sparse file documentation to README explaining filesystem requirements and tooling implications ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/rawdb/README.md))
+
+### Internal Changes
+#### `vecdb`
+- Eager compute functions use `compute_init` helper and `Cursor` for reading previous values, reducing compressed page decompression from once-per-element to once-per-page
+- `RawMmapSource` uses raw pointer + unsafe `read_from_ptr` for zero-copy fold/try_fold iteration with LLVM auto-vectorization
+- `RawIoSource` uses aligned buffer reads with tight inner loops designed for LLVM vectorization
+- `compute_monotonic_window` extracts deque update logic into an inlined `update_deque` helper function
+- `Header::to_bytes()` returns fixed-size `[u8; HEADER_OFFSET]` array instead of heap-allocated `Vec<u8>`
+- `HEADER_OFFSET` visibility changed from `pub(crate)` to `pub`
+- `VecIteratorWriter` simplified to use `std::vec::IntoIter<T>` instead of boxed iterator with phantom data
+- `LazyVecFrom3` consolidated from module with separate iterator file to single-file implementation
+- Added `bench` example for comprehensive throughput benchmarks across all vec types ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/examples/bench.rs))
+- Added `io_vs_mmap` example comparing IO and mmap iteration strategies ([source](https://github.com/anydb-rs/anydb/blob/v0.7.0/crates/vecdb/examples/io_vs_mmap.rs))
+- Added `iter_vs_mmap` and `signal_test` examples
+- README rewritten with inline benchmark table (10B u64 values) and updated API examples using `ReadableVec`/`WritableVec`
+
+#### `rawdb`
+- Simplified Reader field ordering with safety comment, metadata lock released immediately after snapshot
+- `WithPrev::save()`/`restore()` changed from `= .clone()` to `clone_from()` for in-place cloning, avoiding reallocation on BTreeMap/Vec fields
+- `Layout::len()` simplified to use `max()` chaining instead of cascading start-position tracking
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.6.8...v0.7.0)
+
+## [v0.6.8](https://github.com/anydb-rs/anydb/releases/tag/v0.6.8) - 2026-02-04
+
+### New Features
+#### `vecdb`
+- Added `compute_weighted_average_of_others()` method to `EagerVec` for computing weighted averages across multiple source vecs — takes parallel slices of weight and value vecs, computing `sum(weight_i * value_i) / sum(weight_i)` for each index, with zero result when total weight is zero ([source](https://github.com/anydb-rs/anydb/blob/v0.6.8/crates/vecdb/src/variants/eager/aggregates.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.6.7...v0.6.8)
+
+## [v0.6.7](https://github.com/anydb-rs/anydb/releases/tag/v0.6.7) - 2026-02-03
+
+### Bug Fixes
+#### `vecdb`
+- Capped `RollingWindow` pre-allocation to 1024 entries to prevent capacity overflow when window size is very large (e.g., `usize::MAX`) ([source](https://github.com/anydb-rs/anydb/blob/v0.6.7/crates/vecdb/src/variants/eager/statistics.rs))
+
+### Internal Changes
+#### `workspace`
+- Changed dependency outdated check CI schedule from daily to weekly on Mondays ([source](https://github.com/anydb-rs/anydb/blob/v0.6.7/.github/workflows/outdated.yml))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.6.6...v0.6.7)
+
+## [v0.6.6](https://github.com/anydb-rs/anydb/releases/tag/v0.6.6) - 2026-02-03
+
+### Breaking Changes
+#### `vecdb`
+- Renamed `sma` parameter to `window` in `compute_rolling_sma()` ([source](https://github.com/anydb-rs/anydb/blob/v0.6.6/crates/vecdb/src/variants/eager/statistics.rs))
+- Changed computed version seed from `Version::ONE` to `Version::new(2)` in `compute_rolling_sum()` and `compute_rolling_sma()`, forcing recomputation of previously cached values
+
+### New Features
+#### `vecdb`
+- Added `compute_rolling_median()` method to `EagerVec` for computing rolling median over a configurable window size ([source](https://github.com/anydb-rs/anydb/blob/v0.6.6/crates/vecdb/src/variants/eager/statistics.rs))
+
+### Internal Changes
+#### `vecdb`
+- Introduced `RollingWindow<T>` helper struct encapsulating rolling window buffer management with `push()`, `push_and_pop()`, `init_from_source()`, and `len()` methods ([source](https://github.com/anydb-rs/anydb/blob/v0.6.6/crates/vecdb/src/variants/eager/statistics.rs))
+- Added `RollingWindow<f32>` specialization with `median()` for computing window median and `sma()` for incremental simple moving average calculation
+- Refactored `compute_rolling_sum()` and `compute_rolling_sma()` to use `RollingWindow` helper, replacing manual `VecDeque` buffer management
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.6.5...v0.6.6)
+
+## [v0.6.5](https://github.com/anydb-rs/anydb/releases/tag/v0.6.5) - 2026-02-03
+
+### New Features
+#### `vecdb`
+- Made `compute_change()` on `LookbackEagerVec` generic over source type, allowing the source vec to have a different value type than the output — source values are converted via `Into<V::T>` before subtraction, enabling unsigned-to-signed change calculations (e.g., `u64` source producing `i64` deltas) ([source](https://github.com/anydb-rs/anydb/blob/v0.6.5/crates/vecdb/src/variants/eager/lookback.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.6.4...v0.6.5)
+
+## [v0.6.4](https://github.com/anydb-rs/anydb/releases/tag/v0.6.4) - 2026-01-30
+
+### Bug Fixes
+#### `rawdb`
+- Fixed race condition in `set_min_len()` where concurrent threads could cause file truncation — added double-check locking pattern that re-verifies file length after acquiring the mutex ([source](https://github.com/anydb-rs/anydb/blob/v0.6.4/crates/rawdb/src/lib.rs))
+
+#### `vecdb`
+- Fixed potential underflow in `FromCoarser::max_from()` when `len` is 0 by returning 0 instead of computing `len - 1` ([source](https://github.com/anydb-rs/anydb/blob/v0.6.4/crates/vecdb/src/traits/from_coarser.rs))
+- Fixed `FromCoarser::inclusive_range_from()` to return an empty range for empty data instead of producing an invalid range ([source](https://github.com/anydb-rs/anydb/blob/v0.6.4/crates/vecdb/src/traits/from_coarser.rs))
+- Added vec name to `IndexTooHigh` error messages for easier debugging across all vec variants ([source](https://github.com/anydb-rs/anydb/blob/v0.6.4/crates/vecdb/src/error.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.6.3...v0.6.4)
+
+## [v0.6.3](https://github.com/anydb-rs/anydb/releases/tag/v0.6.3) - 2026-01-28
+
+### New Features
+#### `vecdb`
+- Added `get_any_or_read_unwrap()` method to `RawVecInner` for getting a value from any layer with automatic unwrapping, panicking if the read fails or value doesn't exist ([source](https://github.com/anydb-rs/anydb/blob/v0.6.3/crates/vecdb/src/variants/raw/inner/mod.rs))
+- Added `get_any_or_read_at_unwrap()` method to `RawVecInner` for getting a value by usize index from any layer with automatic unwrapping ([source](https://github.com/anydb-rs/anydb/blob/v0.6.3/crates/vecdb/src/variants/raw/inner/mod.rs))
+
+### Internal Changes
+#### `vecdb_bench`
+- Removed fjall v2 benchmark entirely, consolidating to fjall v3 only ([source](https://github.com/anydb-rs/anydb/blob/v0.6.3/crates/vecdb_bench/src/fjall_impl.rs))
+- Renamed `Fjall3Bench` to `FjallBench` and `Database::Fjall3` to `Database::Fjall` to reflect single-version dependency
+
+#### `workspace`
+- Added GitHub Actions workflow for daily automated dependency freshness checks using `cargo outdated` ([source](https://github.com/anydb-rs/anydb/blob/v0.6.3/.github/workflows/outdated.yml))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.6.2...v0.6.3)
+
 ## [v0.6.2](https://github.com/anydb-rs/anydb/releases/tag/v0.6.2) - 2026-01-26
 
 ### New Features
