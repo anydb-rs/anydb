@@ -1686,7 +1686,8 @@ mod integration {
             hasher.update(&contents);
         }
 
-        Ok(format!("{:x}", hasher.finalize()))
+        let hash = hasher.finalize();
+        Ok(hash.iter().map(|b| format!("{:02x}", b)).collect())
     }
 
     /// Comprehensive integration test: rollback + flush + reopen with integrity verification.

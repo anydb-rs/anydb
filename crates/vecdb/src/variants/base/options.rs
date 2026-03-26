@@ -3,7 +3,7 @@ use rawdb::Database;
 use crate::Version;
 
 /// Options for importing or creating stored vectors.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct ImportOptions<'a> {
     /// Database to store the vector in.
     pub db: &'a Database,

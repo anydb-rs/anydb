@@ -80,3 +80,9 @@ pub enum Error {
     #[error("Hole punching is not supported on this platform")]
     HolePunchUnsupported,
 }
+
+impl Error {
+    pub fn other(e: impl ToString) -> Self {
+        Self::InvariantViolation(e.to_string())
+    }
+}

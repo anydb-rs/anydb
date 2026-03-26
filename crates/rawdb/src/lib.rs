@@ -9,11 +9,12 @@ use std::{
         Arc, Weak,
         atomic::{AtomicUsize, Ordering},
     },
+    thread::{self, JoinHandle},
 };
 
 use log::{debug, trace};
 use memmap2::MmapMut;
-use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 mod disk_usage;
 pub mod error;
@@ -47,12 +48,11 @@ pub const PAGE_SIZE_MINUS_1: usize = PAGE_SIZE - 1;
 pub const GiB: usize = 1024 * 1024 * 1024;
 
 /// Memory-mapped database with region-based storage and hole punching.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 #[must_use = "Database should be stored to keep the database open"]
 pub struct Database(Arc<DatabaseInner>);
 
 /// Lock ordering: layout → regions → mmap → file → meta → dirty_bounds.
-#[derive(Debug)]
 struct DatabaseInner {
     path: PathBuf,
     name: String,
@@ -61,6 +61,7 @@ struct DatabaseInner {
     mmap: RwLock<MmapMut>,
     file: RwLock<File>,
     cached_file_len: AtomicUsize,
+    bg_tasks: Mutex<Vec<JoinHandle<Result<()>>>>,
 }
 
 impl Database {
@@ -105,6 +106,7 @@ impl Database {
             mmap: RwLock::new(mmap),
             file: RwLock::new(file),
             cached_file_len: AtomicUsize::new(file_len),
+            bg_tasks: Mutex::new(Vec::new()),
         }));
 
         db.regions_mut().fill(&db)?;
@@ -383,6 +385,27 @@ impl Database {
         r
     }
 
+    /// Runs `f` on a background thread without incrementing the Arc refcount,
+    /// so `strong_count` reflects only real owners.
+    /// Call `sync_bg_tasks()` before the next write to this database.
+    pub fn run_bg(&self, f: impl FnOnce(&Self) -> Result<()> + Send + 'static) {
+        use std::mem::ManuallyDrop;
+        // Safety: sync_bg_tasks (called explicitly or from Drop at strong_count == 1)
+        // joins this thread before the Arc is deallocated.
+        // ManuallyDrop prevents the refcount decrement we never incremented.
+        let db = ManuallyDrop::new(unsafe { Self(Arc::from_raw(Arc::as_ptr(&self.0))) });
+        self.0.bg_tasks.lock().push(thread::spawn(move || f(&db)));
+    }
+
+    /// Joins all pending background tasks on this database.
+    pub fn sync_bg_tasks(&self) -> Result<()> {
+        let handles: Vec<_> = self.0.bg_tasks.lock().drain(..).collect();
+        for handle in handles {
+            handle.join().unwrap()?;
+        }
+        Ok(())
+    }
+
     fn punch_holes(&self) -> Result<()> {
         let layout = self.layout();
 
@@ -578,6 +601,14 @@ impl Database {
     #[inline]
     pub fn name(&self) -> &str {
         &self.0.name
+    }
+}
+
+impl Drop for Database {
+    fn drop(&mut self) {
+        if Arc::strong_count(&self.0) == 1 {
+            let _ = self.sync_bg_tasks();
+        }
     }
 }
 

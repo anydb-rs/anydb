@@ -72,7 +72,7 @@ where
     pub fn compute_transform<A, F>(
         &mut self,
         max_from: V::I,
-        other: &impl ReadableVec<V::I, A>,
+        source: &impl ReadableVec<V::I, A>,
         mut t: F,
         exit: &Exit,
     ) -> Result<()>
@@ -80,15 +80,15 @@ where
         A: VecValue,
         F: FnMut((V::I, A, &Self)) -> (V::I, V::T),
     {
-        self.compute_init(other.version(), max_from, exit, |this| {
+        self.compute_init(source.version(), max_from, exit, |this| {
             let skip = this.len();
-            let end = this.batch_end(other.len());
+            let end = this.batch_end(source.len());
             if skip >= end {
                 return Ok(());
             }
 
             let mut i = skip;
-            other.try_fold_range_at(skip, end, (), |(), b: A| {
+            source.try_fold_range_at(skip, end, (), |(), b: A| {
                 let (idx, v) = t((V::I::from(i), b, &*this));
                 i += 1;
                 this.checked_push(idx, v)

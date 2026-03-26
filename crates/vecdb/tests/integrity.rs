@@ -137,7 +137,8 @@ fn compute_directory_hash(dir: &Path) -> Result<String, Box<dyn std::error::Erro
         hasher.update(&contents);
     }
 
-    Ok(format!("{:x}", hasher.finalize()))
+    let hash = hasher.finalize();
+    Ok(hash.iter().map(|b| format!("{:02x}", b)).collect())
 }
 
 /// Generic test function for data integrity with rollback, flush, and reopen

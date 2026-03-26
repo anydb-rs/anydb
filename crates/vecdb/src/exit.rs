@@ -8,11 +8,7 @@ use std::{
 };
 
 use log::info;
-use parking_lot::{Mutex, RwLock, RwLockReadGuard};
-
-pub type ExitGuard<'a> = RwLockReadGuard<'a, ()>;
-
-type Callbacks = Arc<Mutex<Vec<Box<dyn Fn() + Send + Sync>>>>;
+use parking_lot::{Mutex, RwLock};
 
 static SIGNAL_RECEIVED: AtomicBool = AtomicBool::new(false);
 static SIGNAL_PIPE: AtomicI32 = AtomicI32::new(-1);
@@ -28,6 +24,8 @@ extern "C" fn signal_handler(_sig: libc::c_int) {
         unsafe { libc::write(fd, b"x".as_ptr().cast(), 1) };
     }
 }
+
+type Callbacks = Arc<Mutex<Vec<Box<dyn Fn() + Send + Sync>>>>;
 
 /// Graceful shutdown coordinator for ensuring data consistency during program exit.
 ///
@@ -104,7 +102,36 @@ impl Exit {
 
     /// Acquires a read lock to protect a critical section from shutdown.
     /// The shutdown thread will wait for all read locks to be released before exiting.
-    pub fn lock(&self) -> ExitGuard<'_> {
-        self.lock.read()
+    /// Returns an owned guard that is Send + 'static (can be moved to background threads).
+    pub fn lock(&self) -> ExitGuard {
+        ExitGuard::new(&self.lock)
     }
 }
+
+/// Owned read guard for [`Exit`]. Can be moved across threads.
+///
+/// Safety: parking_lot's `RawRwLock` supports cross-thread unlock,
+/// so sending this guard to another thread is safe.
+pub struct ExitGuard(Arc<RwLock<()>>);
+
+impl ExitGuard {
+    fn new(lock: &Arc<RwLock<()>>) -> Self {
+        let arc = Arc::clone(lock);
+        use parking_lot::lock_api::RawRwLock as _;
+        // Safety: we release the lock in Drop.
+        unsafe { arc.raw().lock_shared() };
+        Self(arc)
+    }
+}
+
+impl Drop for ExitGuard {
+    fn drop(&mut self) {
+        use parking_lot::lock_api::RawRwLock as _;
+        // Safety: we acquired the shared lock in `new`, so we must release it.
+        unsafe { self.0.raw().unlock_shared() };
+    }
+}
+
+// Safety: parking_lot's RawRwLock supports unlock from a different thread than lock.
+unsafe impl Send for ExitGuard {}
+unsafe impl Sync for ExitGuard {}
