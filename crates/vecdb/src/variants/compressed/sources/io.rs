@@ -10,7 +10,7 @@ use rawdb::{Region, RegionMetadata};
 use crate::{AnyStoredVec, BUFFER_SIZE, Pages, VecIndex, VecValue, unlikely};
 
 use super::super::inner::{
-    CompressionStrategy, MAX_UNCOMPRESSED_PAGE_SIZE, ReadWriteCompressedVec,
+    CompressionStrategy, MAX_UNCOMPRESSED_PAGE_SIZE, Page, ReadWriteCompressedVec,
 };
 
 /// Buffered file I/O source for reading stored compressed data.
@@ -127,17 +127,11 @@ where
         Some(())
     }
 
-    fn decompress_from_buffer(
-        &mut self,
-        page_index: usize,
-        compressed_offset: u64,
-        compressed_size: usize,
-        values_count: usize,
-    ) -> Option<()> {
-        let in_buffer_offset = (compressed_offset - self.buffer_start_offset) as usize;
-        let compressed_data = &self.buffer[in_buffer_offset..in_buffer_offset + compressed_size];
+    fn decode_from_buffer(&mut self, page_index: usize, page: Page) -> Option<()> {
+        let in_buffer_offset = (page.start - self.buffer_start_offset) as usize;
+        let data = &self.buffer[in_buffer_offset..in_buffer_offset + page.bytes as usize];
 
-        S::decompress_into(compressed_data, values_count, &mut self.decoded_values).ok()?;
+        S::decode_page_into(data, &page, &mut self.decoded_values).ok()?;
         self.decoded_page_index = page_index;
 
         Some(())
@@ -148,28 +142,21 @@ where
             return None;
         }
 
-        let page = self.pages.get(page_index)?;
-        let compressed_size = page.bytes as usize;
-        let compressed_offset = page.start;
-        let values_count = page.values as usize;
+        // Copy page metadata to release the borrow on self.pages
+        let page = *self.pages.get(page_index)?;
 
         if self.buffer_len > 0 {
             let buffer_end_offset = self.buffer_start_offset + self.buffer_len as u64;
 
-            if compressed_offset >= self.buffer_start_offset
-                && compressed_offset + compressed_size as u64 <= buffer_end_offset
+            if page.start >= self.buffer_start_offset
+                && page.end() <= buffer_end_offset
             {
-                return self.decompress_from_buffer(
-                    page_index,
-                    compressed_offset,
-                    compressed_size,
-                    values_count,
-                );
+                return self.decode_from_buffer(page_index, page);
             }
         }
 
         self.refill_buffer(page_index)?;
-        self.decompress_from_buffer(page_index, compressed_offset, compressed_size, values_count)
+        self.decode_from_buffer(page_index, page)
     }
 
     /// Fold all remaining elements — tight pointer loop per page so LLVM can vectorize.

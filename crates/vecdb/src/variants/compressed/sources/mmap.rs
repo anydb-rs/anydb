@@ -70,14 +70,9 @@ where
     #[inline(always)]
     fn decode_page_into_buf(&mut self, page_index: usize) -> Option<()> {
         let page = self.pages.get(page_index)?;
-        let len = page.bytes as usize;
-        let offset = page.start as usize;
-        let values_count = page.values as usize;
-
-        let compressed_data = self.reader.unchecked_read(offset, len);
-        S::decompress_into(compressed_data, values_count, &mut self.page_buf).ok()?;
+        let data = self.reader.unchecked_read(page.start as usize, page.bytes as usize);
+        S::decode_page_into(data, page, &mut self.page_buf).ok()?;
         self.page_buf_idx = page_index;
-
         Some(())
     }
 

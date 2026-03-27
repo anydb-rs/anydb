@@ -5,8 +5,8 @@ use parking_lot::RwLock;
 use rawdb::{Database, Reader, Region};
 
 use crate::{
-    AnyStoredVec, AnyVec, CompressedIoSource, CompressedMmapSource, Error, Format, HEADER_OFFSET,
-    Header, ImportOptions, MMAP_CROSSOVER_BYTES, ReadWriteBaseVec, ReadableVec, Result, Stamp,
+    AnyStoredVec, AnyVec, CompressedIoSource, CompressedMmapSource, Error, Format, Header,
+    ImportOptions, MMAP_CROSSOVER_BYTES, ReadWriteBaseVec, ReadableVec, Result, Stamp,
     TypedVec, VecIndex, VecValue, Version, WritableVec, likely, short_type_name, unlikely,
     vec_region_name_with,
 };
@@ -119,25 +119,8 @@ where
         let page = pages
             .get(page_index)
             .expect("page should exist after bounds check");
-        let len = page.bytes as usize;
-        let offset = page.start as usize;
-
-        let compressed_data = reader.unchecked_read(offset, len);
-        Self::decompress_bytes(compressed_data, page.values as usize)
-    }
-
-    #[inline]
-    fn decompress_bytes(compressed_data: &[u8], expected_len: usize) -> Result<Vec<T>> {
-        let vec = S::decompress(compressed_data, expected_len)?;
-
-        if likely(vec.len() == expected_len) {
-            return Ok(vec);
-        }
-
-        Err(Error::DecompressionMismatch {
-            expected_len,
-            actual_len: vec.len(),
-        })
+        let data = reader.unchecked_read(page.start as usize, page.bytes as usize);
+        S::decode_page(data, page)
     }
 
     #[inline]
@@ -160,6 +143,41 @@ where
     #[inline(always)]
     pub(crate) fn page_index_to_index(page_index: usize) -> usize {
         page_index * Self::PER_PAGE
+    }
+
+    /// Reads stored page data into a buffer. Used by both ReadWrite and ReadOnly read_into_at.
+    #[inline(always)]
+    pub(crate) fn read_stored_pages_into(
+        reader: &Reader,
+        pages: &Pages,
+        from: usize,
+        to: usize,
+        buf: &mut Vec<T>,
+    ) {
+        let start_page = Self::index_to_page_index(from);
+        let end_page = Self::index_to_page_index(to - 1);
+        for page_idx in start_page..=end_page {
+            let page_start = Self::page_index_to_index(page_idx);
+            let page = pages
+                .get(page_idx)
+                .expect("page should exist after bounds check");
+            let data = reader.unchecked_read(page.start as usize, page.bytes as usize);
+            let values_count = page.values_count() as usize;
+            let local_from = from.saturating_sub(page_start);
+            let local_to = (to - page_start).min(values_count);
+
+            if !page.is_raw() && likely(local_from == 0) {
+                let before = buf.len();
+                S::decompress_append(data, values_count, buf)
+                    .expect("decompression failed in read_into_at");
+                buf.truncate(before + local_to);
+            } else {
+                let mut page_buf = Vec::with_capacity(values_count);
+                S::decode_page_into(data, page, &mut page_buf)
+                    .expect("page decode failed in read_into_at");
+                buf.extend_from_slice(&page_buf[local_from..local_to]);
+            }
+        }
     }
 
     pub(crate) fn pages_region_name(&self) -> String {
@@ -423,26 +441,52 @@ where
                     },
                 )
             } else {
-                let truncate_at = pages
-                    .last()
-                    .map_or(HEADER_OFFSET as u64, |page| page.start + page.bytes as u64);
-                (truncate_at, starting_page_index, None)
+                (pages.next_start(), starting_page_index, None)
             }
         };
         // Pages lock released — decompression happens without blocking readers
 
-        // Phase 1b: Decompress partial page (if needed) outside lock
+        // Fast path: append to existing raw page without reading it back.
+        // When the last page is raw, not truncated, and won't overflow, just
+        // write the new pushed bytes at the end of the existing page data.
+        if let Some((page, partial_len)) = partial_page
+            && page.is_raw()
+            && partial_len == page.values_count() as usize
+            && partial_len + pushed_len < Self::PER_PAGE
+        {
+            let taken = mem::take(self.base.mut_pushed());
+            let raw = S::values_to_bytes(&taken);
+            let append_at = page.end() as usize;
+            self.region().truncate_write(append_at, &raw)?;
+
+            let mut pages = self.pages.write();
+            pages.truncate(starting_page_index);
+            pages.checked_push(
+                starting_page_index,
+                Page::raw(
+                    page.start,
+                    page.bytes + raw.len() as u32,
+                    (partial_len + pushed_len) as u32,
+                ),
+            )?;
+            self.base.update_stored_len(stored_len + pushed_len);
+            pages.flush()?;
+            return Ok(true);
+        }
+
+        // Phase 1b: Read partial page (if needed) outside lock
         let mut values = if let Some((page, partial_len)) = partial_page {
             let reader = self.create_reader();
-            let compressed_data = reader.unchecked_read(page.start as usize, page.bytes as usize);
-            let mut page_values = Self::decompress_bytes(compressed_data, page.values as usize)?;
+            let data = reader.unchecked_read(page.start as usize, page.bytes as usize);
+            let mut page_values = S::decode_page(data, &page)?;
             page_values.truncate(partial_len);
             page_values
         } else {
             vec![]
         };
 
-        // Phase 2: Compress (no locks held)
+        // Phase 2: Encode pages (no locks held)
+        // Full pages are compressed; the last partial page is stored raw.
         let taken = mem::take(self.base.mut_pushed());
         if values.is_empty() {
             values = taken;
@@ -452,11 +496,17 @@ where
 
         let num_pages = values.len().div_ceil(Self::PER_PAGE);
         let mut buf = Vec::with_capacity(values.len() * Self::SIZE_OF_T);
-        let mut page_sizes = Vec::with_capacity(num_pages);
+        let mut page_sizes: Vec<(usize, usize, bool)> = Vec::with_capacity(num_pages);
         for chunk in values.chunks(Self::PER_PAGE) {
-            let compressed = Self::compress_page(chunk)?;
-            page_sizes.push((compressed.len(), chunk.len()));
-            buf.extend_from_slice(&compressed);
+            if chunk.len() == Self::PER_PAGE {
+                let compressed = Self::compress_page(chunk)?;
+                page_sizes.push((compressed.len(), chunk.len(), false));
+                buf.extend_from_slice(&compressed);
+            } else {
+                let raw = S::values_to_bytes(chunk);
+                page_sizes.push((raw.len(), chunk.len(), true));
+                buf.extend_from_slice(&raw);
+            }
         }
 
         // Phase 3: Write to region first (without holding pages lock to avoid deadlock)
@@ -465,22 +515,14 @@ where
         let mut pages = self.pages.write();
         pages.truncate(starting_page_index);
 
-        for (i, &(compressed_len, values_len)) in page_sizes.iter().enumerate() {
-            let page_index = starting_page_index + i;
-
-            let start = if page_index != 0 {
-                let prev = pages
-                    .get(page_index - 1)
-                    .ok_or(Error::ExpectVecToHaveIndex)?;
-                prev.start + prev.bytes as u64
+        for (i, &(byte_len, values_len, is_raw)) in page_sizes.iter().enumerate() {
+            let start = pages.next_start();
+            let page = if is_raw {
+                Page::raw(start, byte_len as u32, values_len as u32)
             } else {
-                HEADER_OFFSET as u64
+                Page::compressed(start, byte_len as u32, values_len as u32)
             };
-
-            pages.checked_push(
-                page_index,
-                Page::new(start, compressed_len as u32, values_len as u32),
-            )?;
+            pages.checked_push(starting_page_index + i, page)?;
         }
 
         self.base.update_stored_len(stored_len + pushed_len);
@@ -606,34 +648,11 @@ where
         buf.reserve(to - from);
         let stored_len = self.stored_len();
 
-        // Stored portion: decompress pages directly into buf when possible.
         if from < stored_len {
             let stored_to = to.min(stored_len);
             let reader = self.create_reader();
             let pages = self.pages.read();
-            let start_page = Self::index_to_page_index(from);
-            let end_page = Self::index_to_page_index(stored_to - 1);
-            for page_idx in start_page..=end_page {
-                let page_start = Self::page_index_to_index(page_idx);
-                let page = pages
-                    .get(page_idx)
-                    .expect("page should exist after bounds check");
-                let compressed = reader.unchecked_read(page.start as usize, page.bytes as usize);
-                let local_from = from.saturating_sub(page_start);
-                let local_to = (stored_to - page_start).min(page.values as usize);
-
-                if likely(local_from == 0) {
-                    let before = buf.len();
-                    S::decompress_append(compressed, page.values as usize, buf)
-                        .expect("decompression failed in read_into_at");
-                    buf.truncate(before + local_to);
-                } else {
-                    let mut page_buf = Vec::with_capacity(Self::PER_PAGE);
-                    S::decompress_into(compressed, page.values as usize, &mut page_buf)
-                        .expect("decompression failed in read_into_at");
-                    buf.extend_from_slice(&page_buf[local_from..local_to]);
-                }
-            }
+            Self::read_stored_pages_into(&reader, &pages, from, stored_to, buf);
         }
 
         if to > stored_len {

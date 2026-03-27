@@ -1,6 +1,6 @@
 use rawdb::{Database, Region, unlikely};
 
-use crate::{Bytes, Error, Result};
+use crate::{Bytes, Error, HEADER_OFFSET, Result};
 
 use super::Page;
 
@@ -102,9 +102,14 @@ impl Pages {
         page
     }
 
+    pub fn next_start(&self) -> u64 {
+        self.last()
+            .map_or(HEADER_OFFSET as u64, |page| page.end())
+    }
+
     pub fn stored_len(&self, per_page: usize) -> usize {
         if let Some(last) = self.last() {
-            (self.len() - 1) * per_page + last.values as usize
+            (self.len() - 1) * per_page + last.values_count() as usize
         } else {
             0
         }

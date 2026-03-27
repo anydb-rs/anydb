@@ -4,10 +4,10 @@ use parking_lot::RwLock;
 
 use crate::{
     AnyVec, CompressedIoSource, CompressedMmapSource, MMAP_CROSSOVER_BYTES, ReadOnlyBaseVec,
-    ReadableVec, TypedVec, VecIndex, VecValue, Version, likely, short_type_name, vec_region_name,
+    ReadableVec, TypedVec, VecIndex, VecValue, Version, short_type_name, vec_region_name,
 };
 
-use super::{CompressionStrategy, MAX_UNCOMPRESSED_PAGE_SIZE, Pages};
+use super::{CompressionStrategy, Pages, ReadWriteCompressedVec};
 
 /// Lean read-only view of a compressed vector (~48 bytes).
 ///
@@ -38,18 +38,6 @@ where
     T: VecValue,
     S: CompressionStrategy<T>,
 {
-    const PER_PAGE: usize = MAX_UNCOMPRESSED_PAGE_SIZE / size_of::<T>();
-
-    #[inline(always)]
-    fn index_to_page_index(index: usize) -> usize {
-        index / Self::PER_PAGE
-    }
-
-    #[inline(always)]
-    fn page_index_to_index(page_index: usize) -> usize {
-        page_index * Self::PER_PAGE
-    }
-
     #[inline(always)]
     fn fold_source<B, F: FnMut(B, T) -> B>(
         &self,
@@ -175,29 +163,9 @@ where
 
         let reader = self.base.region().create_reader();
         let pages = self.pages.read();
-        let start_page = Self::index_to_page_index(from);
-        let end_page = Self::index_to_page_index(to - 1);
-        for page_idx in start_page..=end_page {
-            let page_start = Self::page_index_to_index(page_idx);
-            let page = pages
-                .get(page_idx)
-                .expect("page should exist after bounds check");
-            let compressed = reader.unchecked_read(page.start as usize, page.bytes as usize);
-            let local_from = from.saturating_sub(page_start);
-            let local_to = (to - page_start).min(page.values as usize);
-
-            if likely(local_from == 0) {
-                let before = buf.len();
-                S::decompress_append(compressed, page.values as usize, buf)
-                    .expect("decompression failed in read_into_at");
-                buf.truncate(before + local_to);
-            } else {
-                let mut page_buf = Vec::with_capacity(Self::PER_PAGE);
-                S::decompress_into(compressed, page.values as usize, &mut page_buf)
-                    .expect("decompression failed in read_into_at");
-                buf.extend_from_slice(&page_buf[local_from..local_to]);
-            }
-        }
+        ReadWriteCompressedVec::<I, T, S>::read_stored_pages_into(
+            &reader, &pages, from, to, buf,
+        );
     }
 
     #[inline]

@@ -10,6 +10,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
     thread::{self, JoinHandle},
+    time::{Duration, Instant},
 };
 
 use log::{debug, trace};
@@ -365,10 +366,21 @@ impl Database {
         Ok(dirty_regions.len())
     }
 
+    /// Gives the OS time to write dirty mmap pages before fsyncing.
+    /// Intended for background tasks where the delay is invisible.
+    pub fn compact_deferred(&self, delay: Duration) -> Result<()> {
+        thread::sleep(delay);
+        self.compact()
+    }
+
+    /// Like `compact_deferred` with a 5-second default delay.
+    pub fn compact_deferred_default(&self) -> Result<()> {
+        self.compact_deferred(Duration::from_secs(5))
+    }
+
     /// Flushes, then punches holes to reclaim disk space.
     #[inline]
     pub fn compact(&self) -> Result<()> {
-        use std::time::Instant;
         let i = Instant::now();
         self.flush()?;
         let flush_time = i.elapsed();

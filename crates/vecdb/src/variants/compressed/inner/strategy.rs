@@ -2,6 +2,8 @@ use rawdb::likely;
 
 use crate::{Error, Result, ValueStrategy};
 
+use super::Page;
+
 /// Trait for compression strategies used by ReadWriteCompressedVec.
 pub trait CompressionStrategy<T>: ValueStrategy<T> {
     /// Compress a slice of values into bytes.
@@ -26,6 +28,35 @@ pub trait CompressionStrategy<T>: ValueStrategy<T> {
         let tmp = Self::decompress(bytes, expected_len)?;
         dst.extend(tmp);
         Ok(())
+    }
+
+    /// Decode page data (raw or compressed) into a new Vec.
+    #[inline]
+    fn decode_page(data: &[u8], page: &Page) -> Result<Vec<T>> {
+        let n = page.values_count() as usize;
+        if page.is_raw() {
+            Self::bytes_to_values(data, n)
+        } else {
+            let vec = Self::decompress(data, n)?;
+            if likely(vec.len() == n) {
+                return Ok(vec);
+            }
+            Err(Error::DecompressionMismatch {
+                expected_len: n,
+                actual_len: vec.len(),
+            })
+        }
+    }
+
+    /// Decode page data (raw or compressed) into an existing buffer (replace semantics).
+    #[inline]
+    fn decode_page_into(data: &[u8], page: &Page, dst: &mut Vec<T>) -> Result<()> {
+        let n = page.values_count() as usize;
+        if page.is_raw() {
+            Self::bytes_to_values_into(data, n, dst)
+        } else {
+            Self::decompress_into(data, n, dst)
+        }
     }
 
     /// Serializes a slice of values to bytes.
