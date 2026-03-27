@@ -7,6 +7,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.8.0](https://github.com/anydb-rs/anydb/releases/tag/v0.8.0) - 2026-03-26
+
+### Breaking Changes
+#### `rawdb`
+- `Database` no longer implements `Debug` — the addition of background task handles (`JoinHandle`) to the inner struct makes `Debug` derivation impossible ([source](https://github.com/anydb-rs/anydb/blob/v0.8.0/crates/rawdb/src/lib.rs))
+
+#### `vecdb`
+- `ExitGuard` changed from a borrowed type alias (`RwLockReadGuard<'_, ()>`) to an owned struct — it no longer carries a lifetime parameter, so code depending on the concrete guard type or its lifetime will need updating ([source](https://github.com/anydb-rs/anydb/blob/v0.8.0/crates/vecdb/src/exit.rs))
+- `ImportOptions` no longer implements `Debug` ([source](https://github.com/anydb-rs/anydb/blob/v0.8.0/crates/vecdb/src/variants/base/options.rs))
+
+### New Features
+#### `rawdb`
+- Added `Database::run_bg()` for spawning background tasks that operate on the database without incrementing the Arc strong count — uses `ManuallyDrop` with a raw Arc pointer so `strong_count` reflects only real owners and drop semantics are preserved ([source](https://github.com/anydb-rs/anydb/blob/v0.8.0/crates/rawdb/src/lib.rs))
+- Added `Database::sync_bg_tasks()` to join all pending background tasks and propagate their errors; automatically called on drop when the last strong reference is released ([source](https://github.com/anydb-rs/anydb/blob/v0.8.0/crates/rawdb/src/lib.rs))
+- Added `Error::other()` convenience constructor that wraps any `ToString` value into an `InvariantViolation` error ([source](https://github.com/anydb-rs/anydb/blob/v0.8.0/crates/rawdb/src/error.rs))
+
+#### `vecdb`
+- `ExitGuard` is now `Send + Sync + 'static`, allowing exit guards to be moved to background threads — acquires and releases the raw `RwLock` directly for cross-thread safety ([source](https://github.com/anydb-rs/anydb/blob/v0.8.0/crates/vecdb/src/exit.rs))
+
+### Internal Changes
+#### `vecdb`
+- Renamed `other` parameter to `source` in `EagerVec::compute_transform` for clarity ([source](https://github.com/anydb-rs/anydb/blob/v0.8.0/crates/vecdb/src/variants/eager/transforms.rs))
+- Adapted test hash formatting in integrity and rollback tests for sha2 0.11 compatibility — uses manual per-byte hex formatting instead of the removed `LowerHex` impl on digest output ([source](https://github.com/anydb-rs/anydb/blob/v0.8.0/crates/vecdb/tests/integrity.rs))
+
+[View changes](https://github.com/anydb-rs/anydb/compare/v0.7.2...v0.8.0)
+
 ## [v0.7.2](https://github.com/anydb-rs/anydb/releases/tag/v0.7.2) - 2026-03-23
 
 ### New Features
