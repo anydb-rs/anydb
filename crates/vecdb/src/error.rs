@@ -53,7 +53,11 @@ pub enum Error {
         name: String,
     },
     #[error("Unexpected index: expected {expected}, got {got} ({name})")]
-    UnexpectedIndex { expected: usize, got: usize, name: String },
+    UnexpectedIndex {
+        expected: usize,
+        got: usize,
+        name: String,
+    },
     #[error("Expect vec to have index")]
     ExpectVecToHaveIndex,
     #[error("Failed to convert key to usize")]
@@ -65,7 +69,7 @@ pub enum Error {
     #[error("Stamp mismatch: file stamp {file:?} != vec stamp {vec:?}")]
     StampMismatch { file: Stamp, vec: Stamp },
     #[error("Corrupted region: invalid length {region_len}")]
-    CorruptedRegion { region_len: usize },
+    CorruptedRegion { name: String, region_len: usize },
     #[error("Decompression mismatch: expected {expected_len} values, got {actual_len}")]
     DecompressionMismatch {
         expected_len: usize,

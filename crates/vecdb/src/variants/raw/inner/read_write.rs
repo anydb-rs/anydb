@@ -82,7 +82,10 @@ where
         if region_len > HEADER_OFFSET
             && !(region_len - HEADER_OFFSET).is_multiple_of(Self::SIZE_OF_T)
         {
-            return Err(Error::CorruptedRegion { region_len });
+            return Err(Error::CorruptedRegion {
+                name: name.to_string(),
+                region_len,
+            });
         }
 
         let holes = db
@@ -829,11 +832,8 @@ where
         // Collect all indices that need change tracking: entries currently modified
         // AND entries that were in prev_updated but removed (e.g., by delete_at).
         // Without the latter, rollback after rollback loses track of deleted entries.
-        let all_keys: BTreeSet<usize> = updated
-            .keys()
-            .chain(prev_updated.keys())
-            .copied()
-            .collect();
+        let all_keys: BTreeSet<usize> =
+            updated.keys().chain(prev_updated.keys()).copied().collect();
 
         bytes.extend(all_keys.len().to_bytes());
         for &i in &all_keys {

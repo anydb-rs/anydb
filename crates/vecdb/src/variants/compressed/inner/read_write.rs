@@ -6,8 +6,8 @@ use rawdb::{Database, Reader, Region};
 
 use crate::{
     AnyStoredVec, AnyVec, CompressedIoSource, CompressedMmapSource, Error, Format, Header,
-    ImportOptions, MMAP_CROSSOVER_BYTES, ReadWriteBaseVec, ReadableVec, Result, Stamp,
-    TypedVec, VecIndex, VecValue, Version, WritableVec, likely, short_type_name, unlikely,
+    ImportOptions, MMAP_CROSSOVER_BYTES, ReadWriteBaseVec, ReadableVec, Result, Stamp, TypedVec,
+    VecIndex, VecValue, Version, WritableVec, likely, short_type_name, unlikely,
     vec_region_name_with,
 };
 
@@ -411,6 +411,7 @@ where
             let real_stored_len = pages.stored_len(Self::PER_PAGE);
             if stored_len > real_stored_len {
                 return Err(Error::CorruptedRegion {
+                    name: self.name().to_string(),
                     region_len: real_stored_len,
                 });
             }
@@ -422,6 +423,7 @@ where
             let starting_page_index = Self::index_to_page_index(stored_len);
             if starting_page_index > pages.len() {
                 return Err(Error::CorruptedRegion {
+                    name: self.name().to_string(),
                     region_len: pages.len(),
                 });
             }

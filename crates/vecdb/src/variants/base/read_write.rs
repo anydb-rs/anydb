@@ -39,7 +39,10 @@ where
 
         let region_len = region.meta().len();
         if region_len > 0 && region_len < HEADER_OFFSET {
-            return Err(Error::CorruptedRegion { region_len });
+            return Err(Error::CorruptedRegion {
+                name: region.meta().id().to_string(),
+                region_len,
+            });
         }
 
         let header = if region_len == 0 {
