@@ -1,4 +1,5 @@
 use std::{
+    fmt,
     fs,
     io::{self, Read},
     iter::Sum,
@@ -95,5 +96,11 @@ impl Add<Version> for Version {
 impl Sum for Version {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
         iter.fold(Self::ZERO, Add::add)
+    }
+}
+
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
     }
 }
