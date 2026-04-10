@@ -5,7 +5,10 @@ use std::sync::{
 
 use parking_lot::RwLock;
 
-use crate::{AnyVec, ReadOnlyClone, ReadableVec, TypedVec, VecIndex, Version, short_type_name};
+use crate::{
+    AnyVec, ReadOnlyClone, ReadableBoxedVec, ReadableVec, StoredVec, TypedVec, VecIndex, Version,
+    short_type_name,
+};
 
 /// Budget gate for [`CachedVec`] materialization.
 ///
@@ -184,7 +187,7 @@ impl<V: TypedVec> AnyVec for CachedVec<V> {
 
     #[inline(always)]
     fn region_names(&self) -> Vec<String> {
-        Vec::new()
+        self.inner.region_names()
     }
 
     #[inline(always)]
@@ -203,16 +206,25 @@ impl<V: TypedVec> TypedVec for CachedVec<V> {
     type T = V::T;
 }
 
-impl<V> ReadOnlyClone for CachedVec<V>
-where
-    V: TypedVec + ReadOnlyClone,
-    V::ReadOnly: TypedVec,
-{
+impl<V: StoredVec> CachedVec<V> {
+    /// Boxes a read-only clone for use with type-erased APIs (e.g. LazyVecFrom1).
+    #[inline]
+    pub fn read_only_boxed_clone(&self) -> ReadableBoxedVec<V::I, V::T> {
+        Box::new(self.read_only_clone())
+    }
+}
+
+impl<V: StoredVec> ReadOnlyClone for CachedVec<V> {
     type ReadOnly = CachedVec<V::ReadOnly>;
 
     #[inline]
     fn read_only_clone(&self) -> Self::ReadOnly {
-        CachedVec::wrap(self.inner.read_only_clone())
+        CachedVec {
+            inner: self.inner.read_only_clone(),
+            cache: self.cache.clone(),
+            budget: self.budget,
+            access_count: self.access_count.clone(),
+        }
     }
 }
 
