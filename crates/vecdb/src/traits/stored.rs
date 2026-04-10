@@ -10,7 +10,10 @@ where
     Self::T: VecValue,
 {
     /// The concrete lean read-only type returned by [`read_only_clone`](StoredVec::read_only_clone).
-    type ReadOnly: ReadableVec<Self::I, Self::T> + Clone + 'static;
+    type ReadOnly: TypedVec<I = Self::I, T = Self::T>
+        + ReadableVec<Self::I, Self::T>
+        + Clone
+        + 'static;
 
     /// Creates a lean read-only clone that only carries fields needed for disk reads.
     fn read_only_clone(&self) -> Self::ReadOnly;

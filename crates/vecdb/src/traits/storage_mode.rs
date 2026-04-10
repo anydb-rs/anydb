@@ -1,4 +1,4 @@
-use crate::{ReadableVec, StoredVec};
+use crate::{ReadableVec, StoredVec, TypedVec};
 
 /// Marker trait that selects between read-write and read-only storage.
 ///
@@ -6,7 +6,9 @@ use crate::{ReadableVec, StoredVec};
 /// When `M = Rw`, the field is `V` itself (identity) with full write access.
 /// When `M = Ro`, the field is `V::ReadOnly` — a lean read-only clone (~40-48 bytes).
 pub trait StorageMode: 'static {
-    type Stored<V: StoredVec + 'static>: ReadableVec<V::I, V::T> + 'static;
+    type Stored<V: StoredVec + 'static>: TypedVec<I = V::I, T = V::T>
+        + ReadableVec<V::I, V::T>
+        + 'static;
 }
 
 /// Read-write mode. `Stored<V>` is the identity — the full read-write vec.
