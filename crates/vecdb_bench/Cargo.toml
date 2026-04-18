@@ -9,13 +9,13 @@ name = "vecdb_bench"
 path = "src/main.rs"
 
 [dependencies]
-fjall = "3.1.3"
+fjall = "3.1.4"
 heed = "0.22.1"
 redb = "4.0.0"
 vecdb = { workspace = true, features = ["pco"] }
 
 # Utilities
 rand = "0.10.1"
-rayon = "1.11"
+rayon = "1.12"
 anyhow = "1.0"
 byteorder = "1.5"
