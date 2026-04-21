@@ -1,11 +1,3 @@
-mod any_stored_vec;
-mod any_vec;
-mod change;
-mod readable;
-mod rollback;
-mod typed;
-mod writable;
-
 use std::{
     collections::{BTreeMap, BTreeSet},
     marker::PhantomData,
@@ -13,6 +5,14 @@ use std::{
 
 use log::info;
 use rawdb::{Reader, likely, unlikely};
+
+mod any_stored_vec;
+mod any_vec;
+mod change;
+mod readable;
+mod rollback;
+mod typed;
+mod writable;
 
 use crate::{
     AnyStoredVec, AnyVec, Bytes, Error, Format, HEADER_OFFSET, ImportOptions, MMAP_CROSSOVER_BYTES,

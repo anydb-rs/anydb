@@ -1,8 +1,8 @@
 use std::ops::{Add, Div, Mul, Sub};
 
-use crate::{Exit, ReadableVec, Result, StoredVec, VecValue};
+use crate::{CheckedSub, Exit, ReadableVec, Result, StoredVec, VecValue};
 
-use super::{CheckedSub, EagerVec};
+use super::super::EagerVec;
 
 impl<V> EagerVec<V>
 where

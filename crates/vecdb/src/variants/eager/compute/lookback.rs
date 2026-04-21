@@ -1,6 +1,9 @@
-use crate::{AnyVec, Error, Exit, ReadableVec, Result, StoredVec, VecIndex, VecValue, WritableVec};
+use crate::{
+    AnyVec, CheckedSub, Error, Exit, ReadableVec, Result, StoredVec, VecIndex, VecValue,
+    WritableVec,
+};
 
-use super::{CheckedSub, EagerVec};
+use super::super::EagerVec;
 
 impl<V> EagerVec<V>
 where

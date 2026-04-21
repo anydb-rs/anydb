@@ -5,10 +5,11 @@ use std::{
 };
 
 use crate::{
-    AnyVec, Error, Exit, ReadableVec, Result, StoredVec, VecIndex, VecValue, Version, WritableVec,
+    AnyVec, CheckedSub, Error, Exit, ReadableVec, Result, StoredVec, VecIndex, VecValue, Version,
+    WritableVec,
 };
 
-use super::{CheckedSub, EagerVec};
+use super::super::EagerVec;
 
 impl<V> EagerVec<V>
 where

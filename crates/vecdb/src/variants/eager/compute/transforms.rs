@@ -3,7 +3,7 @@ use crate::{
     Version, WritableVec,
 };
 
-use super::EagerVec;
+use super::super::EagerVec;
 
 impl<V> EagerVec<V>
 where

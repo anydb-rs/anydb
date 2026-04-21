@@ -5,11 +5,13 @@ pub use rawdb::{Database, Error as RawDBError, PAGE_SIZE, Reader, likely, unlike
 #[cfg(feature = "derive")]
 pub use vecdb_derive::{Bytes, Pco};
 
+mod base;
+mod bytes;
 mod cursor;
 mod error;
 mod exit;
 mod iterators;
-
+mod ops;
 mod stamp;
 mod traits;
 mod variants;
@@ -17,10 +19,13 @@ mod version;
 
 use variants::*;
 
+pub use base::*;
+pub use bytes::*;
 pub use cursor::*;
 pub use error::*;
 pub use exit::*;
 pub use iterators::*;
+pub use ops::*;
 pub use stamp::*;
 pub use traits::*;
 pub use variants::*;

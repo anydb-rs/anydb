@@ -17,6 +17,7 @@ mod storage_mode;
 mod stored;
 mod typed;
 mod value;
+mod value_strategy;
 pub(crate) mod writable;
 
 pub use any::*;
@@ -38,4 +39,5 @@ pub use storage_mode::*;
 pub use stored::*;
 pub use typed::*;
 pub use value::*;
+pub use value_strategy::*;
 pub use writable::*;

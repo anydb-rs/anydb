@@ -1,10 +1,10 @@
-mod any_vec;
-mod readable;
-mod typed;
-
 use std::{marker::PhantomData, sync::Arc};
 
 use parking_lot::RwLock;
+
+mod any_vec;
+mod readable;
+mod typed;
 
 use crate::{
     CompressedIoSource, CompressedMmapSource, MMAP_CROSSOVER_BYTES, ReadOnlyBaseVec, VecIndex,

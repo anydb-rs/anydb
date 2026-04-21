@@ -1,6 +1,4 @@
-use crate::VecValue;
-
-use super::Bytes;
+use crate::{Bytes, VecValue};
 
 /// Value trait for BytesVec.
 /// Extends RawVecValue with Bytes trait for custom serialization.

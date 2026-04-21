@@ -2,7 +2,7 @@ use std::ops::{Add, AddAssign};
 
 use crate::{AnyVec, Exit, ReadableVec, Result, StoredVec, VecIndex, VecValue, WritableVec};
 
-use super::EagerVec;
+use super::super::EagerVec;
 
 impl<V> EagerVec<V>
 where

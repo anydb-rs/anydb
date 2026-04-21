@@ -1,11 +1,11 @@
 use std::ops::Add;
 
 use crate::{
-    AnyVec, Error, Exit, ReadableVec, Result, StoredVec, VecIndex, VecValue, Version, WritableVec,
-    unlikely,
+    AnyVec, CheckedSub, Error, Exit, ReadableVec, Result, SaturatingAdd, StoredVec, VecIndex,
+    VecValue, Version, WritableVec, unlikely,
 };
 
-use super::{CheckedSub, EagerVec, SaturatingAdd};
+use super::super::EagerVec;
 
 impl<V> EagerVec<V>
 where

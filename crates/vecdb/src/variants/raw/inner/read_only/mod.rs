@@ -1,8 +1,8 @@
+use std::marker::PhantomData;
+
 mod any_vec;
 mod readable;
 mod typed;
-
-use std::marker::PhantomData;
 
 use crate::{
     Error, MMAP_CROSSOVER_BYTES, RawIoSource, RawMmapSource, ReadOnlyBaseVec, Result, Stamp,

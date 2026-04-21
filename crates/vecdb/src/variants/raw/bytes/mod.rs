@@ -3,11 +3,9 @@ use crate::{Format, ReadOnlyRawVec, impl_vec_wrapper};
 use super::ReadWriteRawVec;
 
 mod strategy;
-mod r#trait;
 mod value;
 
 pub use strategy::*;
-pub use r#trait::*;
 pub use value::*;
 
 /// Raw storage vector using explicit byte serialization in little-endian format.
