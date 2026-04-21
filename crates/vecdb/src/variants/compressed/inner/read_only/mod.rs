@@ -18,7 +18,7 @@ use super::{CompressionStrategy, Pages};
 /// Carries only the fields needed for disk reads: region, shared length,
 /// name/header metadata, and the pages index. No pushed buffer, no rollback state.
 ///
-/// Created via [`ReadWriteCompressedVec::read_only_clone`].
+/// Created via `ReadWriteCompressedVec::read_only_clone`.
 #[derive(Debug, Clone)]
 pub struct ReadOnlyCompressedVec<I, T, S> {
     pub(super) base: ReadOnlyBaseVec<I, T>,

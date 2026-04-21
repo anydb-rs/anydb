@@ -1,3 +1,5 @@
+//! Shared storage substrate used by every concrete vec variant.
+
 mod change;
 mod format;
 mod header;

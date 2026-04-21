@@ -1,5 +1,6 @@
 use crate::{AnyReadableVec, Formattable, ReadableVec, TypedVec, ValueWriter, VecIteratorWriter};
 
+/// Type-erased trait for vecs that can produce a boxed row-by-row [`ValueWriter`].
 pub trait AnyVecWithWriter: AnyReadableVec {
     /// Create a value writer that can be advanced row by row
     fn create_writer(&self, from: Option<i64>, to: Option<i64>) -> Box<dyn ValueWriter + '_>;

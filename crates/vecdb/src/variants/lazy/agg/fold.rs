@@ -1,11 +1,11 @@
 use crate::{ReadableVec, VecIndex, VecValue};
 
-/// Aggregation strategy for [`LazyAggVec`].
+/// Aggregation strategy for [`super::LazyAggVec`].
 ///
 /// Determines how values are produced from a source vec and a pre-materialized mapping.
 /// Implement this on a zero-sized marker type to define a custom strategy.
 ///
-/// Built-in strategy: [`Sparse`].
+/// Built-in strategy: `Sparse`.
 pub trait AggFold<O: VecValue, S1I: VecIndex, S2T: VecValue, S1T: VecValue>: 'static {
     fn try_fold<S: ReadableVec<S1I, S1T> + ?Sized, B, E, F: FnMut(B, O) -> Result<B, E>>(
         source: &S,

@@ -1,5 +1,7 @@
 use std::fmt;
 
+/// Fast formatting trait that writes UTF-8 bytes directly into a buffer,
+/// avoiding the `std::fmt` machinery for number types.
 pub trait Formattable {
     /// Write formatted UTF-8 bytes. Primary method — all others derive from it.
     fn write_to(&self, buf: &mut Vec<u8>);

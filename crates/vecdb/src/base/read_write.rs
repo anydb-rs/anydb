@@ -231,10 +231,12 @@ where
     }
 }
 
+/// Region name for a vec of type `I`, e.g. `"height/Height"`.
 pub fn vec_region_name_with<I: VecIndex>(name: &str) -> String {
     vec_region_name(name, I::to_string())
 }
 
+/// Formats a vec's region name as `{name}/{index}`.
 pub fn vec_region_name(name: &str, index: &str) -> String {
     format!("{name}/{index}")
 }

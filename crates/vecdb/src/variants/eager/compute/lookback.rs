@@ -330,7 +330,7 @@ where
         )
     }
 
-    /// For each index i, output[i] = source[window_starts[i]].
+    /// For each index `i`, `output[i] = source[window_starts[i]]`.
     /// Efficiently caches lookups since window_starts are monotonically non-decreasing.
     pub fn compute_lookback<A>(
         &mut self,

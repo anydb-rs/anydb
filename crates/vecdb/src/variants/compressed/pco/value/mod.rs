@@ -8,6 +8,8 @@ pub use from_inner::FromInnerSlice;
 
 use crate::{BytesVecValue, Pco, TransparentPco};
 
+/// Marker trait for values storable in a `PcoVec`: must be `Copy`, `Pco`,
+/// and serializable via the `Bytes` path used by `BytesVec`.
 pub trait PcoVecValue: Pco + BytesVecValue + Copy {}
 
 impl<T> PcoVecValue for T where T: Pco + BytesVecValue + Copy {}

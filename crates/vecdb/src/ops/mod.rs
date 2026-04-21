@@ -1,3 +1,5 @@
+//! Numeric traits (overflow-safe arithmetic) shared across the crate.
+
 mod checked_sub;
 mod saturating_add;
 

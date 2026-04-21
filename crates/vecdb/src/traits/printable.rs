@@ -27,7 +27,6 @@ pub fn short_type_name<T: 'static>() -> &'static str {
 /// Also unwraps `Option<T>` to just `T` since Option is a serialization
 /// concern (null in JSON) not a type identity.
 fn shorten_type_name(full: &str) -> String {
-    // Find where generic params start (if any)
     let generic_start = full.find('<');
 
     let (base, generics) = match generic_start {
@@ -35,10 +34,9 @@ fn shorten_type_name(full: &str) -> String {
         None => (full, None),
     };
 
-    // Shorten the base type (take last segment after ::)
     let short_base = base.rsplit("::").next().unwrap_or(base);
 
-    // Unwrap Option<T> → T (Option is a serialization concern, not type identity)
+    // Option is a serialization concern (null in JSON), not a type identity.
     if short_base == "Option"
         && let Some(inner) = generics
     {
@@ -47,7 +45,6 @@ fn shorten_type_name(full: &str) -> String {
 
     match generics {
         Some(params) => {
-            // Recursively shorten each generic parameter
             let shortened_params = split_generic_params(params)
                 .into_iter()
                 .map(|p| shorten_type_name(p.trim()))

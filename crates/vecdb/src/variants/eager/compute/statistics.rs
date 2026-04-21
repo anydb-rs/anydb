@@ -302,10 +302,10 @@ where
     }
 
     /// Compute rolling standard deviation with variable window starts.
-    /// For each index i, computes SD of values from `window_starts[i]` to i (inclusive),
+    /// For each index `i`, computes SD of values from `window_starts[i]` to `i` (inclusive),
     /// using the provided rolling mean.
-    /// SD = sqrt(E[X²] - E[X]²) where E[X²] is the rolling mean of squares
-    /// and E[X] is the rolling mean from the `mean` parameter.
+    /// `SD = sqrt(E[X²] - E[X]²)` where `E[X²]` is the rolling mean of squares
+    /// and `E[X]` is the rolling mean from the `mean` parameter.
     pub fn compute_rolling_sd<A, B>(
         &mut self,
         max_from: V::I,
@@ -384,8 +384,8 @@ where
     }
 
     /// Compute expanding (all-time) standard deviation.
-    /// For each index i, computes SD of all values from 0 to i (inclusive).
-    /// SD = sqrt(E[X²] - E[X]²).
+    /// For each index `i`, computes SD of all values from 0 to `i` (inclusive).
+    /// `SD = sqrt(E[X²] - E[X]²)`.
     pub fn compute_expanding_sd<A, B>(
         &mut self,
         max_from: V::I,
@@ -435,10 +435,8 @@ where
     }
 
     /// Compute rolling EMA with variable window starts.
-    /// For each index i, computes an exponential moving average with
-    /// α = 2/(span+1) where span = i - window_starts[i] + 1.
-    /// Compute rolling EMA with variable window starts.
-    /// α = 2/(span+1) where span = i - window_starts[i] + 1.
+    /// For each index `i`, computes an exponential moving average with
+    /// `α = 2/(span+1)` where `span = i - window_starts[i] + 1`.
     pub fn compute_rolling_ema<A>(
         &mut self,
         max_from: V::I,
@@ -457,7 +455,7 @@ where
     }
 
     /// Compute rolling RMA (Wilder's smoothing) with variable window starts.
-    /// α = 1/span where span = i - window_starts[i] + 1.
+    /// `α = 1/span` where `span = i - window_starts[i] + 1`.
     pub fn compute_rolling_rma<A>(
         &mut self,
         max_from: V::I,

@@ -1,3 +1,6 @@
+/// Addition that clamps to the type's min/max on overflow instead of wrapping.
+///
+/// Blanket-implemented for all primitive integer types.
 pub trait SaturatingAdd<Rhs = Self>: Sized {
     fn saturating_add(self, rhs: Rhs) -> Self;
 }

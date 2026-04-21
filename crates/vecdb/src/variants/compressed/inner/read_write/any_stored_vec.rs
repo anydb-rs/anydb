@@ -54,7 +54,6 @@ where
         let stored_len = self.stored_len();
         let pushed_len = self.base.pushed().len();
 
-        // Phase 1a: Copy metadata snapshot (minimal lock scope)
         let (truncate_at, starting_page_index, partial_page) = {
             let pages = self.pages.read();
 
@@ -126,7 +125,7 @@ where
             return Ok(true);
         }
 
-        // Phase 1b: Read partial page (if needed) outside lock
+        // Decompress the partial page outside the pages lock.
         let mut values = if let Some((page, partial_len)) = partial_page {
             let reader = self.create_reader();
             let data = reader.unchecked_read(page.start as usize, page.bytes as usize);
@@ -137,8 +136,8 @@ where
             vec![]
         };
 
-        // Phase 2: Encode pages (no locks held)
-        // Full pages are compressed; the last partial page is stored raw.
+        // Encode pages with no locks held. Full pages compress; the last
+        // partial page is stored raw (avoids recompression on every write).
         let taken = mem::take(self.base.mut_pushed());
         if values.is_empty() {
             values = taken;
@@ -161,7 +160,7 @@ where
             }
         }
 
-        // Phase 3: Write to region first (without holding pages lock to avoid deadlock)
+        // Write the region before re-taking the pages lock to avoid deadlock.
         self.region().truncate_write(truncate_at as usize, &buf)?;
 
         let mut pages = self.pages.write();

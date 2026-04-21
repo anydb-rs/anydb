@@ -17,7 +17,7 @@ use super::RawStrategy;
 /// name/header metadata. No holes, no updated map, no pushed buffer,
 /// no rollback state.
 ///
-/// Created via [`ReadWriteRawVec::read_only_clone`].
+/// Created via `ReadWriteRawVec::read_only_clone`.
 #[derive(Debug, Clone)]
 pub struct ReadOnlyRawVec<I, T, S> {
     pub(super) base: ReadOnlyBaseVec<I, T>,

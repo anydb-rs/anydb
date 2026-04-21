@@ -1,3 +1,6 @@
+/// Subtraction that returns `None` on underflow.
+///
+/// Blanket-implemented for all primitive integer types.
 pub trait CheckedSub<Rhs = Self>: Sized {
     fn checked_sub(self, rhs: Rhs) -> Option<Self>;
 }
