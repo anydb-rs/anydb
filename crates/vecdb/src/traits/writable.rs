@@ -57,22 +57,19 @@ where
 
     /// Rolls back changes to before the given stamp.
     fn rollback_before(&mut self, stamp: Stamp) -> Result<Stamp> {
-        let mut current = self.stamp();
-        if current < stamp {
-            return Ok(current);
-        }
-
         let files = self.find_rollback_files()?;
-        let mut iter = files.range(..=current);
 
-        while let Some((&s, _)) = iter.next_back() {
-            current = self.stamp();
+        // Walk change files newest-first. Each rollback decrements the vec
+        // stamp to the previous file's stamp; if they ever disagree, the
+        // change-file chain is broken (missing or corrupt).
+        for (&file_stamp, _) in files.range(..=self.stamp()).rev() {
+            let current = self.stamp();
             if current < stamp {
                 break;
             }
-            if s != current {
+            if file_stamp != current {
                 return Err(Error::StampMismatch {
-                    file: s,
+                    file: file_stamp,
                     vec: current,
                 });
             }
@@ -80,7 +77,6 @@ where
         }
 
         self.save_rollback_state();
-
         Ok(self.stamp())
     }
 

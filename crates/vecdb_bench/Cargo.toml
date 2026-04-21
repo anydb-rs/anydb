@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 fjall = "3.1.4"
 heed = "0.22.1"
-redb = "4.0.0"
+redb = "4.1.0"
 vecdb = { workspace = true, features = ["pco"] }
 
 # Utilities

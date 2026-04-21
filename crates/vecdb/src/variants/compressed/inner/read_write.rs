@@ -26,7 +26,7 @@ const VERSION: Version = Version::new(3);
 #[derive(Debug)]
 #[must_use = "Vector should be stored to keep data accessible"]
 pub struct ReadWriteCompressedVec<I, T, S> {
-    base: ReadWriteBaseVec<I, T>,
+    pub(super) base: ReadWriteBaseVec<I, T>,
     pages: Arc<RwLock<Pages>>,
     _strategy: PhantomData<S>,
 }
@@ -237,21 +237,6 @@ where
         }
 
         Ok(result)
-    }
-
-    fn deserialize_then_undo_changes(&mut self, bytes: &[u8]) -> Result<()> {
-        let change =
-            ReadWriteBaseVec::<I, T>::parse_change_data(bytes, Self::SIZE_OF_T, |b| S::read(b))?;
-
-        let current_stored_len = self.stored_len();
-        if change.prev_stored_len < current_stored_len {
-            self.base.update_stored_len(change.prev_stored_len);
-        }
-
-        self.base.apply_rollback(&change);
-        self.base.mut_pushed().extend(change.truncated_values);
-
-        Ok(())
     }
 
     #[inline]
@@ -535,15 +520,7 @@ where
 
     #[inline]
     fn serialize_changes(&self) -> Result<Vec<u8>> {
-        self.base.serialize_changes(
-            Self::SIZE_OF_T,
-            |from, to| self.collect_stored_range(from, to),
-            |vals, buf| {
-                for v in vals {
-                    S::write_to_vec(v, buf);
-                }
-            },
-        )
+        self.serialize_compressed_changes()
     }
 
     #[inline]

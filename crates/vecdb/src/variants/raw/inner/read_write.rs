@@ -10,9 +10,9 @@ use rawdb::{Database, Reader, Region, likely, unlikely};
 
 use crate::{
     AnyStoredVec, AnyVec, Bytes, Error, Format, HEADER_OFFSET, Header, ImportOptions,
-    MMAP_CROSSOVER_BYTES, RawIoSource, RawMmapSource, ReadWriteBaseVec, ReadableVec, Result,
-    SIZE_OF_U64, Stamp, TypedVec, VecIndex, VecReader, VecValue, Version, WithPrev, WritableVec,
-    check_bounds, short_type_name, vec_region_name_with,
+    MMAP_CROSSOVER_BYTES, RawIoSource, RawMmapSource, ReadWriteBaseVec, ReadableVec, Result, Stamp,
+    TypedVec, VecIndex, VecReader, VecValue, Version, WithPrev, WritableVec, short_type_name,
+    vec_region_name_with,
 };
 
 use super::{RawStrategy, ReadOnlyRawVec};
@@ -30,8 +30,8 @@ const VERSION: Version = Version::ONE;
 #[must_use = "Vector should be stored to keep data accessible"]
 pub struct ReadWriteRawVec<I, T, S> {
     pub(crate) base: ReadWriteBaseVec<I, T>,
-    holes: WithPrev<BTreeSet<usize>>,
-    updated: WithPrev<BTreeMap<usize, T>>,
+    pub(super) holes: WithPrev<BTreeSet<usize>>,
+    pub(super) updated: WithPrev<BTreeMap<usize, T>>,
     has_stored_holes: bool,
     _strategy: PhantomData<S>,
 }
@@ -392,78 +392,12 @@ where
             .collect())
     }
 
-    fn deserialize_then_undo_changes(&mut self, bytes: &[u8]) -> Result<()> {
-        let change =
-            ReadWriteBaseVec::<I, T>::parse_change_data(bytes, Self::SIZE_OF_T, |b| S::read(b))?;
-        let mut pos = change.bytes_consumed;
-        let mut len = SIZE_OF_U64;
-
-        let current_stored_len = self.stored_len();
-        if change.prev_stored_len < current_stored_len {
-            self.truncate_dirty_at(change.prev_stored_len);
-        }
-
-        self.base.apply_rollback(&change);
-
-        for (i, val) in change.truncated_values.into_iter().enumerate() {
-            self.mut_updated().insert(change.truncated_start + i, val);
-        }
-
-        check_bounds(bytes, pos, len)?;
-        let modified_len = usize::from_bytes(&bytes[pos..pos + len])?;
-        pos += len;
-
-        len = SIZE_OF_U64
-            .checked_mul(modified_len)
-            .ok_or(Error::Overflow)?;
-        check_bounds(bytes, pos, len)?;
-        let indexes_start = pos;
-        pos += len;
-
-        len = Self::SIZE_OF_T
-            .checked_mul(modified_len)
-            .ok_or(Error::Overflow)?;
-        check_bounds(bytes, pos, len)?;
-        let mut idx_pos = indexes_start;
-        let mut val_pos = pos;
-        for _ in 0..modified_len {
-            let idx = usize::from_bytes(&bytes[idx_pos..idx_pos + SIZE_OF_U64])?;
-            let val = S::read(&bytes[val_pos..val_pos + Self::SIZE_OF_T])?;
-            self.update_at(idx, val)?;
-            idx_pos += SIZE_OF_U64;
-            val_pos += Self::SIZE_OF_T;
-        }
-        pos += len;
-
-        len = SIZE_OF_U64;
-        check_bounds(bytes, pos, len)?;
-        let prev_holes_len = usize::from_bytes(&bytes[pos..pos + len])?;
-        pos += len;
-        len = SIZE_OF_U64
-            .checked_mul(prev_holes_len)
-            .ok_or(Error::Overflow)?;
-        check_bounds(bytes, pos, len)?;
-
-        if prev_holes_len > 0 || !self.holes().is_empty() || !self.prev_holes().is_empty() {
-            let prev_holes = bytes[pos..pos + len]
-                .chunks(SIZE_OF_U64)
-                .map(usize::from_bytes)
-                .collect::<Result<BTreeSet<_>>>()?;
-            *self.holes.current_mut() = prev_holes;
-            self.holes.save();
-        }
-
-        self.updated.save();
-
-        Ok(())
-    }
-
     #[inline]
     fn has_dirty_stored(&self) -> bool {
         !self.holes().is_empty() || !self.updated().is_empty()
     }
 
-    fn truncate_dirty_at(&mut self, index: usize) {
+    pub(super) fn truncate_dirty_at(&mut self, index: usize) {
         if self.holes().last().is_some_and(|&h| h >= index) {
             self.mut_holes().split_off(&index);
         }
@@ -815,45 +749,7 @@ where
     }
 
     fn serialize_changes(&self) -> Result<Vec<u8>> {
-        let mut bytes = self.base.serialize_changes(
-            Self::SIZE_OF_T,
-            |from, to| self.collect_stored_range(from, to),
-            |vals, buf| {
-                for v in vals {
-                    S::write_to_vec(v, buf);
-                }
-            },
-        )?;
-
-        let reader = self.create_reader();
-        let updated = self.updated();
-        let prev_updated = self.prev_updated();
-
-        // Collect all indices that need change tracking: entries currently modified
-        // AND entries that were in prev_updated but removed (e.g., by delete_at).
-        // Without the latter, rollback after rollback loses track of deleted entries.
-        let all_keys: BTreeSet<usize> =
-            updated.keys().chain(prev_updated.keys()).copied().collect();
-
-        bytes.extend(all_keys.len().to_bytes());
-        for &i in &all_keys {
-            bytes.extend(i.to_bytes());
-        }
-        for &i in &all_keys {
-            if let Some(v) = prev_updated.get(&i) {
-                S::write_to_vec(v, &mut bytes);
-            } else {
-                S::write_to_vec(&self.unchecked_read_at(i, &reader), &mut bytes);
-            }
-        }
-
-        let prev_holes = self.prev_holes();
-        bytes.extend(prev_holes.len().to_bytes());
-        for &hole in prev_holes {
-            bytes.extend(hole.to_bytes());
-        }
-
-        Ok(bytes)
+        self.serialize_raw_changes()
     }
 
     fn any_stamped_write_with_changes(&mut self, stamp: Stamp) -> Result<()> {
