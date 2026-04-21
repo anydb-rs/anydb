@@ -2,7 +2,7 @@ use crate::{
     AnyStoredVec, ChangeCursor, ReadWriteBaseVec, Result, VecIndex, VecValue, WritableVec,
 };
 
-use super::{CompressionStrategy, ReadWriteCompressedVec};
+use super::{super::CompressionStrategy, ReadWriteCompressedVec};
 
 impl<I, T, S> ReadWriteCompressedVec<I, T, S>
 where

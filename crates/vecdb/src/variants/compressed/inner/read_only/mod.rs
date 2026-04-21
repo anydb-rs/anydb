@@ -1,0 +1,106 @@
+mod any_vec;
+mod readable;
+mod typed;
+
+use std::{marker::PhantomData, sync::Arc};
+
+use parking_lot::RwLock;
+
+use crate::{
+    CompressedIoSource, CompressedMmapSource, MMAP_CROSSOVER_BYTES, ReadOnlyBaseVec, VecIndex,
+    VecValue,
+};
+
+use super::{CompressionStrategy, Pages};
+
+/// Lean read-only view of a compressed vector (~48 bytes).
+///
+/// Carries only the fields needed for disk reads: region, shared length,
+/// name/header metadata, and the pages index. No pushed buffer, no rollback state.
+///
+/// Created via [`ReadWriteCompressedVec::read_only_clone`].
+#[derive(Debug, Clone)]
+pub struct ReadOnlyCompressedVec<I, T, S> {
+    pub(super) base: ReadOnlyBaseVec<I, T>,
+    pub(super) pages: Arc<RwLock<Pages>>,
+    _strategy: PhantomData<S>,
+}
+
+impl<I, T, S> ReadOnlyCompressedVec<I, T, S> {
+    pub(crate) fn new(base: ReadOnlyBaseVec<I, T>, pages: Arc<RwLock<Pages>>) -> Self {
+        Self {
+            base,
+            pages,
+            _strategy: PhantomData,
+        }
+    }
+}
+
+impl<I, T, S> ReadOnlyCompressedVec<I, T, S>
+where
+    I: VecIndex,
+    T: VecValue,
+    S: CompressionStrategy<T>,
+{
+    #[inline(always)]
+    pub(super) fn fold_source<B, F: FnMut(B, T) -> B>(
+        &self,
+        from: usize,
+        to: usize,
+        len: usize,
+        init: B,
+        f: F,
+    ) -> B {
+        let range_bytes = (to - from) * size_of::<T>();
+        if range_bytes > MMAP_CROSSOVER_BYTES {
+            CompressedIoSource::<I, T, S>::new_from_parts(
+                self.base.region(),
+                &self.pages,
+                len,
+                from,
+                to,
+            )
+            .fold(init, f)
+        } else {
+            CompressedMmapSource::<I, T, S>::new_from_parts(
+                self.base.region(),
+                &self.pages,
+                len,
+                from,
+                to,
+            )
+            .fold(init, f)
+        }
+    }
+
+    #[inline(always)]
+    pub(super) fn try_fold_source<B, E, F: FnMut(B, T) -> std::result::Result<B, E>>(
+        &self,
+        from: usize,
+        to: usize,
+        len: usize,
+        init: B,
+        f: F,
+    ) -> std::result::Result<B, E> {
+        let range_bytes = (to - from) * size_of::<T>();
+        if range_bytes > MMAP_CROSSOVER_BYTES {
+            CompressedIoSource::<I, T, S>::new_from_parts(
+                self.base.region(),
+                &self.pages,
+                len,
+                from,
+                to,
+            )
+            .try_fold(init, f)
+        } else {
+            CompressedMmapSource::<I, T, S>::new_from_parts(
+                self.base.region(),
+                &self.pages,
+                len,
+                from,
+                to,
+            )
+            .try_fold(init, f)
+        }
+    }
+}

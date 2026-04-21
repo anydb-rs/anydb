@@ -5,7 +5,7 @@ use crate::{
     VecValue,
 };
 
-use super::{RawStrategy, ReadWriteRawVec, change::RawChangeData};
+use super::{super::RawStrategy, ReadWriteRawVec, change::RawChangeData};
 
 impl<I, T, S> ReadWriteRawVec<I, T, S>
 where

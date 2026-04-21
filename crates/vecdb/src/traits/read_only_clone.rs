@@ -13,8 +13,6 @@ pub trait ReadOnlyClone {
     fn read_only_clone(&self) -> Self::ReadOnly;
 }
 
-// --- Blanket impl for all StoredVec types ---
-
 impl<V: StoredVec> ReadOnlyClone for V {
     type ReadOnly = V::ReadOnly;
 
@@ -23,8 +21,6 @@ impl<V: StoredVec> ReadOnlyClone for V {
         <V as StoredVec>::read_only_clone(self)
     }
 }
-
-// --- Option ---
 
 impl<T: ReadOnlyClone> ReadOnlyClone for Option<T> {
     type ReadOnly = Option<T::ReadOnly>;
@@ -35,8 +31,6 @@ impl<T: ReadOnlyClone> ReadOnlyClone for Option<T> {
     }
 }
 
-// --- Array ---
-
 impl<T: ReadOnlyClone, const N: usize> ReadOnlyClone for [T; N] {
     type ReadOnly = [T::ReadOnly; N];
 
@@ -44,8 +38,6 @@ impl<T: ReadOnlyClone, const N: usize> ReadOnlyClone for [T; N] {
         self.each_ref().map(ReadOnlyClone::read_only_clone)
     }
 }
-
-// --- BTreeMap ---
 
 impl<K: Clone + Ord, V: ReadOnlyClone> ReadOnlyClone for BTreeMap<K, V> {
     type ReadOnly = BTreeMap<K, V::ReadOnly>;

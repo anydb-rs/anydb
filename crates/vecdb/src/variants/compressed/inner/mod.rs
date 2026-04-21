@@ -2,7 +2,6 @@ mod page;
 mod pages;
 mod read_only;
 mod read_write;
-mod rollback;
 mod strategy;
 
 pub use page::*;
