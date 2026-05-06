@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 package.license = "MIT"
 package.edition = "2024"
-package.version = "0.10.2"
+package.version = "0.10.3"
 package.homepage = "https://github.com/anydb-rs/anydb"
 package.repository = "https://github.com/anydb-rs/anydb"
 package.readme = "docs/README.md"
@@ -19,11 +19,11 @@ panic = "abort"
 libc = "0.2"
 log = "0.4.29"
 parking_lot = "0.12.5"
-rawdb = { version = "=0.10.2", path = "crates/rawdb" }
+rawdb = { version = "=0.10.3", path = "crates/rawdb" }
 rayon = "1.12.0"
 tempfile = "3.27.0"
-vecdb = { version = "=0.10.2", path = "crates/vecdb" }
-vecdb_derive = { version = "=0.10.2", path = "crates/vecdb_derive" }
+vecdb = { version = "=0.10.3", path = "crates/vecdb" }
+vecdb_derive = { version = "=0.10.3", path = "crates/vecdb_derive" }
 
 [workspace.metadata.release]
 shared-version = true
