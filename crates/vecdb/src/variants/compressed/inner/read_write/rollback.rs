@@ -24,9 +24,8 @@ where
 
     pub(super) fn deserialize_then_undo_changes(&mut self, bytes: &[u8]) -> Result<()> {
         let mut c = ChangeCursor::new(bytes);
-        let change = ReadWriteBaseVec::<I, T>::parse_change_data(&mut c, Self::SIZE_OF_T, |b| {
-            S::read(b)
-        })?;
+        let change =
+            ReadWriteBaseVec::<I, T>::parse_change_data(&mut c, Self::SIZE_OF_T, |b| S::read(b))?;
 
         // No overlay map: truncated values ride in `pushed` and `stored_len`
         // is clamped to where disk still agrees with the rolled-back state.
@@ -38,7 +37,8 @@ where
             buf.extend(change.prev_pushed);
             (agree_at, buf)
         };
-        self.base.apply_rollback(change.prev_stamp, stored_len, pushed);
+        self.base
+            .apply_rollback(change.prev_stamp, stored_len, pushed);
 
         Ok(())
     }

@@ -10,7 +10,9 @@ pub trait Formattable {
     #[inline(always)]
     fn fmt_into(&self, f: &mut String) {
         // SAFETY: write_to produces valid UTF-8 (itoa/ryu/Display guarantee this).
-        unsafe { self.write_to(f.as_mut_vec()); }
+        unsafe {
+            self.write_to(f.as_mut_vec());
+        }
     }
 
     /// Write in CSV format. Override for types needing CSV escaping (e.g., quoting commas).
@@ -41,7 +43,9 @@ macro_rules! impl_formattable_int {
     };
 }
 
-impl_formattable_int!(u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize);
+impl_formattable_int!(
+    u8, u16, u32, u64, u128, usize, i8, i16, i32, i64, i128, isize
+);
 
 macro_rules! impl_formattable_float {
     ($($t:ty),*) => {

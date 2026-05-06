@@ -63,4 +63,3 @@ impl<T: VecValue, SI: VecIndex> AggFold<Option<T>, SI, SI, T> for Sparse {
         Some(source.collect_one_at(next_first - 1))
     }
 }
-

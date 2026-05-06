@@ -103,8 +103,7 @@ impl Pages {
     }
 
     pub fn next_start(&self) -> u64 {
-        self.last()
-            .map_or(HEADER_OFFSET as u64, |page| page.end())
+        self.last().map_or(HEADER_OFFSET as u64, |page| page.end())
     }
 
     pub fn stored_len(&self, per_page: usize) -> usize {

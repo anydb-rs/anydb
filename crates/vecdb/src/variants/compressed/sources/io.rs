@@ -148,9 +148,7 @@ where
         if self.buffer_len > 0 {
             let buffer_end_offset = self.buffer_start_offset + self.buffer_len as u64;
 
-            if page.start >= self.buffer_start_offset
-                && page.end() <= buffer_end_offset
-            {
+            if page.start >= self.buffer_start_offset && page.end() <= buffer_end_offset {
                 return self.decode_from_buffer(page_index, page);
             }
         }

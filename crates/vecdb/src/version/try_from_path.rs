@@ -1,8 +1,4 @@
-use std::{
-    fs,
-    io::Read,
-    path::Path,
-};
+use std::{fs, io::Read, path::Path};
 
 use crate::{Bytes, Error};
 

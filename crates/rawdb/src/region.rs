@@ -20,7 +20,6 @@ pub(crate) struct RegionInner {
 }
 
 impl Region {
-
     pub(crate) fn new(
         db: &Database,
         id: String,

@@ -242,24 +242,30 @@ where
                 if group_idx < counts_batch.len() {
                     let mut remaining = counts_batch[group_idx];
 
-                    source.fold_range_at(pos, pos + total_count, V::T::default(), |sum, val: V::T| {
-                        let sum = sum.saturating_add(val);
-                        remaining -= 1;
-                        if unlikely(remaining == 0) {
-                            this.push(sum);
-                            group_idx += 1;
-                            while group_idx < counts_batch.len() && counts_batch[group_idx] == 0 {
-                                this.push(V::T::default());
+                    source.fold_range_at(
+                        pos,
+                        pos + total_count,
+                        V::T::default(),
+                        |sum, val: V::T| {
+                            let sum = sum.saturating_add(val);
+                            remaining -= 1;
+                            if unlikely(remaining == 0) {
+                                this.push(sum);
                                 group_idx += 1;
+                                while group_idx < counts_batch.len() && counts_batch[group_idx] == 0
+                                {
+                                    this.push(V::T::default());
+                                    group_idx += 1;
+                                }
+                                if group_idx < counts_batch.len() {
+                                    remaining = counts_batch[group_idx];
+                                }
+                                V::T::default()
+                            } else {
+                                sum
                             }
-                            if group_idx < counts_batch.len() {
-                                remaining = counts_batch[group_idx];
-                            }
-                            V::T::default()
-                        } else {
-                            sum
-                        }
-                    });
+                        },
+                    );
                 }
 
                 Ok(())
@@ -317,28 +323,34 @@ where
                 if group_idx < counts_batch.len() {
                     let mut remaining = counts_batch[group_idx];
 
-                    source.fold_range_at(pos, pos + total_count, V::T::default(), |sum, val: V::T| {
-                        let sum = if filter(&val) {
-                            sum.saturating_add(val)
-                        } else {
-                            sum
-                        };
-                        remaining -= 1;
-                        if unlikely(remaining == 0) {
-                            this.push(sum);
-                            group_idx += 1;
-                            while group_idx < counts_batch.len() && counts_batch[group_idx] == 0 {
-                                this.push(V::T::default());
+                    source.fold_range_at(
+                        pos,
+                        pos + total_count,
+                        V::T::default(),
+                        |sum, val: V::T| {
+                            let sum = if filter(&val) {
+                                sum.saturating_add(val)
+                            } else {
+                                sum
+                            };
+                            remaining -= 1;
+                            if unlikely(remaining == 0) {
+                                this.push(sum);
                                 group_idx += 1;
+                                while group_idx < counts_batch.len() && counts_batch[group_idx] == 0
+                                {
+                                    this.push(V::T::default());
+                                    group_idx += 1;
+                                }
+                                if group_idx < counts_batch.len() {
+                                    remaining = counts_batch[group_idx];
+                                }
+                                V::T::default()
+                            } else {
+                                sum
                             }
-                            if group_idx < counts_batch.len() {
-                                remaining = counts_batch[group_idx];
-                            }
-                            V::T::default()
-                        } else {
-                            sum
-                        }
-                    });
+                        },
+                    );
                 }
 
                 Ok(())

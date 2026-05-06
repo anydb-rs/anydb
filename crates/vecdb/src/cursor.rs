@@ -18,7 +18,12 @@ use crate::{READ_CHUNK_SIZE, ReadableVec, VecIndex, VecValue};
 ///     // process val
 /// }
 /// ```
-pub struct Cursor<'a, I: VecIndex, T: VecValue, V: ReadableVec<I, T> + ?Sized = dyn ReadableVec<I, T>> {
+pub struct Cursor<
+    'a,
+    I: VecIndex,
+    T: VecValue,
+    V: ReadableVec<I, T> + ?Sized = dyn ReadableVec<I, T>,
+> {
     source: &'a V,
     buf: Vec<T>,
     /// Absolute position of buf[0] in the source vec.
@@ -143,6 +148,10 @@ impl<'a, I: VecIndex, T: VecValue, V: ReadableVec<I, T> + ?Sized> Cursor<'a, I, 
         self.buf_start = aligned;
         self.source.read_into_at(aligned, end, &mut self.buf);
 
-        if self.buf.is_empty() { None } else { Some(at - aligned) }
+        if self.buf.is_empty() {
+            None
+        } else {
+            Some(at - aligned)
+        }
     }
 }

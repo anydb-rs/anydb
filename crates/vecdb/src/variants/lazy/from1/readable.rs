@@ -57,7 +57,9 @@ where
         let buf = self.source.collect_range_dyn(from, to);
         buf.into_iter()
             .enumerate()
-            .try_fold(init, |acc, (local, v)| f(acc, compute(I::from(from + local), v)))
+            .try_fold(init, |acc, (local, v)| {
+                f(acc, compute(I::from(from + local), v))
+            })
     }
 
     #[inline]

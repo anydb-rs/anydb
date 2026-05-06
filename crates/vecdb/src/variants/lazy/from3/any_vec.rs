@@ -14,10 +14,7 @@ where
     S3T: VecValue,
 {
     fn version(&self) -> Version {
-        self.base_version
-            + self.source1.version()
-            + self.source2.version()
-            + self.source3.version()
+        self.base_version + self.source1.version() + self.source2.version() + self.source3.version()
     }
 
     fn name(&self) -> &str {

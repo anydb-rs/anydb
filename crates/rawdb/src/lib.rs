@@ -15,7 +15,7 @@ use std::{
 
 use log::{debug, trace};
 use memmap2::MmapMut;
-use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::{Condvar, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 mod disk_usage;
 pub mod error;
@@ -63,6 +63,7 @@ struct DatabaseInner {
     file: RwLock<File>,
     cached_file_len: AtomicUsize,
     bg_tasks: Mutex<Vec<JoinHandle<Result<()>>>>,
+    bg_sync: (Mutex<bool>, Condvar),
 }
 
 impl Database {
@@ -108,6 +109,7 @@ impl Database {
             file: RwLock::new(file),
             cached_file_len: AtomicUsize::new(file_len),
             bg_tasks: Mutex::new(Vec::new()),
+            bg_sync: (Mutex::new(false), Condvar::new()),
         }));
 
         db.regions_mut().fill(&db)?;
@@ -143,10 +145,12 @@ impl Database {
             return Ok(());
         }
 
-        let target_len = Self::ceil_number_to_page_size_multiple(
-            len.max(current_len * 2).max(1024 * 1024),
+        let target_len =
+            Self::ceil_number_to_page_size_multiple(len.max(current_len * 2).max(1024 * 1024));
+        debug!(
+            "{}: set_min_len to {} (requested {})",
+            self, target_len, len
         );
-        debug!("{}: set_min_len to {} (requested {})", self, target_len, len);
         file.set_len(target_len as u64)?;
         self.0.cached_file_len.store(target_len, Ordering::Relaxed);
         *mmap = create_mmap(&file)?;
@@ -368,9 +372,20 @@ impl Database {
 
     /// Gives the OS time to write dirty mmap pages before fsyncing.
     /// Intended for background tasks where the delay is invisible.
+    /// Cancellable: `sync_bg_tasks` cuts the wait short.
     pub fn compact_deferred(&self, delay: Duration) -> Result<()> {
-        thread::sleep(delay);
+        self.bg_sleep(delay);
         self.compact()
+    }
+
+    /// Cancellable wait for use inside `run_bg` closures. Returns
+    /// immediately when `sync_bg_tasks` is called.
+    pub fn bg_sleep(&self, dur: Duration) {
+        let (m, cv) = &self.0.bg_sync;
+        let mut g = m.lock();
+        if !*g {
+            cv.wait_for(&mut g, dur);
+        }
     }
 
     /// Like `compact_deferred` with a 5-second default delay.
@@ -409,12 +424,18 @@ impl Database {
         self.0.bg_tasks.lock().push(thread::spawn(move || f(&db)));
     }
 
-    /// Joins all pending background tasks on this database.
+    /// Wakes any `bg_sleep` waiters and joins all pending background tasks.
     pub fn sync_bg_tasks(&self) -> Result<()> {
+        {
+            let (m, cv) = &self.0.bg_sync;
+            *m.lock() = true;
+            cv.notify_all();
+        }
         let handles: Vec<_> = self.0.bg_tasks.lock().drain(..).collect();
         for handle in handles {
             handle.join().unwrap()?;
         }
+        *self.0.bg_sync.0.lock() = false;
         Ok(())
     }
 
