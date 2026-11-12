@@ -1,5 +1,7 @@
 # anydb
 
+> **Moved.** These crates now live in [bitcoinresearchkit/mono](https://github.com/bitcoinresearchkit/mono): [`crates/rawdb`](https://github.com/bitcoinresearchkit/mono/tree/next/crates/rawdb), [`crates/vecdb`](https://github.com/bitcoinresearchkit/mono/tree/next/crates/vecdb) and [`crates/vecdb_derive`](https://github.com/bitcoinresearchkit/mono/tree/next/crates/vecdb_derive). This repository is archived and no longer updated.
+
 A collection of high-performance embedded database crates for Rust, focused on efficient storage and retrieval of fixed-size data types.
 
 ## Crates
